@@ -74,7 +74,12 @@ class InputMethodViewModel : ViewModel() {
 
         when (key.type) {
             SideKeyType.PINYIN -> key.digit?.let { digit ->
-                _state.value = current.copy(selectedBlocks = current.selectedBlocks + digit)
+                val blocks = current.selectedBlocks + digit
+                _state.value = current.copy(
+                    selectedBlocks = blocks,
+                    pinyinCombinations = calculatePinyinCombinations(blocks),
+                    highlightedPinyinOptionIndex = 0
+                )
             }
 
             SideKeyType.DELETE -> deleteOneInput()
@@ -97,7 +102,12 @@ class InputMethodViewModel : ViewModel() {
     private fun deleteOneInput() {
         val current = _state.value
         _state.value = if (current.selectedBlocks.isNotEmpty()) {
-            current.copy(selectedBlocks = current.selectedBlocks.dropLast(1))
+            val blocks = current.selectedBlocks.dropLast(1)
+            current.copy(
+                selectedBlocks = blocks,
+                pinyinCombinations = calculatePinyinCombinations(blocks),
+                highlightedPinyinOptionIndex = 0
+            )
         } else {
             current.copy(outputText = current.outputText.dropLast(1))
         }
@@ -113,13 +123,9 @@ class InputMethodViewModel : ViewModel() {
 
     private fun enterPinyinSelection() {
         val current = _state.value
-        val combinations = pinyinRecoveryEngine.recover(current.selectedBlocks)
-            .map { it.letters }
-            .filter { it.isNotBlank() }
-            // 当前一轮输入一个汉字，只保留能够直接查到候选字的完整音节。
-            .filter { CharacterDictionary.PINYIN_TO_CHARS.containsKey(it) }
-            .distinct()
+        val combinations = calculatePinyinCombinations(current.selectedBlocks)
 
+        // 没有完整使用全部按键的合法拼音时，第二栏会显示提示，咬牙不切换状态。
         if (combinations.isEmpty()) return
 
         stopScanning()
@@ -132,6 +138,27 @@ class InputMethodViewModel : ViewModel() {
         )
     }
 
+    /**
+     * 只接受逐位使用了全部已选按键的完整单音节拼音。
+     *
+     * 恢复引擎在尾部路径尚未形成完整音节时，可能返回前面已经完成的部分；
+     * 长度和逐位数字映射检查可以排除例如 9426 输入中只使用 94 的 "yi"。
+     */
+    private fun calculatePinyinCombinations(blocks: List<Int>): List<String> {
+        if (blocks.isEmpty()) return emptyList()
+
+        return pinyinRecoveryEngine.recover(blocks)
+            .map { it.letters }
+            .filter { it.isNotBlank() }
+            .filter { pinyin ->
+                pinyin.length == blocks.size && pinyin.indices.all { index ->
+                    LetterBlockMapping.LETTER_TO_DIGIT[pinyin[index]] == blocks[index]
+                }
+            }
+            .filter { CharacterDictionary.PINYIN_TO_CHARS.containsKey(it) }
+            .distinct()
+    }
+
     private fun handlePinyinSignal(signal: ControlSignal) {
         when (signal) {
             ControlSignal.LEFT_LOOK -> movePinyinSelection(-1)
@@ -142,10 +169,12 @@ class InputMethodViewModel : ViewModel() {
 
     private fun movePinyinSelection(direction: Int) {
         val current = _state.value
-        // 拼音候选后还有一个“返回选择拼音”选项。
-        val lastOptionIndex = current.pinyinCombinations.size
-        val next = (current.highlightedPinyinOptionIndex + direction)
-            .coerceIn(0, lastOptionIndex)
+        // 拼音候选后还有一个“返回选择拼音”选项，左右到边界后首尾循环。
+        val optionCount = current.pinyinCombinations.size + 1
+        val next = Math.floorMod(
+            current.highlightedPinyinOptionIndex + direction,
+            optionCount
+        )
         _state.value = current.copy(highlightedPinyinOptionIndex = next)
     }
 
@@ -193,7 +222,7 @@ class InputMethodViewModel : ViewModel() {
 
         val position = available.indexOf(current.highlightedCharOptionIndex)
             .takeIf { it >= 0 } ?: 0
-        val nextPosition = (position + direction).coerceIn(0, available.lastIndex)
+        val nextPosition = Math.floorMod(position + direction, available.size)
         _state.value = current.copy(highlightedCharOptionIndex = available[nextPosition])
     }
 
@@ -319,10 +348,12 @@ class InputMethodViewModel : ViewModel() {
 
     private fun returnToKeyInput(retainSelectedBlocks: Boolean) {
         val current = _state.value
+        val blocks = if (retainSelectedBlocks) current.selectedBlocks else emptyList()
         _state.value = InputState(
             scanSide = current.scanSide,
             highlightedSideKeyIndex = current.highlightedSideKeyIndex,
-            selectedBlocks = if (retainSelectedBlocks) current.selectedBlocks else emptyList(),
+            selectedBlocks = blocks,
+            pinyinCombinations = calculatePinyinCombinations(blocks),
             outputText = current.outputText,
             scanIntervalMs = current.scanIntervalMs
         )

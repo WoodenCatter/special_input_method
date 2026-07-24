@@ -48,6 +48,7 @@ import com.example.input_ds.model.ScanSide
 import com.example.input_ds.ui.theme.AccentGreen
 import com.example.input_ds.ui.theme.BlockBorder
 import com.example.input_ds.ui.theme.DarkBackground
+import com.example.input_ds.ui.theme.ErrorRed
 import com.example.input_ds.ui.theme.HighlightOrange
 import com.example.input_ds.ui.theme.HighlightYellow
 import com.example.input_ds.ui.theme.PrimaryBlue
@@ -242,21 +243,52 @@ private fun FiveStageArea(
             active = state.phase == InputPhase.PINYIN_SELECTION,
             modifier = Modifier.weight(stageWeight(state.phase, InputPhase.PINYIN_SELECTION))
         ) {
-            if (state.phase.ordinal >= InputPhase.PINYIN_SELECTION.ordinal &&
-                state.pinyinCombinations.isNotEmpty()
-            ) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    val options = state.pinyinCombinations + "返回选择拼音"
-                    options.forEachIndexed { index, option ->
-                        SelectionChip(
-                            text = option,
-                            selected = index == state.highlightedPinyinOptionIndex,
-                            compact = false
-                        )
+            when {
+                state.selectedBlocks.isEmpty() -> Unit
+
+                state.pinyinCombinations.isEmpty() -> {
+                    Text(
+                        text = "当前按键组合没有可用拼音，请继续选择或删除后重试",
+                        color = ErrorRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    )
+                }
+
+                state.phase == InputPhase.PINYIN_KEY_INPUT -> {
+                    // 第一阶段实时预览：只显示完整使用当前全部按键的合法拼音。
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        state.pinyinCombinations.forEach { pinyin ->
+                            Text(
+                                text = pinyin,
+                                color = TextGray.copy(alpha = 0.72f),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val options = state.pinyinCombinations + "返回选择拼音"
+                        options.forEachIndexed { index, option ->
+                            SelectionChip(
+                                text = option,
+                                selected = index == state.highlightedPinyinOptionIndex,
+                                compact = false
+                            )
+                        }
                     }
                 }
             }
@@ -343,6 +375,7 @@ private fun FiveStageArea(
 private fun stageWeight(current: InputPhase, panel: InputPhase): Float = when {
     current == panel && panel == InputPhase.CHARACTER_SELECTION -> 3.2f
     current == panel -> 1.55f
+    current == InputPhase.PINYIN_KEY_INPUT && panel == InputPhase.PINYIN_SELECTION -> 1.2f
     current.ordinal > panel.ordinal && panel == InputPhase.CHARACTER_SELECTION -> 1.5f
     else -> 0.72f
 }
