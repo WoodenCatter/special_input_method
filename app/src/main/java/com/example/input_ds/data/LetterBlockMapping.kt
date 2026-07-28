@@ -1,25 +1,13 @@
 package com.example.input_ds.data
 
-/** 两侧轮转按键的类型。 */
-enum class SideKeyType {
-    PINYIN,
-    DELETE,
-    SEND,
-    COMMON_PHRASES,
-    ENGLISH
-}
-
 /**
- * 一个可被两侧自动扫描选中的按键。
- * 拼音键带 digit，其余按键由 type 表示动作。
+ * T9 键盘映射：数字键 → 对应字母块
+ * 如文档描述：
+ * 2=ABC, 3=DEF, 4=GHI, 5=JKL, 6=MNO, 7=PQRS, 8=TUV, 9=WXYZ
  */
-data class SideKey(
-    val label: String,
-    val type: SideKeyType,
-    val digit: Int? = null
-)
-
 object LetterBlockMapping {
+
+    /** 数字到字母块的映射 */
     val DIGIT_TO_LETTERS: Map<Int, List<Char>> = mapOf(
         2 to listOf('a', 'b', 'c'),
         3 to listOf('d', 'e', 'f'),
@@ -31,12 +19,20 @@ object LetterBlockMapping {
         9 to listOf('w', 'x', 'y', 'z')
     )
 
-    val LETTER_TO_DIGIT: Map<Char, Int> = buildMap {
+    /** 字母到数字的逆向映射 */
+    val LETTER_TO_DIGIT: Map<Char, Int> = run {
+        val map = mutableMapOf<Char, Int>()
         DIGIT_TO_LETTERS.forEach { (digit, letters) ->
-            letters.forEach { put(it, digit) }
+            letters.forEach { map[it] = digit }
         }
+        map
     }
 
+    /** 特殊块 ID */
+    const val SEND_BLOCK = 1
+    const val DELETE_BLOCK = 0
+
+    /** 数字块的显示标签 */
     val DIGIT_LABELS: Map<Int, String> = mapOf(
         2 to "ABC",
         3 to "DEF",
@@ -45,34 +41,17 @@ object LetterBlockMapping {
         6 to "MNO",
         7 to "PQRS",
         8 to "TUV",
-        9 to "WXYZ"
+        9 to "WXYZ",
+        SEND_BLOCK to "发送",
+        DELETE_BLOCK to "删除"
     )
 
-    val LEFT_KEYS: List<SideKey> = listOf(
-        pinyinKey(2),
-        pinyinKey(3),
-        pinyinKey(4),
-        pinyinKey(5),
-        SideKey("删除", SideKeyType.DELETE),
-        SideKey("常用词库", SideKeyType.COMMON_PHRASES)
-    )
+    /** 左侧五个块 */
+    val LEFT_BLOCKS = listOf(2, 3, 4, 5, SEND_BLOCK)  // ABC, DEF, GHI, JKL, 发送
 
-    val RIGHT_KEYS: List<SideKey> = listOf(
-        pinyinKey(6),
-        pinyinKey(7),
-        pinyinKey(8),
-        pinyinKey(9),
-        SideKey("发送", SideKeyType.SEND),
-        SideKey("英文", SideKeyType.ENGLISH)
-    )
+    /** 右侧五个块 */
+    val RIGHT_BLOCKS = listOf(6, 7, 8, 9, DELETE_BLOCK)  // MNO, PQRS, TUV, WXYZ, 删除
 
+    /** 所有字母块（2-9） */
     val ALL_BLOCKS = (2..9).toList()
-
-    fun keysFor(isLeft: Boolean): List<SideKey> = if (isLeft) LEFT_KEYS else RIGHT_KEYS
-
-    private fun pinyinKey(digit: Int) = SideKey(
-        label = DIGIT_LABELS.getValue(digit),
-        type = SideKeyType.PINYIN,
-        digit = digit
-    )
 }

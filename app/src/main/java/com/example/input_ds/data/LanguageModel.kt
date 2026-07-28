@@ -1,18 +1,66 @@
 package com.example.input_ds.data
 
+import android.content.Context
+
 /**
- * 简单的中文语言模型
+ * 中文语言模型
  *
- * 使用二元语法（Bigram）统计常见中文词组的共现概率，
- * 用于在后端拼音恢复完成后对候选词进行排序。
+ * 优先从 assets 加载 Bigrams + Trigrams，加载失败回退硬编码兜底。
  */
 object LanguageModel {
+    private var assetBigrams: Map<String, Map<String, Int>>? = null
+    private var assetTrigrams: Map<String, Map<String, Int>>? = null
+
+    /** 当前使用的 Bigram 表 */
+    val BIGRAM_FREQUENCIES: Map<String, Map<String, Int>>
+        get() = assetBigrams ?: FALLBACK_BIGRAMS
+
+    fun init(context: Context) {
+        if (assetBigrams != null) return
+        try { assetBigrams = BigramLoader.load(context) } catch (_: Exception) {}
+        try { assetTrigrams = TrigramLoader.load(context) } catch (_: Exception) {}
+    }
+
+    // ==================== Bigram API ====================
+
+    fun getBigramScore(prev: String?, candidate: String): Int {
+        if (prev == null) return 50
+        return BIGRAM_FREQUENCIES[prev]?.get(candidate) ?: 10
+    }
+
+    fun scoreSequence(chars: List<String>): Double {
+        if (chars.isEmpty()) return 0.0
+        var total = 0
+        for (i in chars.indices) {
+            val prev = if (i > 0) chars[i - 1] else null
+            total += getBigramScore(prev, chars[i])
+        }
+        return total.toDouble() / chars.size
+    }
+
+    // ==================== Trigram API ====================
 
     /**
-     * 二元组频率表：给定前一个字，后续字的频率权重
-     * key: 前一个汉字, value: Map<后一个汉字, 权重>
+     * 真 Trigram 查表：P(candidate | prev2, prev1)
+     * @param prev2 倒数第二个字（可为 null）
+     * @param prev1 倒数第一个字
+     * @param candidate 候选后续字
+     * @return 0~100 分，未命中退化为 Bigram 加权
      */
-    val BIGRAM_FREQUENCIES: Map<String, Map<String, Int>> = mapOf(
+    fun getTrigramScore(prev2: String?, prev1: String, candidate: String): Double {
+        // 优先查真 Trigram 表
+        if (prev2 != null) {
+            val key = "$prev2,$prev1"
+            val trigramScore = assetTrigrams?.get(key)?.get(candidate)
+            if (trigramScore != null) return trigramScore.toDouble()
+        }
+        // 未命中：退化为 Bigram 加权
+        return getBigramScore(prev1, candidate) * 0.6
+    }
+
+    // ==================== 兜底数据 ====================
+
+    private val FALLBACK_BIGRAMS: Map<String, Map<String, Int>> = mapOf(
         "你" to mapOf("好" to 100, "们" to 70, "的" to 60, "想" to 50, "说" to 40),
         "我" to mapOf("们" to 100, "的" to 90, "想" to 85, "要" to 80, "是" to 75, "会" to 70, "不" to 65, "就" to 60, "在" to 55, "很" to 50),
         "他" to mapOf("们" to 100, "的" to 90, "是" to 80, "说" to 75, "想" to 65, "不" to 60),
@@ -61,31 +109,4 @@ object LanguageModel {
         "看" to mapOf("到" to 100, "见" to 95, "不" to 80, "书" to 70),
         "见" to mapOf("面" to 100, "到" to 95, "过" to 85)
     )
-
-    /**
-     * 给定前一个字，返回后续字的排序权重
-     * @param prevChar 前一个汉字（null 表示首字）
-     * @param candidate 候选汉字
-     * @return 该候选的权重分（0-100）
-     */
-    fun getBigramScore(prevChar: String?, candidate: String): Int {
-        if (prevChar == null) return 50 // 首字无上下文
-        val followers = BIGRAM_FREQUENCIES[prevChar] ?: return 30
-        return followers[candidate] ?: 10 // 未知组合给低分
-    }
-
-    /**
-     * 评估一个汉字序列的整体语言模型得分
-     */
-    fun scoreSequence(chars: List<String>): Double {
-        if (chars.isEmpty()) return 0.0
-        var score = 1.0
-        // 为简单计，取平均分
-        var totalScore = 0
-        for (i in chars.indices) {
-            val prev = if (i > 0) chars[i - 1] else null
-            totalScore += getBigramScore(prev, chars[i])
-        }
-        return totalScore.toDouble() / chars.size
-    }
 }

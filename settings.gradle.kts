@@ -24,4 +24,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "input-ds"
 include(":app")
- 

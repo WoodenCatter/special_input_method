@@ -58,6 +58,9 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines)
 
+    // ONNX Runtime for EEG model inference
+    implementation(libs.onnxruntime.android)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)

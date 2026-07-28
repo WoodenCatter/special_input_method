@@ -4,9 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.input_ds.data.CharacterDictionary
 import com.example.input_ds.data.LetterBlockMapping
-import com.example.input_ds.data.SideKeyType
+import com.example.input_ds.data.UserDictionary
 import com.example.input_ds.engine.CharacterLookupEngine
 import com.example.input_ds.engine.PinyinRecoveryEngine
+import com.example.input_ds.engine.PredictionEngine
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.InputPhase
 import com.example.input_ds.model.InputState
@@ -18,12 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * 扫描式输入法状态机。
- *
- * 只有第一阶段会自动轮转两侧按键；后续四个阶段都由左看、右看移动
- * 选中项，由咬牙确认。
- */
 class InputMethodViewModel : ViewModel() {
 
     private val _state = MutableStateFlow(InputState())
@@ -31,383 +26,365 @@ class InputMethodViewModel : ViewModel() {
 
     private val pinyinRecoveryEngine = PinyinRecoveryEngine()
     private val characterLookupEngine = CharacterLookupEngine()
-    private var scanJob: Job? = null
+    private val predictionEngine = PredictionEngine()
 
-    init {
-        startScanning()
-    }
+    private var scanJob: Job? = null
+    private var pinyinScanJob: Job? = null
+    private var charScanJob: Job? = null
+    private var predScanJob: Job? = null
+
+    init { startScanning() }
 
     fun handleSignal(signal: ControlSignal) {
         when (_state.value.phase) {
-            InputPhase.PINYIN_KEY_INPUT -> handleKeyInputSignal(signal)
-            InputPhase.PINYIN_SELECTION -> handlePinyinSignal(signal)
-            InputPhase.CHARACTER_SELECTION -> handleCharacterSignal(signal)
-            InputPhase.WORD_SELECTION -> handleWordSignal(signal)
-            InputPhase.SENTENCE_SELECTION -> handleSentenceSignal(signal)
+            InputPhase.LEVEL_1_SCANNING -> handleLevel1Signal(signal)
+            InputPhase.LEVEL_2_LETTER_SELECT -> handleLevel2Signal(signal)
+            InputPhase.LEVEL_3_CHAR_SELECT -> handleLevel3Signal(signal)
+            InputPhase.PREDICTION -> handlePredictionSignal(signal)
         }
     }
 
-    // 第一块：两侧按键自动扫描
+    // ==================== Level 1 ====================
 
-    private fun handleKeyInputSignal(signal: ControlSignal) {
+    private fun handleLevel1Signal(signal: ControlSignal) {
         when (signal) {
             ControlSignal.LEFT_LOOK -> {
-                if (_state.value.scanSide == ScanSide.LEFT) selectCurrentSideKey()
-                else switchScanSide(ScanSide.LEFT)
+                if (_state.value.scanSide == ScanSide.LEFT) selectBlock()
+                else switchToLeftSide()
             }
-
             ControlSignal.RIGHT_LOOK -> {
-                if (_state.value.scanSide == ScanSide.RIGHT) selectCurrentSideKey()
-                else switchScanSide(ScanSide.RIGHT)
+                if (_state.value.scanSide == ScanSide.RIGHT) selectBlock()
+                else switchToRightSide()
             }
-
             ControlSignal.BITE -> {
-                if (_state.value.selectedBlocks.isNotEmpty()) enterPinyinSelection()
+                if (_state.value.selectedBlocks.isNotEmpty()) enterLevel2()
             }
         }
     }
 
-    private fun selectCurrentSideKey() {
-        val current = _state.value
-        val keys = LetterBlockMapping.keysFor(current.scanSide == ScanSide.LEFT)
-        val key = keys.getOrNull(current.highlightedSideKeyIndex) ?: return
+    private fun selectBlock() {
+        val s = _state.value
+        val sideBlocks = if (s.scanSide == ScanSide.LEFT) LetterBlockMapping.LEFT_BLOCKS
+                         else LetterBlockMapping.RIGHT_BLOCKS
+        val idx = s.highlightedBlockIndex
+        if (idx >= sideBlocks.size) return
+        val block = sideBlocks[idx]
 
-        when (key.type) {
-            SideKeyType.PINYIN -> key.digit?.let { digit ->
-                val blocks = current.selectedBlocks + digit
-                _state.value = current.copy(
-                    selectedBlocks = blocks,
-                    pinyinCombinations = calculatePinyinCombinations(blocks),
-                    highlightedPinyinOptionIndex = 0
-                )
+        if (block == LetterBlockMapping.SEND_BLOCK) { sendText(); return }
+        if (block == LetterBlockMapping.DELETE_BLOCK) {
+            if (s.selectedBlocks.isNotEmpty()) {
+                _state.value = s.copy(selectedBlocks = s.selectedBlocks.dropLast(1), pinyinCombinations = emptyList())
+                updateBackendCandidates()
             }
-
-            SideKeyType.DELETE -> deleteOneInput()
-            SideKeyType.SEND -> sendText()
-            SideKeyType.COMMON_PHRASES -> openCommonPhraseLibrary()
-            SideKeyType.ENGLISH -> enterEnglishMode()
-        }
-    }
-
-    private fun switchScanSide(side: ScanSide) {
-        _state.value = _state.value.copy(
-            scanSide = side,
-            highlightedSideKeyIndex = 0
-        )
-    }
-
-    /**
-     * 删除优先级与普通输入法一致：先删尚未确认的拼音按键，删完后再删输出文字。
-     */
-    private fun deleteOneInput() {
-        val current = _state.value
-        _state.value = if (current.selectedBlocks.isNotEmpty()) {
-            val blocks = current.selectedBlocks.dropLast(1)
-            current.copy(
-                selectedBlocks = blocks,
-                pinyinCombinations = calculatePinyinCombinations(blocks),
-                highlightedPinyinOptionIndex = 0
-            )
-        } else {
-            current.copy(outputText = current.outputText.dropLast(1))
-        }
-    }
-
-    /** 常用词库入口预留：后续可在此加载用户词库并切换新状态。 */
-    private fun openCommonPhraseLibrary() = Unit
-
-    /** 英文输入入口预留：后续可在此接入英文字符/单词选择状态。 */
-    private fun enterEnglishMode() = Unit
-
-    // 第二块：拼音选择
-
-    private fun enterPinyinSelection() {
-        val current = _state.value
-        val combinations = calculatePinyinCombinations(current.selectedBlocks)
-
-        // 没有完整使用全部按键的合法拼音时，第二栏会显示提示，咬牙不切换状态。
-        if (combinations.isEmpty()) return
-
-        stopScanning()
-        _state.value = current.copy(
-            phase = InputPhase.PINYIN_SELECTION,
-            pinyinCombinations = combinations,
-            highlightedPinyinOptionIndex = 0,
-            currentPinyin = "",
-            charCandidates = emptyList()
-        )
-    }
-
-    /**
-     * 只接受逐位使用了全部已选按键的完整单音节拼音。
-     *
-     * 恢复引擎在尾部路径尚未形成完整音节时，可能返回前面已经完成的部分；
-     * 长度和逐位数字映射检查可以排除例如 9426 输入中只使用 94 的 "yi"。
-     */
-    private fun calculatePinyinCombinations(blocks: List<Int>): List<String> {
-        if (blocks.isEmpty()) return emptyList()
-
-        return pinyinRecoveryEngine.recover(blocks)
-            .map { it.letters }
-            .filter { it.isNotBlank() }
-            .filter { pinyin ->
-                pinyin.length == blocks.size && pinyin.indices.all { index ->
-                    LetterBlockMapping.LETTER_TO_DIGIT[pinyin[index]] == blocks[index]
-                }
-            }
-            .filter { CharacterDictionary.PINYIN_TO_CHARS.containsKey(it) }
-            .distinct()
-    }
-
-    private fun handlePinyinSignal(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> movePinyinSelection(-1)
-            ControlSignal.RIGHT_LOOK -> movePinyinSelection(1)
-            ControlSignal.BITE -> confirmPinyinSelection()
-        }
-    }
-
-    private fun movePinyinSelection(direction: Int) {
-        val current = _state.value
-        // 拼音候选后还有一个“返回选择拼音”选项，左右到边界后首尾循环。
-        val optionCount = current.pinyinCombinations.size + 1
-        val next = Math.floorMod(
-            current.highlightedPinyinOptionIndex + direction,
-            optionCount
-        )
-        _state.value = current.copy(highlightedPinyinOptionIndex = next)
-    }
-
-    private fun confirmPinyinSelection() {
-        val current = _state.value
-        val optionIndex = current.highlightedPinyinOptionIndex
-        if (optionIndex == current.pinyinCombinations.size) {
-            returnToKeyInput(retainSelectedBlocks = true)
             return
         }
-
-        val pinyin = current.pinyinCombinations.getOrNull(optionIndex) ?: return
-        val previousChar = current.outputText.lastOrNull()?.toString()
-        val characters = characterLookupEngine.lookupSingleChar(pinyin, previousChar)
-            .map { it.char }
-            .distinct()
-        if (characters.isEmpty()) return
-
-        _state.value = current.copy(
-            phase = InputPhase.CHARACTER_SELECTION,
-            currentPinyin = pinyin,
-            charCandidates = characters,
-            charRowIndex = 0,
-            highlightedCharOptionIndex = defaultCharacterOption(characters, 0),
-            selectedCharacter = "",
-            wordCandidates = emptyList(),
-            sentenceCandidates = emptyList()
-        )
+        _state.value = s.copy(selectedBlocks = s.selectedBlocks + block, pinyinCombinations = emptyList())
+        updateBackendCandidates()
     }
 
-    // 第三块：每行四个汉字，左右看移动，不自动轮转
+    private fun switchToLeftSide() {
+        val idx = _state.value.highlightedBlockIndex
+        _state.value = _state.value.copy(scanSide = ScanSide.LEFT, highlightedBlockIndex = idx)
+        restartScanning()
+    }
 
-    private fun handleCharacterSignal(signal: ControlSignal) {
+    private fun switchToRightSide() {
+        val idx = _state.value.highlightedBlockIndex
+        _state.value = _state.value.copy(scanSide = ScanSide.RIGHT, highlightedBlockIndex = idx)
+        restartScanning()
+    }
+
+    private fun restartScanning() { stopScanning(); startScanning() }
+
+    private fun enterLevel2() {
+        stopScanning()
+        val s = _state.value
+        val combos = s.pinyinCandidates.filter { it.isNotEmpty() }.take(12).toList()
+        if (combos.isEmpty()) { returnToLevel1(); return }
+        val first = combos.first()
+        val chars = loadCharsForPinyin(first, s)
+        _state.value = s.copy(phase = InputPhase.LEVEL_2_LETTER_SELECT, pinyinCombinations = combos,
+            highlightedPinyinIndex = 0, currentPinyin = first,
+            charCandidates = chars.map { it.char }, charScanDirection = 1)
+        startPinyinScanning()
+    }
+
+    // ==================== Level 2 ====================
+
+    private fun handleLevel2Signal(signal: ControlSignal) {
+        if (!_state.value.isCharFocused) handlePinyinSelection(signal)
+        else handleCharSelection(signal)
+    }
+
+    private fun handlePinyinSelection(signal: ControlSignal) {
+        val combos = _state.value.pinyinCombinations
+        if (combos.isEmpty()) return
         when (signal) {
-            ControlSignal.LEFT_LOOK -> moveCharacterSelection(-1)
-            ControlSignal.RIGHT_LOOK -> moveCharacterSelection(1)
-            ControlSignal.BITE -> confirmCharacterOption()
-        }
-    }
-
-    private fun moveCharacterSelection(direction: Int) {
-        val current = _state.value
-        val available = availableCharacterOptions(current)
-        if (available.isEmpty()) return
-
-        val position = available.indexOf(current.highlightedCharOptionIndex)
-            .takeIf { it >= 0 } ?: 0
-        val nextPosition = Math.floorMod(position + direction, available.size)
-        _state.value = current.copy(highlightedCharOptionIndex = available[nextPosition])
-    }
-
-    private fun confirmCharacterOption() {
-        val current = _state.value
-        when (val option = current.highlightedCharOptionIndex) {
-            0 -> changeCharacterRow(-1)
-            1 -> returnToPinyinSelection()
-            in 2..5 -> {
-                val characterIndex = current.charRowIndex * CHARS_PER_ROW + (option - 2)
-                val character = current.charCandidates.getOrNull(characterIndex) ?: return
-                _state.value = current.copy(
-                    phase = InputPhase.WORD_SELECTION,
-                    selectedCharacter = character,
-                    wordCandidates = listOf(character),
-                    highlightedWordIndex = 0
-                )
-            }
-
-            6 -> changeCharacterRow(1)
-        }
-    }
-
-    private fun changeCharacterRow(delta: Int) {
-        val current = _state.value
-        val lastRow = lastCharacterRow(current.charCandidates)
-        val newRow = (current.charRowIndex + delta).coerceIn(0, lastRow)
-        _state.value = current.copy(
-            charRowIndex = newRow,
-            highlightedCharOptionIndex = defaultCharacterOption(current.charCandidates, newRow)
-        )
-    }
-
-    private fun returnToPinyinSelection() {
-        _state.value = _state.value.copy(
-            phase = InputPhase.PINYIN_SELECTION,
-            currentPinyin = "",
-            charCandidates = emptyList(),
-            charRowIndex = 0,
-            highlightedCharOptionIndex = 0,
-            selectedCharacter = "",
-            wordCandidates = emptyList(),
-            selectedWord = "",
-            sentenceCandidates = emptyList()
-        )
-    }
-
-    private fun availableCharacterOptions(state: InputState): List<Int> = buildList {
-        if (state.charRowIndex > 0) add(0) // 上一行
-        add(1) // 返回
-
-        val start = state.charRowIndex * CHARS_PER_ROW
-        val count = (state.charCandidates.size - start).coerceIn(0, CHARS_PER_ROW)
-        repeat(count) { add(2 + it) }
-
-        if (state.charRowIndex < lastCharacterRow(state.charCandidates)) add(6) // 下一行
-    }
-
-    private fun defaultCharacterOption(characters: List<String>, row: Int): Int {
-        val count = (characters.size - row * CHARS_PER_ROW).coerceIn(0, CHARS_PER_ROW)
-        return when {
-            count >= 2 -> 3 // 默认字2
-            count == 1 -> 2
-            else -> 1
-        }
-    }
-
-    private fun lastCharacterRow(characters: List<String>): Int =
-        if (characters.isEmpty()) 0 else (characters.size - 1) / CHARS_PER_ROW
-
-    // 第四块：词语预测（当前按需求只显示所选汉字）
-
-    private fun handleWordSignal(signal: ControlSignal) {
-        val current = _state.value
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> {
-                val index = (current.highlightedWordIndex - 1).coerceAtLeast(0)
-                _state.value = current.copy(highlightedWordIndex = index)
-            }
-
-            ControlSignal.RIGHT_LOOK -> {
-                val lastIndex = current.wordCandidates.lastIndex.coerceAtLeast(0)
-                val index = (current.highlightedWordIndex + 1).coerceAtMost(lastIndex)
-                _state.value = current.copy(highlightedWordIndex = index)
-            }
-
+            ControlSignal.LEFT_LOOK ->
+                _state.value = _state.value.copy(charScanDirection = -1)
+            ControlSignal.RIGHT_LOOK ->
+                _state.value = _state.value.copy(charScanDirection = 1)
             ControlSignal.BITE -> {
-                val word = current.wordCandidates.getOrNull(current.highlightedWordIndex) ?: return
-                _state.value = current.copy(
-                    phase = InputPhase.SENTENCE_SELECTION,
-                    selectedWord = word,
-                    sentenceCandidates = listOf(word),
-                    highlightedSentenceIndex = 0
-                )
+                if (_state.value.highlightedPinyinIndex >= combos.size) returnToLevel1()
+                else focusOnChars()
             }
         }
     }
 
-    // 第五块：大模型句子预测（当前按需求只显示所选词语）
-
-    private fun handleSentenceSignal(signal: ControlSignal) {
-        val current = _state.value
+    private fun handleCharSelection(signal: ControlSignal) {
         when (signal) {
-            ControlSignal.LEFT_LOOK -> {
-                val index = (current.highlightedSentenceIndex - 1).coerceAtLeast(0)
-                _state.value = current.copy(highlightedSentenceIndex = index)
-            }
-
-            ControlSignal.RIGHT_LOOK -> {
-                val lastIndex = current.sentenceCandidates.lastIndex.coerceAtLeast(0)
-                val index = (current.highlightedSentenceIndex + 1).coerceAtMost(lastIndex)
-                _state.value = current.copy(highlightedSentenceIndex = index)
-            }
-
-            ControlSignal.BITE -> {
-                val sentence = current.sentenceCandidates
-                    .getOrNull(current.highlightedSentenceIndex) ?: return
-                _state.value = current.copy(outputText = current.outputText + sentence)
-                returnToKeyInput(retainSelectedBlocks = false)
-            }
+            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
+            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
+            ControlSignal.BITE -> confirmCharacter()
         }
     }
 
-    private fun returnToKeyInput(retainSelectedBlocks: Boolean) {
-        val current = _state.value
-        val blocks = if (retainSelectedBlocks) current.selectedBlocks else emptyList()
-        _state.value = InputState(
-            scanSide = current.scanSide,
-            highlightedSideKeyIndex = current.highlightedSideKeyIndex,
-            selectedBlocks = blocks,
-            pinyinCombinations = calculatePinyinCombinations(blocks),
-            outputText = current.outputText,
-            scanIntervalMs = current.scanIntervalMs
+    private fun focusOnChars() {
+        stopPinyinScanning()
+        stopCharScanning()
+        _state.value = _state.value.copy(isCharFocused = true, highlightedCharIndex = 0, charScanDirection = 1)
+        startCharScanning()
+    }
+
+    private fun loadCharsForPinyin(pinyin: String, state: InputState): List<com.example.input_ds.model.CharCandidate> {
+        val prev = state.outputText.takeIf { it.isNotEmpty() }?.last()?.toString()
+        // 精确匹配
+        val exact = characterLookupEngine.lookupSingleChar(pinyin, prev)
+        if (exact.isNotEmpty()) return exact
+        // 单字母（如 w/x/y/z）：前缀匹配所有首字母相同的汉字
+        if (pinyin.length == 1) {
+            val ch = pinyin[0]
+            return CharacterDictionary.PINYIN_TO_CHARS
+                .filter { (k, _) -> k.startsWith(ch) }
+                .flatMap { (_, entries) -> entries }
+                .sortedByDescending { it.weight }
+                .map { entry -> com.example.input_ds.model.CharCandidate(entry.char, pinyin, entry.weight.toDouble() / 100.0) }
+                .distinctBy { it.char }
+        }
+        return exact
+    }
+
+    private fun switchPinyinHighlight(index: Int) {
+        val s = _state.value
+        val pinyin = s.pinyinCombinations.getOrNull(index) ?: return
+        val chars = loadCharsForPinyin(pinyin, s)
+        _state.value = s.copy(
+            highlightedPinyinIndex = index, currentPinyin = pinyin,
+            charCandidates = chars.map { it.char }, highlightedCharIndex = 0
         )
+    }
+
+    private fun advancePinyinHighlight() {
+        val s = _state.value
+        if (s.phase != InputPhase.LEVEL_2_LETTER_SELECT || s.isCharFocused) return
+        val combos = s.pinyinCombinations
+        if (combos.isEmpty()) return
+        val total = combos.size + 1
+        val next =
+            (s.highlightedPinyinIndex + s.charScanDirection + total) % total
+        if (next < combos.size) {
+            switchPinyinHighlight(next)
+        } else {
+            _state.value = s.copy(highlightedPinyinIndex = next)
+        }
+    }
+
+    // ==================== Level 3 ====================
+
+    private fun handleLevel3Signal(signal: ControlSignal) {
+        when (signal) {
+            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
+            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
+            ControlSignal.BITE -> confirmCharacter()
+        }
+    }
+
+    private fun advanceCharHighlight() {
+        val s = _state.value
+        if (s.phase != InputPhase.LEVEL_2_LETTER_SELECT || !s.isCharFocused) return
+        val chars = s.charCandidates; if (chars.isEmpty()) return
+        val charsPerPage = 15
+        val cp = s.highlightedCharIndex / charsPerPage
+        val start = cp * charsPerPage
+        val tp = (chars.size + charsPerPage - 1) / charsPerPage
+        val hasPrev = cp > 0; val hasNext = cp < tp - 1
+        val dc = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
+        val ac = minOf(dc, chars.size - start)
+        val itemsOnPage = ac + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0) + 1
+        val li = s.highlightedCharIndex - start
+        val ni = start + ((li + s.charScanDirection + itemsOnPage) % itemsOnPage)
+        _state.value = s.copy(highlightedCharIndex = ni)
+    }
+
+    private fun confirmCharacter() {
+        val s = _state.value; val idx = s.highlightedCharIndex
+        val charsPerPage = 15
+        val cp = idx / charsPerPage; val start = cp * charsPerPage
+        val tp = (s.charCandidates.size + charsPerPage - 1) / charsPerPage
+        val hasPrev = cp > 0; val hasNext = cp < tp - 1
+        val dc = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
+        val ac = minOf(dc, s.charCandidates.size - start)
+        val li = idx - start
+        val prevSlot = if (hasPrev) ac else -1
+        val nextSlot = if (hasNext) (if (hasPrev) ac + 1 else ac) else -1
+        val backSlot = ac + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0)
+        if (hasPrev && li == prevSlot) { _state.value = s.copy(highlightedCharIndex = (cp - 1) * charsPerPage); return }
+        if (hasNext && li == nextSlot) { _state.value = s.copy(highlightedCharIndex = (cp + 1) * charsPerPage); return }
+        if (li == backSlot) {
+            _state.value = s.copy(isCharFocused = false)
+            stopCharScanning()
+            startPinyinScanning()
+            return
+        }
+        stopCharScanning()
+        if (idx < s.charCandidates.size) {
+            val ch = s.charCandidates[idx]
+            val newOut = s.outputText + ch
+            // 用最后 2 字作上下文预测
+            val ctx = newOut.takeLast(2)
+            val preds = predictionEngine.predictNext(ctx)
+            UserDictionary.record(newOut.takeLast(minOf(newOut.length, 4)))
+            _state.value = s.copy(phase = InputPhase.PREDICTION, isCharFocused = false,
+                outputText = newOut, currentChar = ch,
+                predictionCandidates = preds + listOf("继续输入"),
+                highlightedPredictionIndex = 0, charScanDirection = 1)
+            startPredScanning()
+        }
+    }
+
+    // ==================== Prediction ====================
+
+    private fun handlePredictionSignal(signal: ControlSignal) {
+        if (_state.value.predictionCandidates.isEmpty()) { returnToLevel1(); return }
+        when (signal) {
+            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
+            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
+            ControlSignal.BITE -> confirmPrediction()
+        }
+    }
+
+    private fun startPredScanning() {
+        predScanJob?.cancel()
+        predScanJob = viewModelScope.launch {
+            while (isActive) { delay(_state.value.scanIntervalMs); advancePredictionHighlight() }
+        }
+    }
+
+    private fun stopPredScanning() { predScanJob?.cancel(); predScanJob = null }
+
+    private fun advancePredictionHighlight() {
+        val s = _state.value
+        if (s.phase != InputPhase.PREDICTION) return
+        val preds = s.predictionCandidates; if (preds.isEmpty()) return
+        val ni = (s.highlightedPredictionIndex + s.charScanDirection + preds.size) % preds.size
+        _state.value = s.copy(highlightedPredictionIndex = ni)
+    }
+
+    private fun confirmPrediction() {
+        val s = _state.value; val idx = s.highlightedPredictionIndex
+        if (idx >= s.predictionCandidates.size) return
+        val sel = s.predictionCandidates[idx]
+        if (sel == "继续输入") { stopPredScanning(); returnToLevel1(); return }
+        val suffix = if (sel.startsWith(s.currentChar)) sel.removePrefix(s.currentChar) else sel
+        val newOut = s.outputText + suffix
+        if (suffix.isNotEmpty()) {
+            val lc = suffix.last().toString()
+            val ctx = newOut.takeLast(2)
+            UserDictionary.record(newOut.takeLast(minOf(newOut.length, 4)))
+            _state.value = s.copy(outputText = newOut, currentChar = lc,
+                predictionCandidates = predictionEngine.predictNext(ctx) + listOf("继续输入"),
+                highlightedPredictionIndex = 0, charScanDirection = 1)
+        } else { stopPredScanning(); returnToLevel1() }
+    }
+
+    // ==================== 退出 ====================
+
+    private fun returnToLevel1() {
+        stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        _state.value = InputState(outputText = _state.value.outputText, scanIntervalMs = _state.value.scanIntervalMs)
         startScanning()
     }
 
-    /** 发送动作沿用旧版效果：发送后清空输入框并开始下一轮输入。 */
     fun sendText() {
-        val current = _state.value
-        stopScanning()
-        _state.value = InputState(scanIntervalMs = current.scanIntervalMs)
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        _state.value = InputState()
         startScanning()
     }
 
     fun adjustSpeed(faster: Boolean) {
-        val current = _state.value.scanIntervalMs
-        val interval = if (faster) {
-            maxOf(300L, current - 200L)
-        } else {
-            minOf(3000L, current + 200L)
-        }
-        _state.value = _state.value.copy(scanIntervalMs = interval)
+        val cur = _state.value.scanIntervalMs
+        _state.value = _state.value.copy(scanIntervalMs = if (faster) maxOf(300L, cur - 200L) else minOf(3000L, cur + 200L))
     }
 
-    private fun startScanning() {
-        scanJob?.cancel()
-        scanJob = viewModelScope.launch {
+    // ==================== 后台 ====================
+
+    private fun isValidPinyinCombo(pinyin: String): Boolean {
+        return CharacterDictionary.PINYIN_TO_CHARS.containsKey(pinyin)
+    }
+
+    private fun updateBackendCandidates() {
+        val s = _state.value
+        if (s.selectedBlocks.isEmpty()) { _state.value = s.copy(pinyinCandidates = emptyList(), charCandidates = emptyList()); return }
+        val prev = s.outputText.takeIf { it.isNotEmpty() }?.last()?.toString()
+
+        // 单块：显示所有字母+首字母匹配的全部汉字（模拟九键）
+        if (s.selectedBlocks.size == 1) {
+            val block = s.selectedBlocks.first()
+            val letters = LetterBlockMapping.DIGIT_TO_LETTERS[block] ?: emptyList()
+            val pinyins = letters.map { it.toString() }
+            val chars = CharacterDictionary.PINYIN_TO_CHARS
+                .filter { (pinyin, _) -> letters.any { l -> pinyin.startsWith(l) } }
+                .flatMap { (_, entries) -> entries }
+                .sortedByDescending { it.weight }
+                .map { it.char }
+                .distinct()
+                .take(45)
+            _state.value = s.copy(pinyinCandidates = pinyins, charCandidates = chars)
+            return
+        }
+
+        // 多块：minLen = 块数（2块→≥2字母，3块→≥3字母）
+        val cands = pinyinRecoveryEngine.recover(s.selectedBlocks)
+        val minLen = s.selectedBlocks.size
+        val pinyins = cands.map { it.letters }
+            .filter { it.length >= minLen }
+            .filter { isValidPinyinCombo(it) }
+            .distinct()
+        val chars = pinyins.take(3).flatMap { pinyin ->
+            characterLookupEngine.lookupSingleChar(pinyin, prev).map { it.char }
+        }.distinct()
+        _state.value = s.copy(pinyinCandidates = pinyins.take(12), charCandidates = chars)
+    }
+
+    // ==================== 扫描定时器 ====================
+
+    private fun startScanning() { scanJob?.cancel(); scanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceHighlight() } } }
+    private fun stopScanning() { scanJob?.cancel(); scanJob = null }
+    private fun startPinyinScanning() {
+        pinyinScanJob?.cancel()
+        pinyinScanJob = viewModelScope.launch {
             while (isActive) {
                 delay(_state.value.scanIntervalMs)
-                advanceSideKeyHighlight()
+                advancePinyinHighlight()
             }
         }
     }
-
-    private fun stopScanning() {
-        scanJob?.cancel()
-        scanJob = null
+    private fun stopPinyinScanning() {
+        pinyinScanJob?.cancel()
+        pinyinScanJob = null
     }
+    private fun startCharScanning() { charScanJob?.cancel(); charScanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceCharHighlight() } } }
+    private fun stopCharScanning() { charScanJob?.cancel(); charScanJob = null }
 
-    private fun advanceSideKeyHighlight() {
-        val current = _state.value
-        if (current.phase != InputPhase.PINYIN_KEY_INPUT) return
-
-        val keys = LetterBlockMapping.keysFor(current.scanSide == ScanSide.LEFT)
-        val nextIndex = (current.highlightedSideKeyIndex + 1) % keys.size
-        _state.value = current.copy(highlightedSideKeyIndex = nextIndex)
+    private fun advanceHighlight() {
+        val s = _state.value
+        if (s.phase != InputPhase.LEVEL_1_SCANNING) return
+        val blocks = if (s.scanSide == ScanSide.LEFT) LetterBlockMapping.LEFT_BLOCKS else LetterBlockMapping.RIGHT_BLOCKS
+        _state.value = s.copy(highlightedBlockIndex = (s.highlightedBlockIndex + 1) % blocks.size)
     }
 
     override fun onCleared() {
         super.onCleared()
-        stopScanning()
-    }
-
-    private companion object {
-        const val CHARS_PER_ROW = 4
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
     }
 }

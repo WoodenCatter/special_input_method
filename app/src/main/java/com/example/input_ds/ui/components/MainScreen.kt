@@ -11,10 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,15 +19,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,23 +35,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.input_ds.data.LetterBlockMapping
-import com.example.input_ds.data.SideKey
 import com.example.input_ds.model.InputPhase
 import com.example.input_ds.model.InputState
 import com.example.input_ds.model.ScanSide
-import com.example.input_ds.ui.theme.AccentGreen
-import com.example.input_ds.ui.theme.BlockBorder
-import com.example.input_ds.ui.theme.DarkBackground
-import com.example.input_ds.ui.theme.ErrorRed
-import com.example.input_ds.ui.theme.HighlightOrange
-import com.example.input_ds.ui.theme.HighlightYellow
-import com.example.input_ds.ui.theme.PrimaryBlue
-import com.example.input_ds.ui.theme.SurfaceDark
-import com.example.input_ds.ui.theme.TextGray
-import com.example.input_ds.ui.theme.TextWhite
+import com.example.input_ds.ui.theme.*
 
-/** 主输入界面：两侧扫描区 + 中间五阶段区 + 底部控制区。 */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 主输入界面
+ *
+ * 布局对应 PRD 中的扫描界面设计：
+ * - 左侧 4 个字母块
+ * - 中间区域 1（放大字母 + 左/右指示）
+ * - 中间区域 2（拼音/汉字候选）
+ * - 右侧 4 个字母块
+ * - 底部控制按钮
+ */
 @Composable
 fun MainScreen(
     state: InputState,
@@ -73,40 +65,80 @@ fun MainScreen(
             .background(DarkBackground)
             .padding(8.dp)
     ) {
+        // === 顶部输出区域 ===
         OutputTextArea(state.outputText)
-        Spacer(modifier = Modifier.height(6.dp))
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // === 中间主交互区域 ===
         Row(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(7.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SideKeyColumn(
-                keys = LetterBlockMapping.LEFT_KEYS,
-                isActiveSide = state.phase == InputPhase.PINYIN_KEY_INPUT &&
-                    state.scanSide == ScanSide.LEFT,
-                highlightedIndex = state.highlightedSideKeyIndex,
-                selectedBlocks = state.selectedBlocks,
-                modifier = Modifier.weight(0.9f)
-            )
+            // 左侧字母块
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                LetterBlockMapping.LEFT_BLOCKS.forEachIndexed { index, block ->
+                    LetterBlockItem(
+                        label = LetterBlockMapping.DIGIT_LABELS[block] ?: "",
+                        isHighlighted = state.phase == InputPhase.LEVEL_1_SCANNING
+                                && state.scanSide == ScanSide.LEFT
+                                && state.highlightedBlockIndex == index,
+                        isSelected = block in state.selectedBlocks,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
 
-            FiveStageArea(
-                state = state,
-                modifier = Modifier.weight(2.8f)
-            )
+            // 中间区域
+            Column(
+                modifier = Modifier
+                    .weight(2f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // 区域1：放大显示 + 左右指示
+                Region1(
+                    state = state,
+                    modifier = Modifier.weight(1f)
+                )
 
-            SideKeyColumn(
-                keys = LetterBlockMapping.RIGHT_KEYS,
-                isActiveSide = state.phase == InputPhase.PINYIN_KEY_INPUT &&
-                    state.scanSide == ScanSide.RIGHT,
-                highlightedIndex = state.highlightedSideKeyIndex,
-                selectedBlocks = state.selectedBlocks,
-                modifier = Modifier.weight(0.9f)
-            )
+                // 区域2：拼音/汉字候选
+                Region2(
+                    state = state,
+                    modifier = Modifier.weight(1.5f)
+                )
+            }
+
+            // 右侧字母块
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                LetterBlockMapping.RIGHT_BLOCKS.forEachIndexed { index, block ->
+                    LetterBlockItem(
+                        label = LetterBlockMapping.DIGIT_LABELS[block] ?: "",
+                        isHighlighted = state.phase == InputPhase.LEVEL_1_SCANNING
+                                && state.scanSide == ScanSide.RIGHT
+                                && state.highlightedBlockIndex == index,
+                        isSelected = block in state.selectedBlocks,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // === 底部控制区域 ===
         ControlPanel(
             onLeftLook = onLeftLook,
             onRightLook = onRightLook,
@@ -114,67 +146,49 @@ fun MainScreen(
             onSpeedUp = onSpeedUp,
             onSpeedDown = onSpeedDown,
             currentPhase = state.phase,
-            scanIntervalMs = state.scanIntervalMs
+            scanIntervalMs = state.scanIntervalMs,
+            isCharFocused = state.isCharFocused
         )
     }
 }
 
+/**
+ * 字母块组件
+ */
 @Composable
-private fun SideKeyColumn(
-    keys: List<SideKey>,
-    isActiveSide: Boolean,
-    highlightedIndex: Int,
-    selectedBlocks: List<Int>,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxHeight(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        keys.forEachIndexed { index, key ->
-            SideKeyItem(
-                label = key.label,
-                isHighlighted = isActiveSide && highlightedIndex == index,
-                isSelected = key.digit != null && key.digit in selectedBlocks,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SideKeyItem(
+fun LetterBlockItem(
     label: String,
     isHighlighted: Boolean,
     isSelected: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val background by animateColorAsState(
+    val bgColor by animateColorAsState(
         targetValue = when {
-            isHighlighted -> HighlightYellow.copy(alpha = 0.76f)
-            isSelected -> AccentGreen.copy(alpha = 0.2f)
+            isHighlighted -> HighlightYellow.copy(alpha = 0.7f)
             else -> SurfaceDark
         },
-        label = "sideKeyBackground"
+        label = "blockColor"
     )
-    val border by animateColorAsState(
+
+    val borderColor by animateColorAsState(
         targetValue = when {
             isHighlighted -> HighlightYellow
-            isSelected -> AccentGreen
             else -> BlockBorder
         },
-        label = "sideKeyBorder"
+        label = "borderColor"
     )
-    val pulse = if (isHighlighted) {
-        val transition = rememberInfiniteTransition(label = "sideKeyPulse")
-        val alpha by transition.animateFloat(
-            initialValue = 0.68f,
-            targetValue = 1f,
+
+    // 高亮时添加脉冲动画
+    val pulseAlpha = if (isHighlighted) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.6f,
+            targetValue = 1.0f,
             animationSpec = infiniteRepeatable(
                 animation = tween(600, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse
             ),
-            label = "sideKeyPulseAlpha"
+            label = "pulseAlpha"
         )
         alpha
     } else {
@@ -184,187 +198,573 @@ private fun SideKeyItem(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(7.dp))
-            .background(background.copy(alpha = pulse))
-            .border(2.dp, border.copy(alpha = pulse), RoundedCornerShape(7.dp))
-            .padding(horizontal = 2.dp),
+            .padding(2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor.copy(alpha = pulseAlpha))
+            .border(2.dp, borderColor.copy(alpha = pulseAlpha), RoundedCornerShape(8.dp)),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = when {
-                isHighlighted -> 19.sp
-                label.length >= 4 -> 12.sp
-                else -> 16.sp
-            },
-            fontWeight = if (isHighlighted || isSelected) FontWeight.Bold else FontWeight.Normal,
-            color = if (isHighlighted) Color.Black else TextWhite,
-            textAlign = TextAlign.Center
+            fontSize = if (isHighlighted) 22.sp else 18.sp,
+            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+            color = if (isHighlighted) Color.Black else TextWhite
         )
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 汉字网格中的单个格子（含下一页导航）
+ */
 @Composable
-private fun FiveStageArea(
+fun GridCharBox(
+    isHighlighted: Boolean,
+    text: String,
+    highlightedSize: androidx.compose.ui.unit.TextUnit,
+    normalSize: androidx.compose.ui.unit.TextUnit,
+    isNav: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = when {
+        isHighlighted && isNav -> HighlightYellow.copy(alpha = 0.6f)
+        isHighlighted -> HighlightYellow.copy(alpha = 0.5f)
+        isNav -> HighlightOrange.copy(alpha = 0.15f)
+        else -> Color.Transparent
+    }
+    val borderColor = when {
+        isHighlighted -> HighlightYellow
+        isNav -> HighlightOrange.copy(alpha = 0.6f)
+        else -> Color.Transparent
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(4.dp))
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontSize = if (isHighlighted) highlightedSize else normalSize,
+            fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+            color = when {
+                isHighlighted -> Color.Black
+                isNav -> HighlightOrange
+                else -> TextWhite
+            }
+        )
+    }
+}
+
+/**
+ * 区域1：放大显示当前字母 + 左/右提示
+ */
+@Composable
+fun Region1(
     state: InputState,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.fillMaxHeight(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceDark)
+            .border(1.dp, BlockBorder, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        contentAlignment = Alignment.Center
     ) {
-        StagePanel(
-            title = "1  已选择的拼音按键",
-            active = state.phase == InputPhase.PINYIN_KEY_INPUT,
-            modifier = Modifier.weight(stageWeight(state.phase, InputPhase.PINYIN_KEY_INPUT))
-        ) {
-            if (state.selectedBlocks.isNotEmpty()) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+        when (state.phase) {
+            InputPhase.LEVEL_1_SCANNING -> {
+                // 显示当前高亮块的字母放大
+                val sideBlocks = if (state.scanSide == ScanSide.LEFT) {
+                    LetterBlockMapping.LEFT_BLOCKS
+                } else {
+                    LetterBlockMapping.RIGHT_BLOCKS
+                }
+                val currentBlock = sideBlocks.getOrNull(state.highlightedBlockIndex)
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    state.selectedBlocks.forEach { digit ->
+                    // 左/右指示
+                    Text(
+                        text = if (state.scanSide == ScanSide.LEFT) "← 左侧扫描" else "右侧扫描 →",
+                        fontSize = 12.sp,
+                        color = TextGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // 放大字母
+                    if (currentBlock != null) {
+                        val letters = LetterBlockMapping.DIGIT_TO_LETTERS[currentBlock]
+                            ?.joinToString(" ") { it.uppercase() } ?: ""
                         Text(
-                            text = LetterBlockMapping.DIGIT_LABELS[digit].orEmpty(),
-                            color = if (state.phase == InputPhase.PINYIN_KEY_INPUT) HighlightYellow else TextWhite,
-                            fontSize = 17.sp,
+                            text = letters,
+                            fontSize = 28.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            color = HighlightYellow
                         )
                     }
                 }
             }
-        }
-
-        StagePanel(
-            title = "2  选择具体拼音",
-            active = state.phase == InputPhase.PINYIN_SELECTION,
-            modifier = Modifier.weight(stageWeight(state.phase, InputPhase.PINYIN_SELECTION))
-        ) {
-            when {
-                state.selectedBlocks.isEmpty() -> Unit
-
-                state.pinyinCombinations.isEmpty() -> {
+            InputPhase.LEVEL_2_LETTER_SELECT -> {
+                // 始终显示拼音组合（咬牙后不跳转，Region2 切换为汉字网格）
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
-                        text = "当前按键组合没有可用拼音，请继续选择或删除后重试",
-                        color = ErrorRed,
+                        text = "选择拼音",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 6.dp)
+                        color = TextGray
                     )
-                }
-
-                state.phase == InputPhase.PINYIN_KEY_INPUT -> {
-                    // 第一阶段实时预览：只显示完整使用当前全部按键的合法拼音。
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        state.pinyinCombinations.forEach { pinyin ->
+                        state.pinyinCombinations.forEachIndexed { index, pinyin ->
+                            val isHighlighted = index == state.highlightedPinyinIndex
                             Text(
                                 text = pinyin,
-                                color = TextGray.copy(alpha = 0.72f),
+                                fontSize = if (isHighlighted) 30.sp else 22.sp,
+                                fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isHighlighted) HighlightYellow else TextWhite
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (!state.isCharFocused) "← 左看/右看 → 切换"
+                               else "咬定拼音 · 下方选字",
+                        fontSize = 10.sp,
+                        color = TextGray
+                    )
+                }
+            }
+            InputPhase.LEVEL_3_CHAR_SELECT -> {
+                // 显示当前拼音和正在选择的字
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = state.currentPinyin,
+                        fontSize = 18.sp,
+                        color = TextGray
+                    )
+                    Text(
+                        text = "选择汉字",
+                        fontSize = 12.sp,
+                        color = TextGray
+                    )
+                    if (state.charCandidates.isNotEmpty()) {
+                        val idx = state.highlightedCharIndex
+                        if (idx < state.charCandidates.size) {
+                            Text(
+                                text = state.charCandidates[idx],
+                                fontSize = 36.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = HighlightYellow
+                            )
+                            val dirText = if (state.charScanDirection >= 0) "→ 自动循环中" else "← 自动循环中"
+                            Text(
+                                text = dirText,
+                                fontSize = 10.sp,
+                                color = TextGray
+                            )
+                        }
+                    }
+                }
+            }
+            InputPhase.PREDICTION -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "预测词",
+                        fontSize = 12.sp,
+                        color = TextGray
+                    )
+                    if (state.predictionCandidates.isNotEmpty()) {
+                        val idx = state.highlightedPredictionIndex
+                        if (idx < state.predictionCandidates.size) {
+                            Text(
+                                text = state.predictionCandidates[idx],
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = HighlightYellow
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 区域2：拼音候选 / 汉字候选 / 预测词 显示
+ */
+@Composable
+fun Region2(
+    state: InputState,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceDark)
+            .border(1.dp, BlockBorder, RoundedCornerShape(8.dp))
+            .padding(8.dp)
+    ) {
+        when (state.phase) {
+            InputPhase.LEVEL_1_SCANNING -> {
+                Column {
+                    // 上半部分：拼音候选（全量显示，与咬定后一致）
+                    if (state.pinyinCandidates.isNotEmpty()) {
+                        Text(
+                            text = "拼音:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        Text(
+                            text = state.pinyinCandidates.joinToString("  "),
+                            fontSize = 15.sp,
+                            color = PrimaryBlue,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    // 下半部分：汉字候选网格（无高亮循环，纯展示）
+                    val chars = state.charCandidates
+                    if (chars.isNotEmpty()) {
+                        Text(
+                            text = "候选词:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val displayChars = chars.take(15)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in 0..2) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    for (col in 0..4) {
+                                        val idx = row * 5 + col
+                                        if (idx < displayChars.size) {
+                                            GridCharBox(false, displayChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (state.selectedBlocks.isEmpty()) {
+                        // 初始状态：显示常用语
+                        Text(
+                            text = "常用语:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        val commonPhrases = com.example.input_ds.data.CharacterDictionary.COMMON_PHRASES.take(15)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in 0..2) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    for (col in 0..4) {
+                                        val idx = row * 5 + col
+                                        if (idx < commonPhrases.size) {
+                                            GridCharBox(false, commonPhrases[idx], 18.sp, 16.sp, modifier = Modifier.weight(1f))
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            InputPhase.LEVEL_2_LETTER_SELECT -> {
+                if (!state.isCharFocused) {
+                    // 子状态A：选拼音 — 显示拼音组合 + 候选字预览
+                    Column {
+                        if (state.pinyinCombinations.isNotEmpty()) {
+                            Text(
+                                text = "拼音组合:",
                                 fontSize = 11.sp,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                color = TextGray
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                state.pinyinCombinations.forEachIndexed { index, pinyin ->
+                                    val isHighlighted = index == state.highlightedPinyinIndex
+                                    Text(
+                                        text = pinyin,
+                                        fontSize = if (isHighlighted) 20.sp else 16.sp,
+                                        fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isHighlighted) HighlightYellow else PrimaryBlue
+                                    )
+                                }
+                                // 返回按钮（与候选词网格样式一致）
+                                val isReturnHl = state.highlightedPinyinIndex >= state.pinyinCombinations.size
+                                GridCharBox(isReturnHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+
+                        if (state.charCandidates.isNotEmpty()) {
+                            Text(
+                                text = "候选词 (${state.currentPinyin}) · 预览:",
+                                fontSize = 11.sp,
+                                color = TextGray
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            // 与选字状态完全相同的分页网格（无高亮循环）
+                            val chars = state.charCandidates
+                            val charsPerPage = 15
+                            val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
+                            // 始终 page=0，与选字态第一页逻辑一致
+                            val hasPrev = false
+                            val hasNext = totalPages > 1
+                            val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
+                            val actualCount = minOf(displayCount, chars.size)
+                            val pageChars = chars.take(actualCount)
+                            val prevSlot = -1  // 预览无上一页
+                            val nextSlot = if (hasNext) actualCount else -1
+                            val backSlot = actualCount + (if (hasNext) 1 else 0)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                for (row in 0..2) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        for (col in 0..4) {
+                                            val idx = row * 5 + col
+                                            if (idx < actualCount) {
+                                                GridCharBox(false, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
+                                            } else if (idx == nextSlot) {
+                                                GridCharBox(false, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            } else if (idx == backSlot) {
+                                                GridCharBox(false, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            } else {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "第1/${totalPages}页",
+                                fontSize = 11.sp,
+                                color = TextGray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
-                }
+                } else {
+                    // 子状态B：选汉字 — 上方拼音组合不动，下方汉字网格循环高亮
+                    Column {
+                        // 上方：拼音组合（与子状态A完全一致，被选中的固定高亮）
+                        if (state.pinyinCombinations.isNotEmpty()) {
+                            Text(
+                                text = "拼音组合:",
+                                fontSize = 11.sp,
+                                color = TextGray
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                state.pinyinCombinations.forEachIndexed { index, pinyin ->
+                                    val isHighlighted = index == state.highlightedPinyinIndex
+                                    Text(
+                                        text = pinyin,
+                                        fontSize = if (isHighlighted) 20.sp else 16.sp,
+                                        fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isHighlighted) HighlightYellow else PrimaryBlue
+                                    )
+                                }
+                                GridCharBox(false, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
 
-                else -> {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        val options = state.pinyinCombinations + "返回选择拼音"
-                        options.forEachIndexed { index, option ->
-                            SelectionChip(
-                                text = option,
-                                selected = index == state.highlightedPinyinOptionIndex,
-                                compact = false
+                        // 下方：汉字候选网格 + 自动循环高亮
+                        Text(
+                            text = "候选词 (${state.currentPinyin}) · 选字中:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        val chars = state.charCandidates
+                        if (chars.isNotEmpty()) {
+                            val charsPerPage = 15
+                            val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
+                            val currentPage = state.highlightedCharIndex / charsPerPage
+                            val startIdx = currentPage * charsPerPage
+                            val hasPrev = currentPage > 0
+                            val hasNext = currentPage < totalPages - 1
+                            val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
+                            val actualCount = minOf(displayCount, chars.size - startIdx)
+                            val pageChars = chars.subList(startIdx, startIdx + actualCount)
+                            // 导航槽位：上一页 / 下一页 / 返回
+                            val prevSlot = if (hasPrev) actualCount else -1
+                            val nextSlot = if (hasNext) (if (hasPrev) actualCount + 1 else actualCount) else -1
+                            val backSlot = actualCount + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                for (row in 0..2) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        for (col in 0..4) {
+                                            val idx = row * 5 + col
+                                            if (idx < actualCount) {
+                                                val charIdx = startIdx + idx
+                                                val isHl = charIdx == state.highlightedCharIndex
+                                                GridCharBox(isHl, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
+                                            } else if (idx == prevSlot) {
+                                                val isHl = state.highlightedCharIndex == startIdx + prevSlot
+                                                GridCharBox(isHl, "上一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            } else if (idx == nextSlot) {
+                                                val isHl = state.highlightedCharIndex == startIdx + nextSlot
+                                                GridCharBox(isHl, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            } else if (idx == backSlot) {
+                                                val isHl = state.highlightedCharIndex == startIdx + backSlot
+                                                GridCharBox(isHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            } else {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "第${currentPage + 1}/${totalPages}页",
+                                fontSize = 11.sp,
+                                color = TextGray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
                 }
             }
-        }
+            InputPhase.LEVEL_3_CHAR_SELECT -> {
+                Column {
+                    Text(
+                        text = "${state.currentPinyin} →",
+                        fontSize = 11.sp,
+                        color = TextGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
 
-        StagePanel(
-            title = "3  选择汉字",
-            active = state.phase == InputPhase.CHARACTER_SELECTION,
-            modifier = Modifier.weight(stageWeight(state.phase, InputPhase.CHARACTER_SELECTION))
-        ) {
-            if (state.phase.ordinal >= InputPhase.CHARACTER_SELECTION.ordinal &&
-                state.charCandidates.isNotEmpty()
-            ) {
-                val listState = rememberLazyListState()
-                LaunchedEffect(state.charRowIndex) {
-                    listState.scrollToItem((state.charRowIndex - 1).coerceAtLeast(0))
-                }
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    val rows = state.charCandidates.chunked(4)
-                    items(rows.size) { rowIndex ->
-                        val characters = rows[rowIndex]
-                        Box(modifier = Modifier.padding(bottom = 2.dp)) {
-                            CandidateCharacterRow(
-                                characters = characters,
-                                rowIndex = rowIndex,
-                                rowCount = rows.size,
-                                isCurrentRow = rowIndex == state.charRowIndex,
-                                highlightedOptionIndex = state.highlightedCharOptionIndex
-                            )
+                    val chars = state.charCandidates
+                    if (chars.isNotEmpty()) {
+                        val charsPerPage = 15
+                        val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
+                        val currentPage = state.highlightedCharIndex / charsPerPage
+                        val startIdx = currentPage * charsPerPage
+                        val hasPrev = currentPage > 0
+                        val hasNext = currentPage < totalPages - 1
+                        val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
+                        val actualCount = minOf(displayCount, chars.size - startIdx)
+                        val pageChars = chars.subList(startIdx, startIdx + actualCount)
+                        val prevSlot = if (hasPrev) actualCount else -1
+                        val nextSlot = if (hasNext) (if (hasPrev) actualCount + 1 else actualCount) else -1
+                        val backSlot = actualCount + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0)
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in 0..2) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    for (col in 0..4) {
+                                        val idx = row * 5 + col
+                                        if (idx < actualCount) {
+                                            val charIdx = startIdx + idx
+                                            val isHl = charIdx == state.highlightedCharIndex
+                                            GridCharBox(isHl, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
+                                        } else if (idx == prevSlot) {
+                                            val isHl = state.highlightedCharIndex == startIdx + prevSlot
+                                            GridCharBox(isHl, "上一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                        } else if (idx == nextSlot) {
+                                            val isHl = state.highlightedCharIndex == startIdx + nextSlot
+                                            GridCharBox(isHl, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                        } else if (idx == backSlot) {
+                                            val isHl = state.highlightedCharIndex == startIdx + backSlot
+                                            GridCharBox(isHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-            }
-        }
 
-        StagePanel(
-            title = "4  选择词语",
-            active = state.phase == InputPhase.WORD_SELECTION,
-            modifier = Modifier.weight(stageWeight(state.phase, InputPhase.WORD_SELECTION))
-        ) {
-            if (state.phase.ordinal >= InputPhase.WORD_SELECTION.ordinal) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    state.wordCandidates.forEachIndexed { index, word ->
-                        SelectionChip(
-                            text = word,
-                            selected = index == state.highlightedWordIndex,
-                            compact = false
+                        Text(
+                            text = "第${currentPage + 1}/${totalPages}页",
+                            fontSize = 11.sp,
+                            color = TextGray,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
             }
-        }
+            InputPhase.PREDICTION -> {
+                Column {
+                    Text(
+                        text = "预测词 · 自动循环中:",
+                        fontSize = 11.sp,
+                        color = TextGray
+                    )
+                    val dirText = if (state.charScanDirection >= 0) "→" else "←"
+                    Text(
+                        text = "左看/右看控制方向 ${dirText}",
+                        fontSize = 10.sp,
+                        color = TextGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
 
-        StagePanel(
-            title = "5  预测句子",
-            active = state.phase == InputPhase.SENTENCE_SELECTION,
-            modifier = Modifier.weight(stageWeight(state.phase, InputPhase.SENTENCE_SELECTION))
-        ) {
-            if (state.phase == InputPhase.SENTENCE_SELECTION) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    state.sentenceCandidates.forEachIndexed { index, sentence ->
-                        SelectionChip(
-                            text = sentence,
-                            selected = index == state.highlightedSentenceIndex,
-                            compact = false
-                        )
+                    val predictions = state.predictionCandidates
+                    val pageSize = 15
+                    val currentPage = state.highlightedPredictionIndex / pageSize
+                    val startIdx = currentPage * pageSize
+                    val pagePredictions = predictions.subList(
+                        startIdx,
+                        minOf(startIdx + pageSize, predictions.size)
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (row in 0..2) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                for (col in 0..4) {
+                                    val idx = row * 5 + col
+                                    if (idx < pagePredictions.size) {
+                                        val predIdx = startIdx + idx
+                                        val isHighlighted = predIdx == state.highlightedPredictionIndex
+                                        GridCharBox(isHighlighted, pagePredictions[idx], 20.sp, 17.sp, modifier = Modifier.weight(1f))
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -372,233 +772,89 @@ private fun FiveStageArea(
     }
 }
 
-private fun stageWeight(current: InputPhase, panel: InputPhase): Float = when {
-    current == panel && panel == InputPhase.CHARACTER_SELECTION -> 3.2f
-    current == panel -> 1.55f
-    current == InputPhase.PINYIN_KEY_INPUT && panel == InputPhase.PINYIN_SELECTION -> 1.2f
-    current.ordinal > panel.ordinal && panel == InputPhase.CHARACTER_SELECTION -> 1.5f
-    else -> 0.72f
-}
-
+/**
+ * 底部控制面板
+ */
 @Composable
-private fun StagePanel(
-    title: String,
-    active: Boolean,
-    modifier: Modifier = Modifier,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(7.dp))
-            .background(if (active) SurfaceDark else SurfaceDark.copy(alpha = 0.72f))
-            .border(
-                width = if (active) 2.dp else 1.dp,
-                color = if (active) HighlightYellow else BlockBorder,
-                shape = RoundedCornerShape(7.dp)
-            )
-            .padding(horizontal = 6.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = title,
-            color = if (active) HighlightYellow else TextGray,
-            fontSize = if (active) 11.sp else 10.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-            content = content
-        )
-    }
-}
-
-@Composable
-private fun SelectionChip(
-    text: String,
-    selected: Boolean,
-    compact: Boolean,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .padding(horizontal = 3.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(if (selected) HighlightYellow.copy(alpha = 0.78f) else Color.Transparent)
-            .border(
-                1.dp,
-                if (selected) HighlightYellow else BlockBorder.copy(alpha = 0.7f),
-                RoundedCornerShape(5.dp)
-            )
-            .padding(horizontal = if (compact) 4.dp else 7.dp, vertical = 3.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = if (selected) Color.Black else TextWhite,
-            fontSize = when {
-                selected && compact -> 14.sp
-                selected -> 20.sp
-                compact -> 10.sp
-                else -> 15.sp
-            },
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-private fun CandidateCharacterRow(
-    characters: List<String>,
-    rowIndex: Int,
-    rowCount: Int,
-    isCurrentRow: Boolean,
-    highlightedOptionIndex: Int
-) {
-    val labels = listOf(
-        "上一行",
-        "返回",
-        characters.getOrNull(0).orEmpty(),
-        characters.getOrNull(1).orEmpty(),
-        characters.getOrNull(2).orEmpty(),
-        characters.getOrNull(3).orEmpty(),
-        "下一行"
-    )
-    val enabled = listOf(
-        rowIndex > 0,
-        true,
-        characters.size >= 1,
-        characters.size >= 2,
-        characters.size >= 3,
-        characters.size >= 4,
-        rowIndex < rowCount - 1
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(if (isCurrentRow) 38.dp else 25.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        labels.forEachIndexed { optionIndex, label ->
-            CandidateCell(
-                text = label,
-                selected = isCurrentRow && highlightedOptionIndex == optionIndex,
-                enabled = enabled[optionIndex],
-                isCurrentRow = isCurrentRow,
-                modifier = Modifier.weight(if (optionIndex in listOf(0, 1, 6)) 1.25f else 0.8f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun CandidateCell(
-    text: String,
-    selected: Boolean,
-    enabled: Boolean,
-    isCurrentRow: Boolean,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (selected) HighlightYellow.copy(alpha = 0.8f) else Color.Transparent)
-            .border(
-                1.dp,
-                when {
-                    selected -> HighlightYellow
-                    isCurrentRow && enabled -> BlockBorder
-                    else -> Color.Transparent
-                },
-                RoundedCornerShape(4.dp)
-            )
-            .padding(horizontal = 1.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = when {
-                selected -> Color.Black
-                !enabled -> TextGray.copy(alpha = 0.28f)
-                isCurrentRow -> TextWhite
-                else -> TextGray.copy(alpha = 0.55f)
-            },
-            fontSize = when {
-                selected -> 16.sp
-                isCurrentRow -> 10.sp
-                else -> 8.sp
-            },
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-private fun ControlPanel(
+fun ControlPanel(
     onLeftLook: () -> Unit,
     onRightLook: () -> Unit,
     onBite: () -> Unit,
     onSpeedUp: () -> Unit,
     onSpeedDown: () -> Unit,
     currentPhase: InputPhase,
-    scanIntervalMs: Long
+    scanIntervalMs: Long,
+    isCharFocused: Boolean = false
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(54.dp),
-        horizontalArrangement = Arrangement.spacedBy(7.dp)
+            .height(56.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        // 左看按钮
         Button(
             onClick = onLeftLook,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text("← 左看", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-
-        Button(
-            onClick = onBite,
-            modifier = Modifier.weight(1.25f),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (currentPhase == InputPhase.PINYIN_KEY_INPUT) AccentGreen else HighlightOrange
+                containerColor = PrimaryBlue
             ),
             shape = RoundedCornerShape(8.dp)
         ) {
             Text(
-                text = when (currentPhase) {
-                    InputPhase.PINYIN_KEY_INPUT -> "咬牙·选拼音"
-                    InputPhase.PINYIN_SELECTION -> "咬牙·确认拼音"
-                    InputPhase.CHARACTER_SELECTION -> "咬牙·选字"
-                    InputPhase.WORD_SELECTION -> "咬牙·选词"
-                    InputPhase.SENTENCE_SELECTION -> "咬牙·输入句子"
-                },
+                text = "← 左看",
                 fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                fontWeight = FontWeight.Bold
             )
         }
 
+        // 咬牙/确认按钮
+        Button(
+            onClick = onBite,
+            modifier = Modifier.weight(1.3f),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = when (currentPhase) {
+                    InputPhase.LEVEL_1_SCANNING -> AccentGreen
+                    InputPhase.LEVEL_2_LETTER_SELECT -> HighlightOrange
+                    InputPhase.LEVEL_3_CHAR_SELECT -> HighlightOrange
+                    InputPhase.PREDICTION -> HighlightOrange
+                }
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = when {
+                    isCharFocused -> "咬牙·选字"
+                    currentPhase == InputPhase.LEVEL_1_SCANNING -> "咬牙·进二级"
+                    currentPhase == InputPhase.LEVEL_2_LETTER_SELECT -> "咬牙·选拼音"
+                    currentPhase == InputPhase.LEVEL_3_CHAR_SELECT -> "咬牙·选字"
+                    currentPhase == InputPhase.PREDICTION -> "咬牙·选词"
+                    else -> "咬牙·确认"
+                },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        // 右看按钮
         Button(
             onClick = onRightLook,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = PrimaryBlue
+            ),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Text("右看 →", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "右看 →",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 
+    // 第二行：速度调节
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -610,25 +866,38 @@ private fun ControlPanel(
         Button(
             onClick = onSpeedDown,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SurfaceDark
+            ),
             shape = RoundedCornerShape(6.dp)
         ) {
-            Text("减速", fontSize = 11.sp, color = TextGray)
+            Text("🐢 减速", fontSize = 11.sp, color = TextGray)
         }
-        Text("  ${scanIntervalMs}ms  ", fontSize = 12.sp, color = TextGray)
+        Text(
+            text = "  ${scanIntervalMs}ms  ",
+            fontSize = 12.sp,
+            color = TextGray
+        )
         Button(
             onClick = onSpeedUp,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SurfaceDark
+            ),
             shape = RoundedCornerShape(6.dp)
         ) {
-            Text("加速", fontSize = 11.sp, color = TextGray)
+            Text("加速 🐇", fontSize = 11.sp, color = TextGray)
         }
     }
 }
 
+/**
+ * 输出文本区域（顶部）
+ */
 @Composable
-private fun OutputTextArea(text: String) {
+fun OutputTextArea(
+    text: String
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
