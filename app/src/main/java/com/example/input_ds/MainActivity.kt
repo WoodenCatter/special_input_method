@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +30,7 @@ import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
 import com.example.input_ds.ui.components.MainScreen
+import com.example.input_ds.ui.components.PredictionDebugOverlay
 import com.example.input_ds.ui.theme.InputDSTheme
 import com.example.input_ds.viewmodel.InputMethodViewModel
 
@@ -64,6 +66,7 @@ class MainActivity : ComponentActivity() {
             InputDSTheme {
                 val vm: InputMethodViewModel = viewModel()
                 val state by vm.state.collectAsState()
+                val predictionDebugInfo by vm.predictionDebugInfo.collectAsState()
                 val highlightKey = when (state.phase) {
                     InputPhase.LEVEL_1_SCANNING ->
                         "level1:${state.scanSide}:${state.highlightedBlockIndex}"
@@ -103,6 +106,13 @@ class MainActivity : ComponentActivity() {
                                 onBite = { vm.handleSignal(ControlSignal.BITE) },
                                 onSpeedUp = { vm.adjustSpeed(true) },
                                 onSpeedDown = { vm.adjustSpeed(false) }
+                            )
+                            PredictionDebugOverlay(
+                                info = predictionDebugInfo,
+                                onExpired = vm::clearPredictionDebugInfo,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(start = 20.dp, end = 20.dp, bottom = 108.dp)
                             )
                         }
                         // BCI 入口按钮

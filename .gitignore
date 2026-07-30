@@ -1,15 +1,42 @@
-*.iml
-.gradle
+# Android / Gradle generated files
+.gradle/
 .kotlin/
-/local.properties
-/.idea/
-/.serena/
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+**/build/
 local.properties
+captures/
+.externalNativeBuild/
+.cxx/
 *.apk
 *.aab
+*.ap_
+*.hprof
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.serena/
+
+# Signing files and local secrets
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+.env
+.env.*
+!.env.example
+
+# Python helper-script caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# OS and local diagnostic files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
 /current_phone_screen.png

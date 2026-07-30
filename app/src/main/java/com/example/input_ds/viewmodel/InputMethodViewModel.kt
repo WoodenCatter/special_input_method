@@ -1,13 +1,18 @@
 package com.example.input_ds.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.pm.ApplicationInfo
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.input_ds.data.CharacterDictionary
 import com.example.input_ds.data.LetterBlockMapping
 import com.example.input_ds.data.UserDictionary
 import com.example.input_ds.engine.CharacterLookupEngine
+import com.example.input_ds.engine.HybridPredictionProvider
+import com.example.input_ds.engine.LocalPredictionProvider
 import com.example.input_ds.engine.PinyinRecoveryEngine
-import com.example.input_ds.engine.PredictionEngine
+import com.example.input_ds.engine.PredictionDebugInfo
+import com.example.input_ds.engine.RimePredictionProvider
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.InputPhase
 import com.example.input_ds.model.InputState
@@ -19,19 +24,31 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-class InputMethodViewModel : ViewModel() {
+class InputMethodViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(InputState())
     val state: StateFlow<InputState> = _state
 
+    private val _predictionDebugInfo = MutableStateFlow<PredictionDebugInfo?>(null)
+    val predictionDebugInfo: StateFlow<PredictionDebugInfo?> = _predictionDebugInfo
+
     private val pinyinRecoveryEngine = PinyinRecoveryEngine()
     private val characterLookupEngine = CharacterLookupEngine()
-    private val predictionEngine = PredictionEngine()
+    private val predictionProvider = HybridPredictionProvider(
+        local = LocalPredictionProvider(),
+        rime = RimePredictionProvider(application)
+    )
+    private val predictionDebugEnabled =
+        application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     private var scanJob: Job? = null
     private var pinyinScanJob: Job? = null
     private var charScanJob: Job? = null
     private var predScanJob: Job? = null
+    private var predictionJob: Job? = null
+    private var predictionDebugClearJob: Job? = null
+    private var predictionRequestId = 0L
+    private var predictionDebugEventId = 0L
 
     init { startScanning() }
 
@@ -57,7 +74,8 @@ class InputMethodViewModel : ViewModel() {
                 else switchToRightSide()
             }
             ControlSignal.BITE -> {
-                if (_state.value.selectedBlocks.isNotEmpty()) enterLevel2()
+                if (hasActivePinyinInput(_state.value)) enterLevel2()
+                else enterCommonPhraseSelection()
             }
         }
     }
@@ -72,14 +90,40 @@ class InputMethodViewModel : ViewModel() {
 
         if (block == LetterBlockMapping.SEND_BLOCK) { sendText(); return }
         if (block == LetterBlockMapping.DELETE_BLOCK) {
-            if (s.selectedBlocks.isNotEmpty()) {
+            if (hasActivePinyinInput(s) && s.selectedBlocks.isNotEmpty()) {
                 _state.value = s.copy(selectedBlocks = s.selectedBlocks.dropLast(1), pinyinCombinations = emptyList())
                 updateBackendCandidates()
+            } else if (!hasActivePinyinInput(s) && s.outputText.isNotEmpty()) {
+                _state.value = s.copy(outputText = removeLastCodePoint(s.outputText))
             }
             return
         }
         _state.value = s.copy(selectedBlocks = s.selectedBlocks + block, pinyinCombinations = emptyList())
         updateBackendCandidates()
+    }
+
+    private fun hasActivePinyinInput(state: InputState): Boolean {
+        return state.selectedBlocks.isNotEmpty() ||
+            state.currentPinyin.isNotEmpty() ||
+            state.selectedLetters.isNotEmpty()
+    }
+
+    private fun enterCommonPhraseSelection() {
+        stopScanning()
+        val s = _state.value
+        _state.value = s.copy(
+            phase = InputPhase.PREDICTION,
+            currentChar = "",
+            predictionCandidates = CharacterDictionary.COMMON_PHRASES + listOf(CONTINUE_INPUT),
+            highlightedPredictionIndex = 0,
+            charScanDirection = 1
+        )
+        startPredScanning()
+    }
+
+    private fun removeLastCodePoint(text: String): String {
+        if (text.isEmpty()) return text
+        return text.substring(0, text.offsetByCodePoints(text.length, -1))
     }
 
     private fun switchToLeftSide() {
@@ -240,15 +284,8 @@ class InputMethodViewModel : ViewModel() {
         if (idx < s.charCandidates.size) {
             val ch = s.charCandidates[idx]
             val newOut = s.outputText + ch
-            // 用最后 2 字作上下文预测
-            val ctx = newOut.takeLast(2)
-            val preds = predictionEngine.predictNext(ctx)
-            UserDictionary.record(newOut.takeLast(minOf(newOut.length, 4)))
-            _state.value = s.copy(phase = InputPhase.PREDICTION, isCharFocused = false,
-                outputText = newOut, currentChar = ch,
-                predictionCandidates = preds + listOf("继续输入"),
-                highlightedPredictionIndex = 0, charScanDirection = 1)
-            startPredScanning()
+            UserDictionary.record(takeLastCodePoints(newOut, 4))
+            requestPredictions(s, newOut, ch)
         }
     }
 
@@ -284,28 +321,86 @@ class InputMethodViewModel : ViewModel() {
         val s = _state.value; val idx = s.highlightedPredictionIndex
         if (idx >= s.predictionCandidates.size) return
         val sel = s.predictionCandidates[idx]
-        if (sel == "继续输入") { stopPredScanning(); returnToLevel1(); return }
-        val suffix = if (sel.startsWith(s.currentChar)) sel.removePrefix(s.currentChar) else sel
+        if (sel == CONTINUE_INPUT) { stopPredScanning(); returnToLevel1(); return }
+        val suffix = sel
         val newOut = s.outputText + suffix
         if (suffix.isNotEmpty()) {
-            val lc = suffix.last().toString()
-            val ctx = newOut.takeLast(2)
-            UserDictionary.record(newOut.takeLast(minOf(newOut.length, 4)))
-            _state.value = s.copy(outputText = newOut, currentChar = lc,
-                predictionCandidates = predictionEngine.predictNext(ctx) + listOf("继续输入"),
-                highlightedPredictionIndex = 0, charScanDirection = 1)
+            val lastCodePoint = takeLastCodePoints(suffix, 1)
+            UserDictionary.record(takeLastCodePoints(newOut, 4))
+            requestPredictions(s, newOut, lastCodePoint)
         } else { stopPredScanning(); returnToLevel1() }
+    }
+
+    private fun requestPredictions(baseState: InputState, context: String, currentChar: String) {
+        stopPredScanning()
+        predictionJob?.cancel()
+        val requestId = ++predictionRequestId
+        _state.value = baseState.copy(
+            phase = InputPhase.PREDICTION,
+            isCharFocused = false,
+            outputText = context,
+            currentChar = currentChar,
+            predictionCandidates = listOf(CONTINUE_INPUT),
+            highlightedPredictionIndex = 0,
+            charScanDirection = 1
+        )
+        predictionJob = viewModelScope.launch {
+            val predictionBatch = predictionProvider.predictWithDebug(context, MAX_PREDICTIONS)
+            val predictions = predictionBatch.candidates.map { it.text }
+            val current = _state.value
+            if (requestId != predictionRequestId ||
+                current.phase != InputPhase.PREDICTION ||
+                current.outputText != context
+            ) return@launch
+
+            _state.value = current.copy(
+                predictionCandidates = predictions + CONTINUE_INPUT,
+                highlightedPredictionIndex = 0,
+                charScanDirection = 1
+            )
+            startPredScanning()
+            if (predictionDebugEnabled) {
+                val eventId = ++predictionDebugEventId
+                _predictionDebugInfo.value = predictionBatch.debugInfo.copy(eventId = eventId)
+                predictionDebugClearJob?.cancel()
+                predictionDebugClearJob = viewModelScope.launch {
+                    delay(PREDICTION_DEBUG_FALLBACK_CLEAR_MS)
+                    clearPredictionDebugInfo(eventId)
+                }
+            }
+        }
+    }
+
+    fun clearPredictionDebugInfo(eventId: Long) {
+        if (_predictionDebugInfo.value?.eventId == eventId) {
+            _predictionDebugInfo.value = null
+        }
+    }
+
+    private fun takeLastCodePoints(text: String, count: Int): String {
+        if (text.isEmpty() || count <= 0) return ""
+        val codePointCount = text.codePointCount(0, text.length)
+        if (codePointCount <= count) return text
+        return text.substring(text.offsetByCodePoints(0, codePointCount - count))
+    }
+
+    private fun cancelPredictionRequest() {
+        predictionRequestId++
+        predictionJob?.cancel()
+        predictionJob = null
     }
 
     // ==================== 退出 ====================
 
     private fun returnToLevel1() {
+        cancelPredictionRequest()
         stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         _state.value = InputState(outputText = _state.value.outputText, scanIntervalMs = _state.value.scanIntervalMs)
         startScanning()
     }
 
     fun sendText() {
+        cancelPredictionRequest()
         stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         _state.value = InputState()
         startScanning()
@@ -384,7 +479,16 @@ class InputMethodViewModel : ViewModel() {
     }
 
     override fun onCleared() {
-        super.onCleared()
+        cancelPredictionRequest()
+        predictionDebugClearJob?.cancel()
+        predictionProvider.close()
         stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        super.onCleared()
+    }
+
+    private companion object {
+        const val CONTINUE_INPUT = "继续输入"
+        const val MAX_PREDICTIONS = 12
+        const val PREDICTION_DEBUG_FALLBACK_CLEAR_MS = 4_500L
     }
 }
