@@ -3,13 +3,23 @@ package com.example.input_ds.engine
 enum class PredictionSource {
     USER,
     LOCAL,
-    RIME
+    RIME,
+    LLM,
+    INITIAL_INDEX
+}
+
+enum class PredictionItemKind {
+    CONTEXT_COMPLETION,
+    INITIAL_SENTENCE,
+    COMMON_PHRASE
 }
 
 data class PredictionCandidate(
     val text: String,
     val source: PredictionSource,
-    val score: Double = 0.0
+    val score: Double = 0.0,
+    val id: String = "${source.name.lowercase()}:$text",
+    val kind: PredictionItemKind = PredictionItemKind.CONTEXT_COMPLETION
 )
 
 interface PredictionProvider {

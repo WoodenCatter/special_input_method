@@ -6,6 +6,10 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <!-- API credentials are Keystore-encrypted and must never leave this device. -->
+    <exclude domain="sharedpref" path="personalization_credentials.xml" />
+    <!-- Ear-EEG recordings and downloaded personalized models are sensitive and user-specific. -->
+    <exclude domain="file" path="personalization/" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

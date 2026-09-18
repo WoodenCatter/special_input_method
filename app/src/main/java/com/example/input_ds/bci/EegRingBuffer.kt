@@ -8,6 +8,7 @@ import kotlin.concurrent.withLock
  * 左耳 leftBuffer / 右耳 rightBuffer
  */
 class EegRingBuffer(private val capacitySeconds: Int = 10, val sampleRate: Int = 500) {
+    data class StereoRange(val left: FloatArray, val right: FloatArray)
     private val capacity = capacitySeconds * sampleRate
     private val lock = ReentrantLock()
 
@@ -74,6 +75,15 @@ class EegRingBuffer(private val capacitySeconds: Int = 10, val sampleRate: Int =
 
     fun getRightRange(startSample: Int, endSample: Int): FloatArray = lock.withLock {
         getRange(rightBuf, rightCount, startSample, endSample)
+    }
+
+    /** Returns both channels from one locked snapshot of the shared sample clock. */
+    fun getStereoRange(startSample: Int, endSample: Int): StereoRange = lock.withLock {
+        val sharedCount = minOf(leftCount, rightCount)
+        StereoRange(
+            getRange(leftBuf, sharedCount, startSample, endSample),
+            getRange(rightBuf, sharedCount, startSample, endSample)
+        )
     }
 
     private fun getRange(

@@ -1,17 +1,14 @@
 package com.example.input_ds.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -32,12 +29,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.input_ds.data.LetterBlockMapping
+import com.example.input_ds.data.CommonPhraseUsage
 import com.example.input_ds.model.InputPhase
 import com.example.input_ds.model.InputState
 import com.example.input_ds.model.ScanSide
+import com.example.input_ds.model.SelectionItemAction
+import com.example.input_ds.model.SelectionPaging
 import com.example.input_ds.ui.theme.*
 
 /**
@@ -48,34 +49,33 @@ import com.example.input_ds.ui.theme.*
  * - 中间区域 1（放大字母 + 左/右指示）
  * - 中间区域 2（拼音/汉字候选）
  * - 右侧 4 个字母块
- * - 底部控制按钮
  */
 @Composable
 fun MainScreen(
     state: InputState,
-    onLeftLook: () -> Unit,
-    onRightLook: () -> Unit,
-    onBite: () -> Unit,
-    onSpeedUp: () -> Unit,
-    onSpeedDown: () -> Unit
+    onBlockClick: (Int) -> Unit,
+    onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
+    onCharacterClick: (String) -> Unit,
+    onCommonPhraseClick: (String) -> Unit,
+    onPredictionClick: (Int) -> Unit,
+    onInitialPredictionClick: (Int) -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-            .padding(8.dp)
+    GlassPanel(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(12.dp)
     ) {
         // === 顶部输出区域 ===
         OutputTextArea(state.outputText)
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // === 中间主交互区域 ===
         Row(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // 左侧字母块
             Column(
@@ -90,7 +90,7 @@ fun MainScreen(
                         isHighlighted = state.phase == InputPhase.LEVEL_1_SCANNING
                                 && state.scanSide == ScanSide.LEFT
                                 && state.highlightedBlockIndex == index,
-                        isSelected = block in state.selectedBlocks,
+                        onClick = { onBlockClick(block) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -101,17 +101,25 @@ fun MainScreen(
                 modifier = Modifier
                     .weight(2f)
                     .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // 区域1：放大显示 + 左右指示
                 Region1(
                     state = state,
+                    onPinyinClick = onPinyinClick,
+                    onPinyinNavigationClick = onPinyinNavigationClick,
                     modifier = Modifier.weight(1f)
                 )
 
                 // 区域2：拼音/汉字候选
                 Region2(
                     state = state,
+                    onPinyinClick = onPinyinClick,
+                    onPinyinNavigationClick = onPinyinNavigationClick,
+                    onCharacterClick = onCharacterClick,
+                    onCommonPhraseClick = onCommonPhraseClick,
+                    onPredictionClick = onPredictionClick,
+                    onInitialPredictionClick = onInitialPredictionClick,
                     modifier = Modifier.weight(1.5f)
                 )
             }
@@ -129,26 +137,13 @@ fun MainScreen(
                         isHighlighted = state.phase == InputPhase.LEVEL_1_SCANNING
                                 && state.scanSide == ScanSide.RIGHT
                                 && state.highlightedBlockIndex == index,
-                        isSelected = block in state.selectedBlocks,
+                        onClick = { onBlockClick(block) },
                         modifier = Modifier.weight(1f)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // === 底部控制区域 ===
-        ControlPanel(
-            onLeftLook = onLeftLook,
-            onRightLook = onRightLook,
-            onBite = onBite,
-            onSpeedUp = onSpeedUp,
-            onSpeedDown = onSpeedDown,
-            currentPhase = state.phase,
-            scanIntervalMs = state.scanIntervalMs,
-            isCharFocused = state.isCharFocused
-        )
     }
 }
 
@@ -159,14 +154,15 @@ fun MainScreen(
 fun LetterBlockItem(
     label: String,
     isHighlighted: Boolean,
-    isSelected: Boolean,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val bgColor by animateColorAsState(
         targetValue = when {
-            isHighlighted -> HighlightYellow.copy(alpha = 0.7f)
+            isHighlighted -> AuroraDarkAccentSoft
             else -> SurfaceDark
         },
+        animationSpec = tween(180),
         label = "blockColor"
     )
 
@@ -175,40 +171,29 @@ fun LetterBlockItem(
             isHighlighted -> HighlightYellow
             else -> BlockBorder
         },
+        animationSpec = tween(180),
         label = "borderColor"
     )
-
-    // 高亮时添加脉冲动画
-    val pulseAlpha = if (isHighlighted) {
-        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-        val alpha by infiniteTransition.animateFloat(
-            initialValue = 0.6f,
-            targetValue = 1.0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(600, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulseAlpha"
-        )
-        alpha
-    } else {
-        1f
-    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(bgColor.copy(alpha = pulseAlpha))
-            .border(2.dp, borderColor.copy(alpha = pulseAlpha), RoundedCornerShape(8.dp)),
+            .padding(1.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .background(bgColor)
+            .border(
+                1.dp,
+                borderColor,
+                RoundedCornerShape(12.dp)
+            ),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            fontSize = if (isHighlighted) 22.sp else 18.sp,
+            fontSize = if (isHighlighted) 19.sp else 16.sp,
             fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
-            color = if (isHighlighted) Color.Black else TextWhite
+            color = if (isHighlighted) AuroraVioletBright else TextWhite
         )
     }
 }
@@ -223,6 +208,7 @@ fun GridCharBox(
     highlightedSize: androidx.compose.ui.unit.TextUnit,
     normalSize: androidx.compose.ui.unit.TextUnit,
     isNav: Boolean = false,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val bgColor = when {
@@ -238,9 +224,10 @@ fun GridCharBox(
     }
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(4.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .padding(vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -263,15 +250,17 @@ fun GridCharBox(
 @Composable
 fun Region1(
     state: InputState,
+    onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(SurfaceDark)
-            .border(1.dp, BlockBorder, RoundedCornerShape(8.dp))
-            .padding(8.dp),
+            .border(1.dp, BlockBorder, RoundedCornerShape(16.dp))
+            .padding(6.dp),
         contentAlignment = Alignment.Center
     ) {
         when (state.phase) {
@@ -298,8 +287,13 @@ fun Region1(
 
                     // 放大字母
                     if (currentBlock != null) {
-                        val letters = LetterBlockMapping.DIGIT_TO_LETTERS[currentBlock]
-                            ?.joinToString(" ") { it.uppercase() } ?: ""
+                        val letters = LetterBlockMapping.DIGIT_LABELS[currentBlock]
+                            ?.let { label ->
+                                if (currentBlock in LetterBlockMapping.ALL_BLOCKS) {
+                                    label.toCharArray().joinToString(" ")
+                                } else label
+                            }
+                            .orEmpty()
                         Text(
                             text = letters,
                             fontSize = 28.sp,
@@ -323,13 +317,35 @@ fun Region1(
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        val returnHighlighted = state.highlightedPinyinIndex == 0
+                        Text(
+                            text = "返回",
+                            modifier = Modifier.clickable { onPinyinNavigationClick(0) },
+                            fontSize = if (returnHighlighted) 30.sp else 22.sp,
+                            fontWeight = if (returnHighlighted) FontWeight.Bold else FontWeight.Normal,
+                            color = if (returnHighlighted) HighlightYellow else HighlightOrange
+                        )
                         state.pinyinCombinations.forEachIndexed { index, pinyin ->
-                            val isHighlighted = index == state.highlightedPinyinIndex
+                            val isHighlighted = index + 1 == state.highlightedPinyinIndex
                             Text(
                                 text = pinyin,
+                                modifier = Modifier.clickable { onPinyinClick(pinyin) },
                                 fontSize = if (isHighlighted) 30.sp else 22.sp,
                                 fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isHighlighted) HighlightYellow else TextWhite
+                            )
+                        }
+                        if (state.hasInitialPredictionOption) {
+                            val isHighlighted = state.highlightedPinyinIndex ==
+                                state.pinyinCombinations.size + 1
+                            Text(
+                                text = "首字母",
+                                modifier = Modifier.clickable {
+                                    onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                },
+                                fontSize = if (isHighlighted) 30.sp else 22.sp,
+                                fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isHighlighted) HighlightYellow else HighlightOrange
                             )
                         }
                     }
@@ -381,20 +397,46 @@ fun Region1(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "预测词",
+                        text = if (state.isCommonPhraseSelection) "常用语" else "预测词",
                         fontSize = 12.sp,
                         color = TextGray
                     )
-                    if (state.predictionCandidates.isNotEmpty()) {
+                    val items = if (state.isCommonPhraseSelection) {
+                        SelectionPaging.commonPhraseItems(state.predictionCandidates, state.predictionPage)
+                    } else {
+                        SelectionPaging.predictionItems(state.predictionCandidates)
+                    }
+                    if (items.isNotEmpty()) {
                         val idx = state.highlightedPredictionIndex
-                        if (idx < state.predictionCandidates.size) {
+                        if (idx < items.size) {
                             Text(
-                                text = state.predictionCandidates[idx],
+                                text = items[idx].label,
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = HighlightYellow
                             )
                         }
+                    }
+                }
+            }
+            InputPhase.INITIAL_PREDICTION -> {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "首字母整句 · ${state.initialBlocksKey}",
+                        fontSize = 12.sp,
+                        color = TextGray
+                    )
+                    val items = SelectionPaging.initialSentenceItems(
+                        state.initialCandidates,
+                        state.initialPage
+                    )
+                    items.getOrNull(state.highlightedInitialIndex)?.let { item ->
+                        Text(
+                            text = item.label,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = HighlightYellow
+                        )
                     }
                 }
             }
@@ -408,28 +450,58 @@ fun Region1(
 @Composable
 fun Region2(
     state: InputState,
+    onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
+    onCharacterClick: (String) -> Unit,
+    onCommonPhraseClick: (String) -> Unit,
+    onPredictionClick: (Int) -> Unit,
+    onInitialPredictionClick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(SurfaceDark)
-            .border(1.dp, BlockBorder, RoundedCornerShape(8.dp))
-            .padding(8.dp)
+            .border(1.dp, BlockBorder, RoundedCornerShape(16.dp))
+            .padding(6.dp)
     ) {
         when (state.phase) {
             InputPhase.LEVEL_1_SCANNING -> {
                 Column {
-                    // 上半部分：拼音候选（全量显示，与咬定后一致）
+                    // 上半部分：有完整拼音时维持原显示；否则回显已选字母块，避免空白。
                     if (state.pinyinCandidates.isNotEmpty()) {
                         Text(
                             text = "拼音:",
                             fontSize = 11.sp,
                             color = TextGray
                         )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            state.pinyinCandidates.chunked(6).forEach { rowItems ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    rowItems.forEach { pinyin ->
+                                        Text(
+                                            text = pinyin,
+                                            modifier = Modifier.clickable { onPinyinClick(pinyin) },
+                                            fontSize = 15.sp,
+                                            color = PrimaryBlue,
+                                            lineHeight = 20.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    } else if (state.selectedBlocks.isNotEmpty()) {
                         Text(
-                            text = state.pinyinCandidates.joinToString("  "),
+                            text = "已选字母块:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        Text(
+                            text = state.selectedBlocks.mapNotNull { block ->
+                                LetterBlockMapping.DIGIT_LABELS[block]
+                            }.joinToString(" · "),
                             fontSize = 15.sp,
                             color = PrimaryBlue,
                             lineHeight = 20.sp
@@ -456,7 +528,14 @@ fun Region2(
                                     for (col in 0..4) {
                                         val idx = row * 5 + col
                                         if (idx < displayChars.size) {
-                                            GridCharBox(false, displayChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
+                                            GridCharBox(
+                                                false,
+                                                displayChars[idx],
+                                                26.sp,
+                                                22.sp,
+                                                onClick = { onCharacterClick(displayChars[idx]) },
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         } else {
                                             Spacer(modifier = Modifier.weight(1f))
                                         }
@@ -471,7 +550,9 @@ fun Region2(
                             fontSize = 11.sp,
                             color = TextGray
                         )
-                        val commonPhrases = com.example.input_ds.data.CharacterDictionary.COMMON_PHRASES.take(15)
+                        val commonPhrases = CommonPhraseUsage.sorted(
+                            com.example.input_ds.data.CharacterDictionary.COMMON_PHRASES
+                        ).take(15)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             for (row in 0..2) {
                                 Row(
@@ -481,7 +562,14 @@ fun Region2(
                                     for (col in 0..4) {
                                         val idx = row * 5 + col
                                         if (idx < commonPhrases.size) {
-                                            GridCharBox(false, commonPhrases[idx], 18.sp, 16.sp, modifier = Modifier.weight(1f))
+                                            GridCharBox(
+                                                false,
+                                                commonPhrases[idx],
+                                                18.sp,
+                                                16.sp,
+                                                onClick = { onCommonPhraseClick(commonPhrases[idx]) },
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         } else {
                                             Spacer(modifier = Modifier.weight(1f))
                                         }
@@ -496,25 +584,47 @@ fun Region2(
                 if (!state.isCharFocused) {
                     // 子状态A：选拼音 — 显示拼音组合 + 候选字预览
                     Column {
-                        if (state.pinyinCombinations.isNotEmpty()) {
+                        if (state.pinyinCombinations.isNotEmpty() || state.hasInitialPredictionOption) {
                             Text(
                                 text = "拼音组合:",
                                 fontSize = 11.sp,
                                 color = TextGray
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GridCharBox(
+                                    state.highlightedPinyinIndex == 0,
+                                    "返回",
+                                    18.sp,
+                                    15.sp,
+                                    isNav = true,
+                                    onClick = { onPinyinNavigationClick(0) },
+                                    modifier = Modifier
+                                )
                                 state.pinyinCombinations.forEachIndexed { index, pinyin ->
-                                    val isHighlighted = index == state.highlightedPinyinIndex
+                                    val isHighlighted = index + 1 == state.highlightedPinyinIndex
                                     Text(
                                         text = pinyin,
+                                        modifier = Modifier.clickable { onPinyinClick(pinyin) },
                                         fontSize = if (isHighlighted) 20.sp else 16.sp,
                                         fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isHighlighted) HighlightYellow else PrimaryBlue
                                     )
                                 }
-                                // 返回按钮（与候选词网格样式一致）
-                                val isReturnHl = state.highlightedPinyinIndex >= state.pinyinCombinations.size
-                                GridCharBox(isReturnHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier)
+                                if (state.hasInitialPredictionOption) {
+                                    val highlighted = state.highlightedPinyinIndex ==
+                                        state.pinyinCombinations.size + 1
+                                    GridCharBox(
+                                        highlighted,
+                                        "首字母",
+                                        18.sp,
+                                        15.sp,
+                                        isNav = true,
+                                        onClick = {
+                                            onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                        },
+                                        modifier = Modifier
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                         }
@@ -526,19 +636,7 @@ fun Region2(
                                 color = TextGray
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            // 与选字状态完全相同的分页网格（无高亮循环）
-                            val chars = state.charCandidates
-                            val charsPerPage = 15
-                            val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
-                            // 始终 page=0，与选字态第一页逻辑一致
-                            val hasPrev = false
-                            val hasNext = totalPages > 1
-                            val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
-                            val actualCount = minOf(displayCount, chars.size)
-                            val pageChars = chars.take(actualCount)
-                            val prevSlot = -1  // 预览无上一页
-                            val nextSlot = if (hasNext) actualCount else -1
-                            val backSlot = actualCount + (if (hasNext) 1 else 0)
+                            val previewItems = SelectionPaging.characterItems(state.charCandidates, 0)
 
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 for (row in 0..2) {
@@ -548,12 +646,19 @@ fun Region2(
                                     ) {
                                         for (col in 0..4) {
                                             val idx = row * 5 + col
-                                            if (idx < actualCount) {
-                                                GridCharBox(false, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
-                                            } else if (idx == nextSlot) {
-                                                GridCharBox(false, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
-                                            } else if (idx == backSlot) {
-                                                GridCharBox(false, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            val item = previewItems.getOrNull(idx)
+                                            if (item != null) {
+                                                GridCharBox(
+                                                    false,
+                                                    item.label,
+                                                    26.sp,
+                                                    18.sp,
+                                                    isNav = item.action != SelectionItemAction.SELECT,
+                                                    onClick = if (item.action == SelectionItemAction.SELECT) {
+                                                        { onCharacterClick(item.label) }
+                                                    } else null,
+                                                    modifier = Modifier.weight(1f)
+                                                )
                                             } else {
                                                 Spacer(modifier = Modifier.weight(1f))
                                             }
@@ -563,7 +668,7 @@ fun Region2(
                             }
 
                             Text(
-                                text = "第1/${totalPages}页",
+                                text = "第1/${SelectionPaging.totalPages(state.charCandidates.size)}页",
                                 fontSize = 11.sp,
                                 color = TextGray,
                                 textAlign = TextAlign.Center,
@@ -575,23 +680,45 @@ fun Region2(
                     // 子状态B：选汉字 — 上方拼音组合不动，下方汉字网格循环高亮
                     Column {
                         // 上方：拼音组合（与子状态A完全一致，被选中的固定高亮）
-                        if (state.pinyinCombinations.isNotEmpty()) {
+                        if (state.pinyinCombinations.isNotEmpty() || state.hasInitialPredictionOption) {
                             Text(
                                 text = "拼音组合:",
                                 fontSize = 11.sp,
                                 color = TextGray
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                GridCharBox(
+                                    false,
+                                    "返回",
+                                    18.sp,
+                                    15.sp,
+                                    isNav = true,
+                                    onClick = { onPinyinNavigationClick(0) },
+                                    modifier = Modifier
+                                )
                                 state.pinyinCombinations.forEachIndexed { index, pinyin ->
-                                    val isHighlighted = index == state.highlightedPinyinIndex
+                                    val isHighlighted = index + 1 == state.highlightedPinyinIndex
                                     Text(
                                         text = pinyin,
+                                        modifier = Modifier.clickable { onPinyinClick(pinyin) },
                                         fontSize = if (isHighlighted) 20.sp else 16.sp,
                                         fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isHighlighted) HighlightYellow else PrimaryBlue
                                     )
                                 }
-                                GridCharBox(false, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier)
+                                if (state.hasInitialPredictionOption) {
+                                    GridCharBox(
+                                        false,
+                                        "首字母",
+                                        18.sp,
+                                        15.sp,
+                                        isNav = true,
+                                        onClick = {
+                                            onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                        },
+                                        modifier = Modifier
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                         }
@@ -606,19 +733,7 @@ fun Region2(
 
                         val chars = state.charCandidates
                         if (chars.isNotEmpty()) {
-                            val charsPerPage = 15
-                            val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
-                            val currentPage = state.highlightedCharIndex / charsPerPage
-                            val startIdx = currentPage * charsPerPage
-                            val hasPrev = currentPage > 0
-                            val hasNext = currentPage < totalPages - 1
-                            val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
-                            val actualCount = minOf(displayCount, chars.size - startIdx)
-                            val pageChars = chars.subList(startIdx, startIdx + actualCount)
-                            // 导航槽位：上一页 / 下一页 / 返回
-                            val prevSlot = if (hasPrev) actualCount else -1
-                            val nextSlot = if (hasNext) (if (hasPrev) actualCount + 1 else actualCount) else -1
-                            val backSlot = actualCount + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0)
+                            val items = SelectionPaging.characterItems(chars, state.charPage)
 
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 for (row in 0..2) {
@@ -628,19 +743,19 @@ fun Region2(
                                     ) {
                                         for (col in 0..4) {
                                             val idx = row * 5 + col
-                                            if (idx < actualCount) {
-                                                val charIdx = startIdx + idx
-                                                val isHl = charIdx == state.highlightedCharIndex
-                                                GridCharBox(isHl, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
-                                            } else if (idx == prevSlot) {
-                                                val isHl = state.highlightedCharIndex == startIdx + prevSlot
-                                                GridCharBox(isHl, "上一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
-                                            } else if (idx == nextSlot) {
-                                                val isHl = state.highlightedCharIndex == startIdx + nextSlot
-                                                GridCharBox(isHl, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
-                                            } else if (idx == backSlot) {
-                                                val isHl = state.highlightedCharIndex == startIdx + backSlot
-                                                GridCharBox(isHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                            val item = items.getOrNull(idx)
+                                            if (item != null) {
+                                                GridCharBox(
+                                                    idx == state.highlightedCharIndex,
+                                                    item.label,
+                                                    26.sp,
+                                                    18.sp,
+                                                    isNav = item.action != SelectionItemAction.SELECT,
+                                                    onClick = if (item.action == SelectionItemAction.SELECT) {
+                                                        { onCharacterClick(item.label) }
+                                                    } else null,
+                                                    modifier = Modifier.weight(1f)
+                                                )
                                             } else {
                                                 Spacer(modifier = Modifier.weight(1f))
                                             }
@@ -650,7 +765,7 @@ fun Region2(
                             }
 
                             Text(
-                                text = "第${currentPage + 1}/${totalPages}页",
+                                text = "第${state.charPage + 1}/${SelectionPaging.totalPages(chars.size)}页",
                                 fontSize = 11.sp,
                                 color = TextGray,
                                 textAlign = TextAlign.Center,
@@ -671,18 +786,7 @@ fun Region2(
 
                     val chars = state.charCandidates
                     if (chars.isNotEmpty()) {
-                        val charsPerPage = 15
-                        val totalPages = (chars.size + charsPerPage - 1) / charsPerPage
-                        val currentPage = state.highlightedCharIndex / charsPerPage
-                        val startIdx = currentPage * charsPerPage
-                        val hasPrev = currentPage > 0
-                        val hasNext = currentPage < totalPages - 1
-                        val displayCount = charsPerPage - (if (hasPrev) 1 else 0) - (if (hasNext) 1 else 0) - 1
-                        val actualCount = minOf(displayCount, chars.size - startIdx)
-                        val pageChars = chars.subList(startIdx, startIdx + actualCount)
-                        val prevSlot = if (hasPrev) actualCount else -1
-                        val nextSlot = if (hasNext) (if (hasPrev) actualCount + 1 else actualCount) else -1
-                        val backSlot = actualCount + (if (hasPrev) 1 else 0) + (if (hasNext) 1 else 0)
+                        val items = SelectionPaging.characterItems(chars, state.charPage)
 
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             for (row in 0..2) {
@@ -692,19 +796,19 @@ fun Region2(
                                 ) {
                                     for (col in 0..4) {
                                         val idx = row * 5 + col
-                                        if (idx < actualCount) {
-                                            val charIdx = startIdx + idx
-                                            val isHl = charIdx == state.highlightedCharIndex
-                                            GridCharBox(isHl, pageChars[idx], 26.sp, 22.sp, modifier = Modifier.weight(1f))
-                                        } else if (idx == prevSlot) {
-                                            val isHl = state.highlightedCharIndex == startIdx + prevSlot
-                                            GridCharBox(isHl, "上一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
-                                        } else if (idx == nextSlot) {
-                                            val isHl = state.highlightedCharIndex == startIdx + nextSlot
-                                            GridCharBox(isHl, "下一页", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
-                                        } else if (idx == backSlot) {
-                                            val isHl = state.highlightedCharIndex == startIdx + backSlot
-                                            GridCharBox(isHl, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier.weight(1f))
+                                        val item = items.getOrNull(idx)
+                                        if (item != null) {
+                                            GridCharBox(
+                                                idx == state.highlightedCharIndex,
+                                                item.label,
+                                                26.sp,
+                                                18.sp,
+                                                isNav = item.action != SelectionItemAction.SELECT,
+                                                onClick = if (item.action == SelectionItemAction.SELECT) {
+                                                    { onCharacterClick(item.label) }
+                                                } else null,
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         } else {
                                             Spacer(modifier = Modifier.weight(1f))
                                         }
@@ -714,7 +818,7 @@ fun Region2(
                         }
 
                         Text(
-                            text = "第${currentPage + 1}/${totalPages}页",
+                            text = "第${state.charPage + 1}/${SelectionPaging.totalPages(chars.size)}页",
                             fontSize = 11.sp,
                             color = TextGray,
                             textAlign = TextAlign.Center,
@@ -726,7 +830,11 @@ fun Region2(
             InputPhase.PREDICTION -> {
                 Column {
                     Text(
-                        text = "预测词 · 自动循环中:",
+                        text = if (state.isCommonPhraseSelection) {
+                            "常用语 · 自动循环中:"
+                        } else {
+                            "预测词 · 自动循环中:"
+                        },
                         fontSize = 11.sp,
                         color = TextGray
                     )
@@ -738,14 +846,11 @@ fun Region2(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    val predictions = state.predictionCandidates
-                    val pageSize = 15
-                    val currentPage = state.highlightedPredictionIndex / pageSize
-                    val startIdx = currentPage * pageSize
-                    val pagePredictions = predictions.subList(
-                        startIdx,
-                        minOf(startIdx + pageSize, predictions.size)
-                    )
+                    val items = if (state.isCommonPhraseSelection) {
+                        SelectionPaging.commonPhraseItems(state.predictionCandidates, state.predictionPage)
+                    } else {
+                        SelectionPaging.predictionItems(state.predictionCandidates)
+                    }
 
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         for (row in 0..2) {
@@ -755,10 +860,17 @@ fun Region2(
                             ) {
                                 for (col in 0..4) {
                                     val idx = row * 5 + col
-                                    if (idx < pagePredictions.size) {
-                                        val predIdx = startIdx + idx
-                                        val isHighlighted = predIdx == state.highlightedPredictionIndex
-                                        GridCharBox(isHighlighted, pagePredictions[idx], 20.sp, 17.sp, modifier = Modifier.weight(1f))
+                                    val item = items.getOrNull(idx)
+                                    if (item != null) {
+                                        GridCharBox(
+                                            idx == state.highlightedPredictionIndex,
+                                            item.label,
+                                            20.sp,
+                                            17.sp,
+                                            isNav = item.action != SelectionItemAction.SELECT,
+                                            onClick = { onPredictionClick(idx) },
+                                            modifier = Modifier.weight(1f)
+                                        )
                                     } else {
                                         Spacer(modifier = Modifier.weight(1f))
                                     }
@@ -766,127 +878,69 @@ fun Region2(
                             }
                         }
                     }
+                    if (state.isCommonPhraseSelection) {
+                        Text(
+                            text = "第${state.predictionPage + 1}/${SelectionPaging.totalPages(state.predictionCandidates.size)}页",
+                            fontSize = 11.sp,
+                            color = TextGray,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
-        }
-    }
-}
-
-/**
- * 底部控制面板
- */
-@Composable
-fun ControlPanel(
-    onLeftLook: () -> Unit,
-    onRightLook: () -> Unit,
-    onBite: () -> Unit,
-    onSpeedUp: () -> Unit,
-    onSpeedDown: () -> Unit,
-    currentPhase: InputPhase,
-    scanIntervalMs: Long,
-    isCharFocused: Boolean = false
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // 左看按钮
-        Button(
-            onClick = onLeftLook,
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = PrimaryBlue
-            ),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text(
-                text = "← 左看",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // 咬牙/确认按钮
-        Button(
-            onClick = onBite,
-            modifier = Modifier.weight(1.3f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = when (currentPhase) {
-                    InputPhase.LEVEL_1_SCANNING -> AccentGreen
-                    InputPhase.LEVEL_2_LETTER_SELECT -> HighlightOrange
-                    InputPhase.LEVEL_3_CHAR_SELECT -> HighlightOrange
-                    InputPhase.PREDICTION -> HighlightOrange
+            InputPhase.INITIAL_PREDICTION -> {
+                Column {
+                    Text(
+                        text = "首字母整句 ${state.initialBlocksKey} · ${when (state.initialPredictionStatus) {
+                            com.example.input_ds.model.PredictionStatus.LOADING -> "生成中"
+                            com.example.input_ds.model.PredictionStatus.READY -> "已就绪"
+                            com.example.input_ds.model.PredictionStatus.UNAVAILABLE -> "远程不可用"
+                            com.example.input_ds.model.PredictionStatus.IDLE -> "等待中"
+                        }}",
+                        fontSize = 11.sp,
+                        color = TextGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val items = SelectionPaging.initialSentenceItems(
+                        state.initialCandidates,
+                        state.initialPage
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (row in 0..2) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                for (col in 0..4) {
+                                    val index = row * 5 + col
+                                    val item = items.getOrNull(index)
+                                    if (item != null) {
+                                        GridCharBox(
+                                            index == state.highlightedInitialIndex,
+                                            item.label,
+                                            20.sp,
+                                            17.sp,
+                                            isNav = item.action != SelectionItemAction.SELECT,
+                                            onClick = { onInitialPredictionClick(index) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        text = "第${state.initialPage + 1}/${SelectionPaging.totalPages(state.initialCandidates.size)}页",
+                        fontSize = 11.sp,
+                        color = TextGray,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-            ),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text(
-                text = when {
-                    isCharFocused -> "咬牙·选字"
-                    currentPhase == InputPhase.LEVEL_1_SCANNING -> "咬牙·进二级"
-                    currentPhase == InputPhase.LEVEL_2_LETTER_SELECT -> "咬牙·选拼音"
-                    currentPhase == InputPhase.LEVEL_3_CHAR_SELECT -> "咬牙·选字"
-                    currentPhase == InputPhase.PREDICTION -> "咬牙·选词"
-                    else -> "咬牙·确认"
-                },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // 右看按钮
-        Button(
-            onClick = onRightLook,
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = PrimaryBlue
-            ),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text(
-                text = "右看 →",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-
-    // 第二行：速度调节
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(36.dp)
-            .padding(top = 4.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Button(
-            onClick = onSpeedDown,
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = SurfaceDark
-            ),
-            shape = RoundedCornerShape(6.dp)
-        ) {
-            Text("🐢 减速", fontSize = 11.sp, color = TextGray)
-        }
-        Text(
-            text = "  ${scanIntervalMs}ms  ",
-            fontSize = 12.sp,
-            color = TextGray
-        )
-        Button(
-            onClick = onSpeedUp,
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = SurfaceDark
-            ),
-            shape = RoundedCornerShape(6.dp)
-        ) {
-            Text("加速 🐇", fontSize = 11.sp, color = TextGray)
+            }
         }
     }
 }
@@ -901,17 +955,22 @@ fun OutputTextArea(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(SurfaceDark)
-            .border(1.dp, BlockBorder, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        contentAlignment = Alignment.CenterStart
+            .height(68.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(AuroraDarkSurface)
+            .border(1.dp, BlockBorder, RoundedCornerShape(18.dp))
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = if (text.isEmpty()) "输入文本将显示在此处..." else text,
-            fontSize = 18.sp,
-            color = if (text.isEmpty()) TextGray else TextWhite
+            fontSize = if (text.isEmpty()) 18.sp else 26.sp,
+            fontWeight = if (text.isEmpty()) FontWeight.Normal else FontWeight.Medium,
+            color = if (text.isEmpty()) TextGray else TextWhite,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

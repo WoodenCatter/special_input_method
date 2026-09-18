@@ -5,9 +5,10 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
-import android.view.Choreographer
 import android.view.View
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -21,35 +22,49 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.input_ds.bci.EegScopePlotBuffer
+import com.example.input_ds.bci.EegPreprocessor
 import com.example.input_ds.bci.NaoyunBleManager
-import com.example.input_ds.bci.RealtimeEegDisplayFilter
-
-private val BgColor = Color(0xFF090F1C)
-private val MutedColor = Color(0xFF94A3B8)
+import com.example.input_ds.ui.theme.DarkBackground
+import com.example.input_ds.ui.theme.ErrorRed
+import com.example.input_ds.ui.theme.HighlightOrange
+import com.example.input_ds.ui.theme.HighlightYellow
+import com.example.input_ds.ui.theme.PrimaryBlue
+import com.example.input_ds.ui.theme.SurfaceDark
+import com.example.input_ds.ui.theme.TextGray
+import com.example.input_ds.ui.theme.TextWhite
+import com.example.input_ds.ui.theme.auroraBackground
 
 @Composable
-fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
+fun BleScanScreen(
+    bleManager: NaoyunBleManager,
+    onConnected: () -> Unit,
+    onBack: () -> Unit = {}
+) {
     val state by bleManager.state.collectAsState()
     val devices by bleManager.scanResults.collectAsState()
     val scanError by bleManager.scanError.collectAsState()
 
     LaunchedEffect(Unit) { bleManager.startScan() }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text(
-            "BLE 设备扫描",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF5B8DEF)
-        )
+    Column(Modifier.fillMaxSize().auroraBackground().padding(20.dp)) {
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, androidx.compose.ui.Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("← 返回", color = PrimaryBlue) }
+            Text(
+                "BLE 设备扫描",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = PrimaryBlue
+            )
+            Spacer(Modifier.width(64.dp))
+        }
         Spacer(Modifier.height(8.dp))
-        Text("找到含「Naoyun」的设备，点击连接", fontSize = 13.sp, color = MutedColor)
+        Text("仅显示名称包含“Naoyun Pods BLE”的设备", fontSize = 13.sp, color = TextGray)
 
         val errorMessage = when (scanError) {
             NaoyunBleManager.ScanError.BT_OFF -> "⚠️ 请先打开手机蓝牙"
@@ -64,7 +79,7 @@ fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
         if (errorMessage != null) {
             Text(
                 errorMessage,
-                color = Color(0xFFEF5350),
+                color = ErrorRed,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -85,7 +100,7 @@ fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
             )
         }
         if (state == NaoyunBleManager.State.SCANNING) {
-            Text("正在扫描...", fontSize = 13.sp, color = Color(0xFFFFD740))
+            Text("正在扫描...", fontSize = 13.sp, color = HighlightYellow)
         }
         Spacer(Modifier.height(8.dp))
 
@@ -95,12 +110,12 @@ fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
                     onClick = { bleManager.connect(device.device) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1E1E2E)
+                        containerColor = SurfaceDark
                     )
                 ) {
                     Column(Modifier.padding(4.dp)) {
-                        Text(device.name, color = Color.White, fontWeight = FontWeight.Bold)
-                        Text(device.address, fontSize = 11.sp, color = MutedColor)
+                        Text(device.name, color = TextWhite, fontWeight = FontWeight.Bold)
+                        Text(device.address, fontSize = 11.sp, color = TextGray)
                     }
                 }
             }
@@ -115,7 +130,7 @@ fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     Modifier.size(24.dp),
-                    color = Color(0xFF5B8DEF)
+                    color = PrimaryBlue
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -124,12 +139,12 @@ fun BleScanScreen(bleManager: NaoyunBleManager, onConnected: () -> Unit) {
                     } else {
                         "正在初始化脑电数据流…"
                     },
-                    color = MutedColor
+                    color = TextGray
                 )
             }
         }
         if (state == NaoyunBleManager.State.ERROR) {
-            Text("连接初始化失败，请重新扫描", color = Color(0xFFEF5350))
+            Text("连接初始化失败，请重新扫描", color = ErrorRed)
         }
     }
 }
@@ -139,76 +154,107 @@ fun SignalMonitorScreen(
     bleManager: NaoyunBleManager,
     onBack: () -> Unit,
     onStartCollect: () -> Unit = {},
-    onStartControl: () -> Unit = {}
+    onDisconnect: () -> Unit = {}
 ) {
     val deviceInfo by bleManager.deviceInfo.collectAsState()
+    val streamDiagnostics by bleManager.streamDiagnostics.collectAsState()
 
-    Column(Modifier.fillMaxSize().background(BgColor).padding(8.dp)) {
+    Column(Modifier.fillMaxSize().auroraBackground().padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
             Text(
                 "双通道实时耳电信号",
                 fontSize = 18.sp,
-                color = Color(0xFFE2E8F0),
+                color = TextWhite,
                 fontWeight = FontWeight.Bold
             )
             Row {
                 TextButton(onClick = onStartCollect) {
-                    Text("采集", color = Color(0xFFFF9800))
+                    Text("采集管理", color = HighlightOrange)
                 }
-                TextButton(onClick = onStartControl) {
-                    Text("BCI控制", color = Color(0xFF4CAF50))
+                TextButton(onClick = onDisconnect) {
+                    Text("断开耳机", color = ErrorRed)
                 }
                 TextButton(onClick = onBack) {
-                    Text("断开", color = Color(0xFFEF5350))
+                    Text("返回", color = PrimaryBlue)
                 }
             }
         }
         Text(
-            "500 Hz | 0.01–100 Hz 实时带通 | 5 秒环形扫描 | 固定量程 ±200 µV | $deviceInfo",
+            "设备状态页已屏蔽耳电控制命令，连接、波形和采集保持运行",
             fontSize = 10.sp,
-            color = MutedColor
+            color = TextGray
         )
+        Text(
+            "500 Hz | 5 秒窗口 | 固定量程 ±200 µV | 1–45 Hz 带通 | $deviceInfo",
+            fontSize = 10.sp,
+            color = TextGray
+        )
+        if (streamDiagnostics.leftLeadOff != null || streamDiagnostics.rightLeadOff != null) {
+            Text(
+                "电极接触原始值 L:${streamDiagnostics.leftLeadOff ?: "--"} " +
+                    "R:${streamDiagnostics.rightLeadOff ?: "--"}（数值突变时优先检查佩戴）",
+                fontSize = 10.sp,
+                color = TextGray
+            )
+        }
+        if (streamDiagnostics.leftRateHz != null && streamDiagnostics.rightRateHz != null) {
+            Text(
+                "时钟 L:${"%.2f".format(streamDiagnostics.leftRateHz)} Hz " +
+                    "R:${"%.2f".format(streamDiagnostics.rightRateHz)} Hz · " +
+                    "拟合P95 ${"%.1f".format(streamDiagnostics.leftClockResidualMs ?: 0.0)}/" +
+                    "${"%.1f".format(streamDiagnostics.rightClockResidualMs ?: 0.0)} ms",
+                fontSize = 10.sp,
+                color = TextGray
+            )
+        }
         Spacer(Modifier.height(4.dp))
 
+        if (streamDiagnostics.delayed || streamDiagnostics.stalledSide != null) {
+            Text(
+                "数据延迟 L:${streamDiagnostics.leftAgeMs ?: "--"}ms " +
+                    "R:${streamDiagnostics.rightAgeMs ?: "--"}ms " +
+                    "配对:${streamDiagnostics.pairAgeMs ?: "--"}ms",
+                fontSize = 10.sp,
+                color = ErrorRed
+            )
+        }
         AndroidView(
-            factory = { EegChannelView(it, true, bleManager) },
+            factory = { EegStereoView(it, bleManager) },
             modifier = Modifier.weight(1f).fillMaxWidth()
-        )
-        Spacer(Modifier.height(4.dp))
-        AndroidView(
-            factory = { EegChannelView(it, false, bleManager) },
-            modifier = Modifier.weight(1f).fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(1.dp, com.example.input_ds.ui.theme.BlockBorder, RoundedCornerShape(16.dp))
         )
     }
 }
 
-/**
- * 对齐 Ear_EEG_2/EEGPlotter 的示波器式绘图：
- * 固定 5 秒画布，只覆盖刷新线之后的新数据，不移动历史波形。
- */
+/** Aurora glass styled, fixed-range five-second rolling timeline. */
 @SuppressLint("ViewConstructor")
-internal class EegChannelView(
+internal class EegStereoView(
     context: Context,
-    private val isLeft: Boolean,
     private val bleManager: NaoyunBleManager
 ) : View(context) {
-    private val scopeBuffer = EegScopePlotBuffer(BUFFER_SIZE)
-    private val displayFilter = RealtimeEegDisplayFilter()
-    private var snapshot = scopeBuffer.snapshot()
-    private var lastConsumedCount = -1
-    private val drawPath = Path()
+    private val leftBuffer = EegScopePlotBuffer(BUFFER_SIZE)
+    private val rightBuffer = EegScopePlotBuffer(BUFFER_SIZE)
+    private var leftSnapshot = leftBuffer.snapshot()
+    private var rightSnapshot = rightBuffer.snapshot()
+    private val leftPath = Path()
+    private val rightPath = Path()
+    private var refreshRunning = false
 
-    private val panelBackground = android.graphics.Color.WHITE
-    private val gridColor = android.graphics.Color.parseColor("#DDDDDD")
-    private val zeroLineColor = android.graphics.Color.parseColor("#AAAAAA")
-    private val lineColor = android.graphics.Color.parseColor(
-        if (isLeft) "#E53935" else "#1E88E5"
-    )
-    private val textColor = android.graphics.Color.parseColor("#333333")
-    private val refreshLineColor = android.graphics.Color.parseColor("#222222")
+    private val panelBackground = android.graphics.Color.parseColor("#0B1025")
+    private val headerBackground = android.graphics.Color.parseColor("#121936")
+    private val gridColor = android.graphics.Color.parseColor("#242C51")
+    private val zeroLineColor = android.graphics.Color.parseColor("#51608D")
+    private val leftColor = android.graphics.Color.parseColor("#B9A7FF")
+    private val rightColor = android.graphics.Color.parseColor("#7DD3FC")
+    private val textColor = android.graphics.Color.parseColor("#D8DCF4")
 
     private val backgroundPaint = Paint().apply {
         color = panelBackground
+        style = Paint.Style.FILL
+    }
+    private val headerPaint = Paint().apply {
+        color = headerBackground
         style = Paint.Style.FILL
     }
     private val gridPaint = Paint().apply {
@@ -218,98 +264,83 @@ internal class EegChannelView(
     }
     private val zeroPaint = Paint().apply {
         color = zeroLineColor
-        strokeWidth = 1f
+        strokeWidth = 1.25f
         style = Paint.Style.STROKE
     }
-    private val linePaint = Paint().apply {
-        color = lineColor
-        strokeWidth = 1.5f
+    private val leftPaint = Paint().apply {
+        color = leftColor
+        strokeWidth = 2.1f
         style = Paint.Style.STROKE
         isAntiAlias = true
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
-    private val refreshLinePaint = Paint().apply {
-        color = refreshLineColor
-        strokeWidth = 2f
-        style = Paint.Style.STROKE
-    }
-    private val namePaint = Paint().apply {
-        color = lineColor
-        textSize = 36f
+    private val rightPaint = Paint(leftPaint).apply { color = rightColor }
+    private val leftNamePaint = Paint().apply {
+        color = leftColor
+        textSize = 26f
         isAntiAlias = true
-        isFakeBoldText = true
     }
+    private val rightNamePaint = Paint(leftNamePaint).apply { color = rightColor }
     private val statsPaint = Paint().apply {
         color = textColor
-        textSize = 24f
-        isAntiAlias = true
-    }
-    private val axisPaint = Paint().apply {
-        color = android.graphics.Color.parseColor("#777777")
         textSize = 22f
         isAntiAlias = true
     }
+    private val axisPaint = Paint().apply {
+        color = android.graphics.Color.parseColor("#8E96BD")
+        textSize = 20f
+        isAntiAlias = true
+    }
     private val emptyPaint = Paint().apply {
-        color = android.graphics.Color.parseColor("#94A3B8")
-        textSize = 40f
+        color = android.graphics.Color.parseColor("#AEB5D7")
+        textSize = 32f
         isAntiAlias = true
     }
 
-    private val frameCallback = object : Choreographer.FrameCallback {
-        override fun doFrame(frameTimeNanos: Long) {
-            consumeAvailableSamples()
-            Choreographer.getInstance().postFrameCallback(this)
+    private val refreshRunnable = object : Runnable {
+        override fun run() {
+            if (!refreshRunning || !isAttachedToWindow) return
+            requestVisibleWindow()
+            postDelayed(this, REFRESH_INTERVAL_MS)
         }
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         resetPlot()
-        Choreographer.getInstance().postFrameCallback(frameCallback)
+        refreshRunning = true
+        removeCallbacks(refreshRunnable)
+        post(refreshRunnable)
     }
 
     override fun onDetachedFromWindow() {
-        Choreographer.getInstance().removeFrameCallback(frameCallback)
+        refreshRunning = false
+        removeCallbacks(refreshRunnable)
         super.onDetachedFromWindow()
     }
 
     private fun resetPlot() {
-        scopeBuffer.reset()
-        displayFilter.reset()
-        snapshot = scopeBuffer.snapshot()
-        lastConsumedCount = -1
+        leftBuffer.reset()
+        rightBuffer.reset()
+        leftSnapshot = leftBuffer.snapshot()
+        rightSnapshot = rightBuffer.snapshot()
         invalidate()
     }
 
-    private fun consumeAvailableSamples() {
-        // Both plots advance only on the stereo samples already received by
-        // both ears. The two refresh cursors therefore share one time axis.
-        val currentCount = bleManager.buffer.synchronizedCount()
-
-        if (lastConsumedCount < 0) {
-            lastConsumedCount = (currentCount - BUFFER_SIZE).coerceAtLeast(0)
-        } else if (currentCount < lastConsumedCount) {
-            // BCI 控制启动或设备重连会清空共享采样缓冲区。
-            scopeBuffer.reset()
-            displayFilter.reset()
-            lastConsumedCount = 0
-        } else if (currentCount - lastConsumedCount > BUFFER_SIZE) {
-            // 页面长时间不可见时只恢复最近 5 秒，避免追赶过期数据。
-            scopeBuffer.reset()
-            displayFilter.reset()
-            lastConsumedCount = currentCount - BUFFER_SIZE
-        }
-
-        if (currentCount <= lastConsumedCount) return
-        val raw = if (isLeft) {
-            bleManager.buffer.getLeftRange(lastConsumedCount, currentCount)
-        } else {
-            bleManager.buffer.getRightRange(lastConsumedCount, currentCount)
-        }
-        lastConsumedCount = currentCount
-        if (raw.isEmpty()) return
-
-        scopeBuffer.appendAligned(lastConsumedCount - raw.size, displayFilter.process(raw))
-        snapshot = scopeBuffer.snapshot()
+    private fun requestVisibleWindow() {
+        // Rebuild the complete visible window on the latest two clock models.
+        // Incrementally appending a permanently aligned stream would freeze old
+        // timing errors and make the channels drift apart during a long session.
+        val raw = bleManager.latestAlignedWindowAtMost(BUFFER_SIZE, MIN_VISIBLE_POINTS) ?: return
+        val left = EegPreprocessor.filterForDisplay(raw.left)
+        val right = EegPreprocessor.filterForDisplay(raw.right)
+        leftBuffer.reset()
+        rightBuffer.reset()
+        leftBuffer.append(left)
+        rightBuffer.append(right)
+        leftSnapshot = leftBuffer.snapshot()
+        rightSnapshot = rightBuffer.snapshot()
         invalidate()
     }
 
@@ -320,6 +351,7 @@ internal class EegChannelView(
         if (width <= 0f || height <= 0f) return
 
         canvas.drawRect(0f, 0f, width, height, backgroundPaint)
+        canvas.drawRect(0f, 0f, width, HEADER_HEIGHT, headerPaint)
         val plotTop = HEADER_HEIGHT
         val plotBottom = height - FOOTER_HEIGHT
         val plotHeight = (plotBottom - plotTop).coerceAtLeast(1f)
@@ -335,101 +367,62 @@ internal class EegChannelView(
         }
         canvas.drawLine(0f, plotCenter, width, plotCenter, zeroPaint)
 
-        val label = if (isLeft) "左耳 / Channel 0" else "右耳 / Channel 1"
-        canvas.drawText(label, 12f, 38f, namePaint)
-        val stats = "当前 ${snapshot.current.format(1)} µV  " +
-                "均值 ${snapshot.mean.format(1)} µV  " +
-                "峰峰值 ${snapshot.peakToPeak.format(1)} µV  " +
-                "点数 ${snapshot.validCount}"
-        canvas.drawText(stats, namePaint.measureText(label) + 36f, 34f, statsPaint)
+        canvas.drawCircle(18f, 27f, 5f, leftPaint)
+        canvas.drawText("L 左耳", 32f, 34f, leftNamePaint)
+        canvas.drawCircle(138f, 27f, 5f, rightPaint)
+        canvas.drawText("R 右耳", 152f, 34f, rightNamePaint)
+        val filterLabel = "1–45 Hz 带通"
+        canvas.drawText(filterLabel, width - statsPaint.measureText(filterLabel) - 16f, 33f, statsPaint)
 
         canvas.drawText("+200µV", 6f, plotTop + 24f, axisPaint)
         canvas.drawText("0", 6f, plotCenter + 8f, axisPaint)
         canvas.drawText("-200µV", 6f, plotBottom - 6f, axisPaint)
-        canvas.drawText("0s", 12f, height - 6f, axisPaint)
-        canvas.drawText("5s", width - 36f, height - 6f, axisPaint)
+        canvas.drawText("-5 s", 6f, height - 6f, axisPaint)
+        val nowLabel = "现在"
+        canvas.drawText(nowLabel, width - axisPaint.measureText(nowLabel) - 6f, height - 6f, axisPaint)
 
-        if (snapshot.validCount < 2) {
+        if (minOf(leftSnapshot.validCount, rightSnapshot.validCount) < 2) {
             canvas.drawText("等待数据…", width / 2f - 80f, plotCenter, emptyPaint)
             return
         }
 
         canvas.save()
         canvas.clipRect(0f, plotTop, width, plotBottom)
-        if (snapshot.validCount < BUFFER_SIZE) {
-            drawSegment(
-                canvas,
-                snapshot.values,
-                0,
-                snapshot.validCount,
-                width,
-                plotCenter,
-                plotHeight
-            )
-        } else if (snapshot.writePosition == 0) {
-            drawSegment(
-                canvas,
-                snapshot.values,
-                0,
-                BUFFER_SIZE,
-                width,
-                plotCenter,
-                plotHeight
-            )
-        } else {
-            // 在新旧两轮数据交界处断开，避免画出不真实的竖直连接线。
-            drawSegment(
-                canvas,
-                snapshot.values,
-                0,
-                snapshot.writePosition,
-                width,
-                plotCenter,
-                plotHeight
-            )
-            drawSegment(
-                canvas,
-                snapshot.values,
-                snapshot.writePosition,
-                BUFFER_SIZE,
-                width,
-                plotCenter,
-                plotHeight
-            )
-        }
+        drawSnapshot(canvas, leftSnapshot, leftPath, leftPaint, width, plotCenter, plotHeight)
+        drawSnapshot(canvas, rightSnapshot, rightPath, rightPaint, width, plotCenter, plotHeight)
 
-        val sharedWritePosition =
-            Math.floorMod(bleManager.buffer.synchronizedCount(), BUFFER_SIZE)
-        val refreshX =
-            sharedWritePosition.toFloat() / (BUFFER_SIZE - 1) * width
-        canvas.drawLine(
-            refreshX,
-            plotTop,
-            refreshX,
-            plotBottom,
-            refreshLinePaint
-        )
         canvas.restore()
+        when (bleManager.state.value) {
+            NaoyunBleManager.State.STREAM_STALLED ->
+                canvas.drawText("双耳数据流中断", width / 2f - 110f, plotCenter, emptyPaint)
+            NaoyunBleManager.State.RECOVERING ->
+                canvas.drawText("正在自动恢复数据流…", width / 2f - 140f, plotCenter, emptyPaint)
+            else -> Unit
+        }
     }
 
-    private fun drawSegment(
+    private fun drawSnapshot(
         canvas: Canvas,
-        values: FloatArray,
-        start: Int,
-        endExclusive: Int,
+        snapshot: EegScopePlotBuffer.Snapshot,
+        path: Path,
+        paint: Paint,
         width: Float,
         plotCenter: Float,
         plotHeight: Float
     ) {
-        if (endExclusive - start < 2) return
-        val step = maxOf(1, (endExclusive - start) / MAX_POINTS_PER_SEGMENT)
-        drawPath.reset()
-        var index = start
+        if (snapshot.validCount < 2) return
+        val step = maxOf(
+            1,
+            (snapshot.validCount + MAX_POINTS_PER_SEGMENT - 1) / MAX_POINTS_PER_SEGMENT
+        )
+        path.reset()
+        var index = 0
         var lastDrawn = -1
-        while (index < endExclusive) {
+        while (index < snapshot.validCount) {
             appendPathPoint(
+                path,
                 index,
-                values[index],
+                snapshot.chronologicalValueAt(index),
                 width,
                 plotCenter,
                 plotHeight,
@@ -438,20 +431,22 @@ internal class EegChannelView(
             lastDrawn = index
             index += step
         }
-        if (lastDrawn != endExclusive - 1) {
+        if (lastDrawn != snapshot.validCount - 1) {
             appendPathPoint(
-                endExclusive - 1,
-                values[endExclusive - 1],
+                path,
+                snapshot.validCount - 1,
+                snapshot.chronologicalValueAt(snapshot.validCount - 1),
                 width,
                 plotCenter,
                 plotHeight,
                 false
             )
         }
-        canvas.drawPath(drawPath, linePaint)
+        canvas.drawPath(path, paint)
     }
 
     private fun appendPathPoint(
+        path: Path,
         index: Int,
         value: Float,
         width: Float,
@@ -463,20 +458,19 @@ internal class EegChannelView(
         val clipped = value.coerceIn(-FIXED_Y_RANGE_UV, FIXED_Y_RANGE_UV)
         val y =
             plotCenter - clipped / FIXED_Y_RANGE_UV * plotHeight * PLOT_HEIGHT_RATIO
-        if (move) drawPath.moveTo(x, y) else drawPath.lineTo(x, y)
+        if (move) path.moveTo(x, y) else path.lineTo(x, y)
     }
 
     private companion object {
         const val SAMPLE_RATE = 500
         const val WINDOW_SECONDS = 5
         const val BUFFER_SIZE = SAMPLE_RATE * WINDOW_SECONDS
+        const val MIN_VISIBLE_POINTS = 32
         const val FIXED_Y_RANGE_UV = 200f
         const val HEADER_HEIGHT = 52f
         const val FOOTER_HEIGHT = 24f
         const val PLOT_HEIGHT_RATIO = 0.42f
         const val MAX_POINTS_PER_SEGMENT = 800
+        const val REFRESH_INTERVAL_MS = 50L
     }
 }
-
-private fun Float.format(decimals: Int): String =
-    String.format("%.${decimals}f", this)

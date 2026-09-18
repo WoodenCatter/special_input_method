@@ -24,9 +24,48 @@ import java.util.UUID
  */
 class NaoyunBleManager(val context: Context) {
 
-    enum class State { IDLE, SCANNING, CONNECTING, INITIALIZING, READY, DISCONNECTED, ERROR }
+    enum class State {
+        IDLE, SCANNING, CONNECTING, INITIALIZING, READY,
+        STREAM_STALLED, RECOVERING, DISCONNECTED, ERROR
+    }
     enum class ScanError { NONE, BT_OFF, NO_ADAPTER, NO_PERMISSION, LOCATION_OFF, NO_SCANNER, UNKNOWN }
     data class BleDevice(val name: String, val address: String, val device: BluetoothDevice)
+    data class ConnectedDevice(val name: String, val address: String)
+    data class DeviceTelemetry(
+        val leftBatteryPercent: Int,
+        val rightBatteryPercent: Int,
+        val leftWorn: Boolean,
+        val rightWorn: Boolean,
+        val earMode: String
+    )
+    data class StereoSamples(
+        val left: FloatArray,
+        val right: FloatArray,
+        val startSample: Int
+    )
+    data class AlignedWindow(
+        val left: FloatArray,
+        val right: FloatArray,
+        val startTimeUs: Long,
+        val endTimeUs: Long,
+        val quality: Float,
+        val leftRateHz: Double,
+        val rightRateHz: Double
+    )
+    data class StreamDiagnostics(
+        val leftAgeMs: Long? = null,
+        val rightAgeMs: Long? = null,
+        val pairAgeMs: Long? = null,
+        val leftLeadOff: Int? = null,
+        val rightLeadOff: Int? = null,
+        val leftRateHz: Double? = null,
+        val rightRateHz: Double? = null,
+        val leftClockResidualMs: Double? = null,
+        val rightClockResidualMs: Double? = null,
+        val stalledSide: String? = null,
+        val recoveryAttempt: Int = 0,
+        val delayed: Boolean = false
+    )
 
     private val _state = MutableStateFlow(State.IDLE)
     val state: StateFlow<State> = _state
@@ -40,8 +79,24 @@ class NaoyunBleManager(val context: Context) {
     val rightSamples: StateFlow<Int> = _rightSamples
     private val _deviceInfo = MutableStateFlow("")
     val deviceInfo: StateFlow<String> = _deviceInfo
+    private val _connectedDevice = MutableStateFlow<ConnectedDevice?>(null)
+    /** Read-only UI projection of the active GATT target; connection behavior remains internal. */
+    val connectedDevice: StateFlow<ConnectedDevice?> = _connectedDevice
+    private val _deviceTelemetry = MutableStateFlow<DeviceTelemetry?>(null)
+    /** Parsed status fields exposed without requiring UI code to reinterpret BLE packets. */
+    val deviceTelemetry: StateFlow<DeviceTelemetry?> = _deviceTelemetry
+    private val _preprocessing =
+        MutableStateFlow<Set<EegPreprocessStep>>(EegPreprocessStep.DEFAULT)
+    val preprocessing: StateFlow<Set<EegPreprocessStep>> = _preprocessing
+    private val _synchronizedDataEpoch = MutableStateFlow(0L)
+    /** Changes whenever aligned acquisition resets or crosses a packet-counter gap. */
+    val synchronizedDataEpoch: StateFlow<Long> = _synchronizedDataEpoch
+    private val _streamDiagnostics = MutableStateFlow(StreamDiagnostics())
+    val streamDiagnostics: StateFlow<StreamDiagnostics> = _streamDiagnostics
 
-    val buffer = EegRingBuffer(capacitySeconds = 30)
+    fun setPreprocessing(@Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>) {
+        _preprocessing.value = EegPreprocessStep.DEFAULT
+    }
 
     private val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val btAdapter = btManager.adapter
@@ -53,14 +108,37 @@ class NaoyunBleManager(val context: Context) {
     private var scanCallback: ScanCallback? = null
     private var packetCounter = 0
     private var lastLogTime = 0L
+    private var lastAlignmentLogTime = 0L
+    private var lastPairedDataTime = 0L
+    private var lastPairedLeftSamples = 0L
+    private var lastPairedRightSamples = 0L
+    private var lastLeftLeadOff: Int? = null
+    private var lastRightLeadOff: Int? = null
     private val leftAssembler = EegPacketAssembler()
     private val rightAssembler = EegPacketAssembler()
     private val stereoAligner = EegStereoPacketAligner()
+    private val streamLiveness = BleStreamLiveness()
+    private val dataPipelineLock = Any()
+    private var streamRecoveryAttempts = 0
+    private var streamOpenRequestedAt = 0L
+    private var connectionPhaseStartedAt = 0L
+    private var lastWatchdogLogAt = 0L
     private val scanTimeout = Runnable {
         if (_state.value == State.SCANNING) {
             stopScan()
             _state.value = State.IDLE
         }
+    }
+    private val streamWatchdog = object : Runnable {
+        override fun run() {
+            checkStreamLiveness()
+            mainHandler.postDelayed(this, STREAM_WATCHDOG_INTERVAL_MS)
+        }
+    }
+
+    init {
+        streamLiveness.reset(android.os.SystemClock.elapsedRealtime())
+        mainHandler.post(streamWatchdog)
     }
 
     // ─── 扫描 ───
@@ -76,7 +154,13 @@ class NaoyunBleManager(val context: Context) {
         gatt?.close()
         gatt = null
         currentDevice = null
+        _connectedDevice.value = null
+        _deviceTelemetry.value = null
         reconnectAttempts = 0
+        streamRecoveryAttempts = 0
+        streamOpenRequestedAt = 0L
+        connectionPhaseStartedAt = 0L
+        resetSynchronizedData()
 
         // Android 11 及以下的 BLE 扫描依赖系统位置服务。
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -143,7 +227,10 @@ class NaoyunBleManager(val context: Context) {
         stopScan()
         manualDisconnect = false
         currentDevice = device
+        _connectedDevice.value = ConnectedDevice(device.name ?: device.address, device.address)
+        _deviceTelemetry.value = null
         reconnectAttempts = 0
+        streamRecoveryAttempts = 0
         connectInternal(device)
     }
 
@@ -156,13 +243,12 @@ class NaoyunBleManager(val context: Context) {
             "连接重试 $reconnectAttempts/$MAX_RECONNECT_ATTEMPTS…"
         }
         setupStep = 0
-        buffer.reset()
-        leftAssembler.reset()
-        rightAssembler.reset()
-        stereoAligner.reset()
-        _leftSamples.value = 0
-        _rightSamples.value = 0
-        gatt?.close()
+        streamOpenRequestedAt = 0L
+        connectionPhaseStartedAt = android.os.SystemClock.elapsedRealtime()
+        val previousGatt = gatt
+        gatt = null
+        previousGatt?.close()
+        resetSynchronizedData()
         gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
@@ -175,15 +261,38 @@ class NaoyunBleManager(val context: Context) {
         gatt?.close()
         gatt = null
         currentDevice = null
+        _connectedDevice.value = null
+        _deviceTelemetry.value = null
         reconnectAttempts = 0
+        streamRecoveryAttempts = 0
+        streamOpenRequestedAt = 0L
+        connectionPhaseStartedAt = 0L
         setupStep = 0
-        buffer.reset()
-        leftAssembler.reset()
-        rightAssembler.reset()
-        stereoAligner.reset()
-        _leftSamples.value = 0
-        _rightSamples.value = 0
+        resetSynchronizedData()
         _state.value = State.DISCONNECTED
+    }
+
+    /**
+     * Starts another bounded recovery cycle for an active collection session.
+     * The collector may request this repeatedly, but each cycle still uses the
+     * normal connection and stream timeouts.
+     */
+    fun requestCurrentDeviceRecovery() {
+        mainHandler.post {
+            val device = currentDevice ?: return@post
+            if (manualDisconnect || _state.value !in setOf(State.ERROR, State.DISCONNECTED)) {
+                return@post
+            }
+            reconnectAttempts = 0
+            streamRecoveryAttempts = 0
+            _connectedDevice.value = ConnectedDevice(
+                device.name ?: device.address,
+                device.address
+            )
+            _state.value = State.RECOVERING
+            _deviceInfo.value = "采集等待中，正在重新连接耳机…"
+            connectInternal(device)
+        }
     }
 
     /**
@@ -192,12 +301,48 @@ class NaoyunBleManager(val context: Context) {
      * window.
      */
     fun resetSynchronizedData() {
-        buffer.reset()
-        leftAssembler.reset()
-        rightAssembler.reset()
-        stereoAligner.reset()
-        _leftSamples.value = 0
-        _rightSamples.value = 0
+        synchronized(dataPipelineLock) {
+            leftAssembler.reset()
+            rightAssembler.reset()
+            stereoAligner.reset()
+            lastAlignmentLogTime = 0L
+            lastPairedDataTime = 0L
+            lastPairedLeftSamples = 0L
+            lastPairedRightSamples = 0L
+            lastLeftLeadOff = null
+            lastRightLeadOff = null
+            streamLiveness.reset(android.os.SystemClock.elapsedRealtime())
+            _streamDiagnostics.value = StreamDiagnostics(
+                leftLeadOff = lastLeftLeadOff,
+                rightLeadOff = lastRightLeadOff,
+                recoveryAttempt = streamRecoveryAttempts
+            )
+            _leftSamples.value = 0
+            _rightSamples.value = 0
+            _synchronizedDataEpoch.value = _synchronizedDataEpoch.value + 1L
+            Log.d("NaoyunBLE", "aligned acquisition reset epoch=${_synchronizedDataEpoch.value}")
+        }
+    }
+
+    /** Invalidates an in-flight consumer window without resetting healthy BLE transport. */
+    fun markConsumerDiscontinuity(reason: String) {
+        synchronized(dataPipelineLock) {
+            _synchronizedDataEpoch.value = _synchronizedDataEpoch.value + 1L
+            Log.e(
+                "NaoyunBLE",
+                "consumer discontinuity: $reason epoch=${_synchronizedDataEpoch.value}"
+            )
+        }
+    }
+
+    /** Preserves history while preventing windows from spanning a packet gap. */
+    private fun markPacketDiscontinuity(missingPackets: Int, reason: String) {
+        _synchronizedDataEpoch.value = _synchronizedDataEpoch.value + 1L
+        Log.w(
+            "NaoyunBLE",
+            "$reason；缺失 $missingPackets 个包；保留波形历史，开启新采集epoch=" +
+                _synchronizedDataEpoch.value
+        )
     }
 
     // ─── GATT 回调 ───
@@ -216,6 +361,7 @@ class NaoyunBleManager(val context: Context) {
                 Log.e("NaoyunBLE", "连接状态错误 status=$status state=$newState")
                 g.close()
                 if (gatt === g) gatt = null
+                resetSynchronizedData()
                 scheduleReconnectOrFail(status)
                 return
             }
@@ -223,11 +369,13 @@ class NaoyunBleManager(val context: Context) {
                 mainHandler.post {
                     _state.value = State.INITIALIZING
                     _deviceInfo.value = "已连接，正在发现服务…"
+                    connectionPhaseStartedAt = android.os.SystemClock.elapsedRealtime()
                     mainHandler.postDelayed({ setupStep = 1; g.discoverServices() }, 300)
                 }
             } else {
                 g.close()
                 if (gatt === g) gatt = null
+                resetSynchronizedData()
                 if (!manualDisconnect) {
                     scheduleReconnectOrFail(status)
                 } else {
@@ -240,11 +388,9 @@ class NaoyunBleManager(val context: Context) {
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (this@NaoyunBleManager.gatt !== g) return
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                mainHandler.post {
-                    _deviceInfo.value = "服务发现失败（GATT $status）"
-                    _state.value = State.ERROR
-                }
+                mainHandler.post { beginHardStreamRecovery("服务发现失败 GATT $status") }
                 return
             }
             Log.d("NaoyunBLE", "服务已发现，开始逐步启用通知…")
@@ -253,9 +399,11 @@ class NaoyunBleManager(val context: Context) {
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, desc: BluetoothGattDescriptor, status: Int) {
+            if (this@NaoyunBleManager.gatt !== g) return
             Log.d("NaoyunBLE", "CCCD写入 step=$setupStep status=$status uuid=${desc.characteristic.uuid}")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e("NaoyunBLE", "CCCD写入失败! step=$setupStep")
+                mainHandler.post { beginHardStreamRecovery("通知初始化失败 step=$setupStep GATT $status") }
                 return
             }
             when (setupStep) {
@@ -267,6 +415,10 @@ class NaoyunBleManager(val context: Context) {
                     _deviceInfo.value = "已连接，正在初始化数据流…"
                     writeCmd(g, BleProtocol.GET_INFO_CMD)
                     mainHandler.postDelayed({
+                        if (this@NaoyunBleManager.gatt !== g || _state.value != State.INITIALIZING) {
+                            return@postDelayed
+                        }
+                        streamOpenRequestedAt = android.os.SystemClock.elapsedRealtime()
                         writeCmd(g, BleProtocol.OPEN_DATA_CMD)
                         _deviceInfo.value = "等待脑电数据流…"
                         setupStep = 5
@@ -276,6 +428,7 @@ class NaoyunBleManager(val context: Context) {
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
+            if (this@NaoyunBleManager.gatt !== g) return
             @Suppress("DEPRECATION")
             val data = ch.value ?: return
             handleCharacteristicData(ch, data)
@@ -286,12 +439,14 @@ class NaoyunBleManager(val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+            if (this@NaoyunBleManager.gatt !== gatt) return
             handleCharacteristicData(characteristic, value)
         }
 
         private fun handleCharacteristicData(ch: BluetoothGattCharacteristic, data: ByteArray) {
             val uuid = ch.uuid.toString().lowercase()
             val now = System.currentTimeMillis()
+            val callbackTimeUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L
             if (now - lastLogTime > 2000) {
                 val preview = data.take(8).joinToString(" ") {
                     "%02X".format(it.toInt() and 0xFF)
@@ -304,14 +459,22 @@ class NaoyunBleManager(val context: Context) {
             }
 
             if (uuidContains(uuid, BleProtocol.DATA_LEFT_NOTIFY_UUID)) {
-                for (packetData in leftAssembler.append(data)) {
-                    val pkt = EegDataParser.parseEegData(packetData, "left") ?: continue
-                    appendAlignedPacket(pkt)
+                synchronized(dataPipelineLock) {
+                    appendCallbackPackets(
+                        leftAssembler.append(data).mapNotNull {
+                            EegDataParser.parseEegData(it, "left")
+                        },
+                        callbackTimeUs
+                    )
                 }
             } else if (uuidContains(uuid, BleProtocol.DATA_RIGHT_NOTIFY_UUID)) {
-                for (packetData in rightAssembler.append(data)) {
-                    val pkt = EegDataParser.parseEegData(packetData, "right") ?: continue
-                    appendAlignedPacket(pkt)
+                synchronized(dataPipelineLock) {
+                    appendCallbackPackets(
+                        rightAssembler.append(data).mapNotNull {
+                            EegDataParser.parseEegData(it, "right")
+                        },
+                        callbackTimeUs
+                    )
                 }
             } else if (uuidContains(uuid, BleProtocol.CMD_NOTIFY_UUID)) {
                 handleCmdResponse(data)
@@ -319,14 +482,101 @@ class NaoyunBleManager(val context: Context) {
         }
     }
 
-    private fun appendAlignedPacket(packet: EegDataParser.EegPacket) {
-        val stereo = stereoAligner.append(packet) ?: return
-        buffer.pushStereo(stereo.left, stereo.right)
-        val count = buffer.synchronizedCount()
-        _leftSamples.value = count
-        _rightSamples.value = count
-        markReadyWhenDataArrives()
+    /** A batched callback is timestamped backwards so its newest packet ends at callback time. */
+    private fun appendCallbackPackets(
+        packets: List<EegDataParser.EegPacket>,
+        callbackTimeUs: Long
+    ) {
+        if (packets.isEmpty()) return
+        val packetEndTimesUs = EegCallbackTimestampPolicy.packetEndTimesUs(
+            callbackTimeUs,
+            packets.map { it.samples.size },
+            SAMPLE_PERIOD_US
+        )
+        for (index in packets.indices) {
+            val packet = packets[index]
+            if (packet.earSide == "left") lastLeftLeadOff = packet.leadOff
+            else lastRightLeadOff = packet.leadOff
+            val nowMs = callbackTimeUs / 1_000L
+            if (packet.earSide == "left") streamLiveness.onLeft(nowMs)
+            else streamLiveness.onRight(nowMs)
+            val appended = stereoAligner.appendAtTimeUs(packet, packetEndTimesUs[index])
+            appended.discontinuity?.let {
+                markPacketDiscontinuity(it.missingPackets, it.reason)
+            }
+        }
+        val stats = stereoAligner.stats()
+        _leftSamples.value = stats.leftSamplesReceived.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        _rightSamples.value = stats.rightSamplesReceived.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        if (
+            stereoAligner.hasDualCoverage() &&
+            stats.leftSamplesReceived > lastPairedLeftSamples &&
+            stats.rightSamplesReceived > lastPairedRightSamples
+        ) {
+            val nowMs = callbackTimeUs / 1_000L
+            lastPairedLeftSamples = stats.leftSamplesReceived
+            lastPairedRightSamples = stats.rightSamplesReceived
+            lastPairedDataTime = nowMs
+            streamLiveness.onPair(nowMs)
+            markReadyWhenDataArrives()
+        }
+        logAlignmentStatsIfDue(callbackTimeUs / 1_000L)
     }
+
+    private fun logAlignmentStatsIfDue(now: Long) {
+        if (now - lastAlignmentLogTime < ALIGNMENT_LOG_INTERVAL_MS) return
+        lastAlignmentLogTime = now
+        val stats = stereoAligner.stats()
+        val lastPairAge = if (lastPairedDataTime == 0L) {
+            "none"
+        } else {
+            "${now - lastPairedDataTime}ms"
+        }
+        Log.d(
+            "NaoyunBLE",
+            "双耳共同时间轴: recvPackets=${stats.leftPacketsReceived}/" +
+                "${stats.rightPacketsReceived} counters=${stats.lastLeftCounter}/" +
+                "${stats.lastRightCounter} samples=${stats.leftSamplesReceived}/" +
+                "${stats.rightSamplesReceived} " +
+                "droppedPackets=${stats.leftDroppedPackets}/${stats.rightDroppedPackets} " +
+                "missingPackets=${stats.leftMissingPackets}/${stats.rightMissingPackets} " +
+                "pendingSamples=${stats.pendingLeftSamples}/${stats.pendingRightSamples} " +
+                "rateHz=${stats.leftRateHz?.let { "%.2f".format(it) } ?: "--"}/" +
+                "${stats.rightRateHz?.let { "%.2f".format(it) } ?: "--"} " +
+                "clockP95ms=${stats.leftClockResidualP95Ms?.let { "%.1f".format(it) } ?: "--"}/" +
+                "${stats.rightClockResidualP95Ms?.let { "%.1f".format(it) } ?: "--"} " +
+                "arrivalSkewMs=${stats.latestArrivalSkewMs?.let { "%.1f".format(it) } ?: "none"} " +
+                "leadOff=${lastLeftLeadOff ?: "--"}/${lastRightLeadOff ?: "--"} " +
+                "timelineRestarts=${stats.timelineRestarts} " +
+                "lastPairAgo=$lastPairAge"
+        )
+    }
+
+    fun latestAlignedWindow(points: Int): AlignedWindow? = synchronized(dataPipelineLock) {
+        stereoAligner.latestAlignedSnapshot(points)?.toPublicWindow()
+    }
+
+    fun latestAlignedWindowAtMost(maxPoints: Int, minPoints: Int = 2): AlignedWindow? =
+        synchronized(dataPipelineLock) {
+            stereoAligner.latestAlignedSnapshotAtMost(maxPoints, minPoints)?.toPublicWindow()
+        }
+
+    fun alignedWindow(startTimeUs: Long, endTimeUs: Long, points: Int): AlignedWindow? =
+        synchronized(dataPipelineLock) {
+            stereoAligner.alignedSnapshot(startTimeUs, endTimeUs, points)?.toPublicWindow()
+        }
+
+    fun commonAlignedTimeUs(): Long? = synchronized(dataPipelineLock) {
+        stereoAligner.commonLatestTimeUs()
+    }
+
+    fun rawSampleCounts(): Pair<Long, Long> = synchronized(dataPipelineLock) {
+        stereoAligner.stats().let { it.leftSamplesReceived to it.rightSamplesReceived }
+    }
+
+    private fun EegStereoPacketAligner.AlignedSnapshot.toPublicWindow() = AlignedWindow(
+        left, right, startTimeUs, endTimeUs, quality, leftRateHz, rightRateHz
+    )
 
     // ─── 内部 ───
 
@@ -397,25 +647,185 @@ class NaoyunBleManager(val context: Context) {
             return
         }
         // 解析设备信息
-        val info = parseDeviceInfo(data)
-        if (info != null) _deviceInfo.value = info
+        val telemetry = parseDeviceInfo(data)
+        if (telemetry != null) {
+            _deviceTelemetry.value = telemetry
+            _deviceInfo.value = telemetry.asDisplayText()
+        }
     }
 
-    private fun parseDeviceInfo(data: ByteArray): String? {
+    private fun parseDeviceInfo(data: ByteArray): DeviceTelemetry? {
         if (data.size < 16 || data[0] != 0xAA.toByte() || data[1] != 0x55.toByte()) return null
         val cmd = ((data[2].toInt() and 0xFF) shl 8) or (data[3].toInt() and 0xFF)
         if (cmd != 0x00E0) return null
         val ear = when (data[5].toInt() and 0xFF) { 1->"左耳" 2->"右耳" 3->"双耳左" 4->"双耳右" else->"?" }
-        val wearL = if ((data[8].toInt() and 0xFF) == 1) "✓" else "✗"
-        val wearR = if ((data[9].toInt() and 0xFF) == 1) "✓" else "✗"
-        return "电量 L:${data[6].toInt() and 0xFF}% R:${data[7].toInt() and 0xFF}% | 佩戴 L:$wearL R:$wearR | $ear"
+        return DeviceTelemetry(
+            leftBatteryPercent = data[6].toInt() and 0xFF,
+            rightBatteryPercent = data[7].toInt() and 0xFF,
+            leftWorn = (data[8].toInt() and 0xFF) == 1,
+            rightWorn = (data[9].toInt() and 0xFF) == 1,
+            earMode = ear
+        )
     }
 
+    private fun DeviceTelemetry.asDisplayText(): String =
+        "电量 L:$leftBatteryPercent% R:$rightBatteryPercent% | " +
+            "佩戴 L:${if (leftWorn) "✓" else "✗"} R:${if (rightWorn) "✓" else "✗"} | $earMode"
+
     private fun uuidContains(uuid: String, ref: String) = uuid.contains(ref.lowercase())
+
+    private fun checkStreamLiveness() {
+        if (manualDisconnect || gatt == null) return
+        val currentState = _state.value
+        if (currentState !in setOf(
+                State.INITIALIZING,
+                State.CONNECTING,
+                State.READY,
+                State.STREAM_STALLED,
+                State.RECOVERING
+            )
+        ) return
+
+        val now = android.os.SystemClock.elapsedRealtime()
+        val snapshot = streamLiveness.snapshot(now)
+        val alignmentStats = synchronized(dataPipelineLock) { stereoAligner.stats() }
+        _streamDiagnostics.value = StreamDiagnostics(
+            leftAgeMs = snapshot.leftAgeMs,
+            rightAgeMs = snapshot.rightAgeMs,
+            pairAgeMs = snapshot.pairAgeMs,
+            leftLeadOff = lastLeftLeadOff,
+            rightLeadOff = lastRightLeadOff,
+            leftRateHz = alignmentStats.leftRateHz,
+            rightRateHz = alignmentStats.rightRateHz,
+            leftClockResidualMs = alignmentStats.leftClockResidualP95Ms,
+            rightClockResidualMs = alignmentStats.rightClockResidualP95Ms,
+            stalledSide = snapshot.stalledSide,
+            recoveryAttempt = streamRecoveryAttempts,
+            delayed = snapshot.health == BleStreamLiveness.Health.WARNING
+        )
+        if (now - lastWatchdogLogAt >= STREAM_STATUS_LOG_INTERVAL_MS) {
+            lastWatchdogLogAt = now
+            Log.d(
+                "NaoyunBLE",
+                "stream health=${snapshot.health} leftAge=${snapshot.leftAgeMs}ms " +
+                    "rightAge=${snapshot.rightAgeMs}ms pairAge=${snapshot.pairAgeMs}ms " +
+                    "state=$currentState recovery=$streamRecoveryAttempts"
+            )
+        }
+
+        if (
+            snapshot.health == BleStreamLiveness.Health.STALLED &&
+            bothEarsFresh(snapshot) &&
+            currentState in setOf(
+                State.INITIALIZING,
+                State.READY,
+                State.STREAM_STALLED,
+                State.RECOVERING
+            )
+        ) {
+            beginLocalPairRecovery(snapshot)
+            return
+        }
+        if (
+            currentState in setOf(State.READY, State.STREAM_STALLED) &&
+            snapshot.health == BleStreamLiveness.Health.STALLED
+        ) {
+            beginSoftStreamRecovery(snapshot)
+            return
+        }
+        if (
+            currentState in setOf(State.CONNECTING, State.INITIALIZING) &&
+            streamOpenRequestedAt == 0L &&
+            connectionPhaseStartedAt > 0L &&
+            now - connectionPhaseStartedAt >= CONNECTION_PHASE_TIMEOUT_MS
+        ) {
+            beginHardStreamRecovery("连接或通知初始化超时")
+            return
+        }
+        if (
+            currentState in setOf(State.INITIALIZING, State.STREAM_STALLED, State.RECOVERING) &&
+            streamOpenRequestedAt > 0L &&
+            now - streamOpenRequestedAt >= HARD_RECOVERY_AFTER_MS
+        ) {
+            beginHardStreamRecovery("OPEN_DATA 后仍无双耳数据")
+        }
+    }
+
+    private fun bothEarsFresh(snapshot: BleStreamLiveness.Snapshot): Boolean =
+        snapshot.leftAgeMs != null &&
+            snapshot.rightAgeMs != null &&
+            snapshot.leftAgeMs < BleStreamLiveness.STALLED_AFTER_MS &&
+            snapshot.rightAgeMs < BleStreamLiveness.STALLED_AFTER_MS
+
+    private fun beginLocalPairRecovery(snapshot: BleStreamLiveness.Snapshot) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        _state.value = State.STREAM_STALLED
+        streamOpenRequestedAt = 0L
+        markConsumerDiscontinuity("双耳持续到达但共同时间窗停滞，重建时钟模型")
+        synchronized(dataPipelineLock) {
+            stereoAligner.restartTimeline()
+        }
+        streamLiveness.deferPairDeadline(now)
+        _deviceInfo.value = "双耳数据持续到达，正在本地重新对齐…"
+        Log.w(
+            "NaoyunBLE",
+            "local timeline recovery: leftAge=${snapshot.leftAgeMs}ms " +
+                "rightAge=${snapshot.rightAgeMs}ms; clear interpolation history, keep GATT"
+        )
+    }
+
+    private fun beginSoftStreamRecovery(snapshot: BleStreamLiveness.Snapshot) {
+        if (_state.value !in setOf(State.READY, State.STREAM_STALLED)) return
+        streamRecoveryAttempts = 1
+        _state.value = State.STREAM_STALLED
+        _deviceInfo.value = "${snapshot.stalledSide ?: "双耳"}数据中断，正在恢复数据流…"
+        markConsumerDiscontinuity("${snapshot.stalledSide ?: "双耳"}超过阈值无配对数据")
+        val activeGatt = gatt
+        if (activeGatt == null) {
+            beginHardStreamRecovery("GATT 已丢失")
+            return
+        }
+        _state.value = State.RECOVERING
+        streamOpenRequestedAt = android.os.SystemClock.elapsedRealtime()
+        Log.w("NaoyunBLE", "soft stream recovery: resend OPEN_DATA")
+        writeCmd(activeGatt, BleProtocol.OPEN_DATA_CMD)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun beginHardStreamRecovery(reason: String) {
+        if (manualDisconnect) return
+        val device = currentDevice
+        if (device == null || streamRecoveryAttempts >= MAX_STREAM_RECOVERY_ATTEMPTS) {
+            gatt?.close()
+            gatt = null
+            _state.value = State.ERROR
+            _deviceInfo.value = "数据流恢复失败，请检查耳机佩戴、距离和电量"
+            Log.e("NaoyunBLE", "stream recovery exhausted: $reason")
+            return
+        }
+        streamRecoveryAttempts++
+        streamOpenRequestedAt = 0L
+        connectionPhaseStartedAt = 0L
+        _state.value = State.RECOVERING
+        _deviceInfo.value = "数据流恢复 $streamRecoveryAttempts/$MAX_STREAM_RECOVERY_ATTEMPTS…"
+        Log.w("NaoyunBLE", "hard stream recovery attempt=$streamRecoveryAttempts reason=$reason")
+        val previous = gatt
+        gatt = null
+        runCatching { previous?.disconnect() }
+        runCatching { previous?.close() }
+        resetSynchronizedData()
+        mainHandler.postDelayed(
+            { if (!manualDisconnect && currentDevice == device) connectInternal(device) },
+            HARD_RECONNECT_DELAY_MS
+        )
+    }
 
     private fun markReadyWhenDataArrives() {
         if (_state.value != State.READY) {
             reconnectAttempts = 0
+            streamRecoveryAttempts = 0
+            streamOpenRequestedAt = 0L
+            connectionPhaseStartedAt = 0L
             _state.value = State.READY
             _deviceInfo.value = "脑电数据流已就绪 ✓"
         }
@@ -438,6 +848,14 @@ class NaoyunBleManager(val context: Context) {
         private const val SCAN_TIMEOUT_MS = 15_000L
         private const val MAX_RECONNECT_ATTEMPTS = 2
         private const val RECONNECT_DELAY_MS = 800L
+        private const val ALIGNMENT_LOG_INTERVAL_MS = 2_000L
+        private const val STREAM_WATCHDOG_INTERVAL_MS = 250L
+        private const val STREAM_STATUS_LOG_INTERVAL_MS = 1_000L
+        private const val HARD_RECOVERY_AFTER_MS = 3_000L
+        private const val CONNECTION_PHASE_TIMEOUT_MS = 10_000L
+        private const val HARD_RECONNECT_DELAY_MS = 300L
+        private const val MAX_STREAM_RECOVERY_ATTEMPTS = 3
+        private const val SAMPLE_PERIOD_US = 2_000L
         private val RECONNECT_TOKEN = Any()
     }
 
@@ -453,6 +871,8 @@ class NaoyunBleManager(val context: Context) {
             )
         } else {
             mainHandler.post {
+                _connectedDevice.value = null
+                _deviceTelemetry.value = null
                 _deviceInfo.value = "连接失败（GATT $status）"
                 _state.value = State.ERROR
             }

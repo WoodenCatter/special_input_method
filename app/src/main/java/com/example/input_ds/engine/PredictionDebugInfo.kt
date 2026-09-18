@@ -13,7 +13,12 @@ data class PredictionDebugInfo(
     val elapsedMs: Long,
     val status: PredictionDebugStatus,
     val message: String? = null,
-    val eventId: Long = 0L
+    val eventId: Long = 0L,
+    val requestId: String? = null,
+    val llmRawCount: Int = 0,
+    val llmAcceptedCount: Int = 0,
+    val llmMergedCount: Int = 0,
+    val llmElapsedMs: Long = 0L
 )
 
 enum class PredictionDebugStatus(val displayName: String) {
@@ -27,7 +32,25 @@ enum class PredictionDebugStatus(val displayName: String) {
     RIME_RESULTS_FILTERED("Rime结果全部被过滤"),
     RIME_QUERY_FAILED("Rime查询失败"),
     LOCAL_ONLY("仅使用本地预测"),
+    LLM_MIXED_SUCCESS("LLM异步补充成功"),
+    LLM_EMPTY("LLM成功但无候选"),
+    LLM_RESULTS_FILTERED("LLM候选全部被过滤"),
+    LLM_NO_NEW_CANDIDATES("LLM候选无新增"),
+    LLM_UNAVAILABLE("LLM不可用，已回退本地"),
     NO_PREDICTIONS("无任何预测结果")
+}
+
+internal fun contextLlmDebugStatus(
+    responseAvailable: Boolean,
+    rawCount: Int,
+    acceptedCount: Int,
+    addedCount: Int
+): PredictionDebugStatus = when {
+    !responseAvailable -> PredictionDebugStatus.LLM_UNAVAILABLE
+    rawCount == 0 -> PredictionDebugStatus.LLM_EMPTY
+    acceptedCount == 0 -> PredictionDebugStatus.LLM_RESULTS_FILTERED
+    addedCount == 0 -> PredictionDebugStatus.LLM_NO_NEW_CANDIDATES
+    else -> PredictionDebugStatus.LLM_MIXED_SUCCESS
 }
 
 internal data class RimePredictionDiagnostics(

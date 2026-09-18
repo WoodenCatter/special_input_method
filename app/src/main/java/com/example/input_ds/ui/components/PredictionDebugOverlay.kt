@@ -82,7 +82,12 @@ private fun PredictionDebugInfo.asDisplayText(): String = buildString {
     append("Rime有效：${rimeFilteredCount.asCount()}  入选：${rimeMergedCount.asCount()}  ")
     append("合并：${mergedCount.asCount()}")
     append('\n')
-    append("耗时：${elapsedMs}ms  状态：${status.displayName}")
+    append("LLM原始：${llmRawCount.asCount()}  有效：${llmAcceptedCount.asCount()}  ")
+    append("追加：${llmMergedCount.asCount()}  ")
+    append("LLM耗时：${llmElapsedMs}ms")
+    append('\n')
+    append("本地/Rime耗时：${elapsedMs}ms  状态：${status.displayName}")
+    requestId?.let { append("  requestId：$it") }
     message?.takeIf { it.isNotBlank() }?.let {
         append('\n')
         append(it)

@@ -60,6 +60,15 @@ dependencies {
 
     // ONNX Runtime for EEG model inference
     implementation(libs.onnxruntime.android)
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // Entertainment playback (music playlists and HLS television streams)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.datasource.okhttp)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp.dnsoverhttps)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)

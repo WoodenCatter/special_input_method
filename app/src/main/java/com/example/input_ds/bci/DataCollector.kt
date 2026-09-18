@@ -27,6 +27,7 @@ class DataCollector(
         const val CAPTURE_SECONDS = 1.1f
         const val TARGET_POINTS = 500
         const val SAMPLE_RATE = 500
+        private const val SAMPLE_PERIOD_US = 2_000L
         private const val MAX_RETRIES_PER_TRIAL = 3
     }
 
@@ -67,22 +68,21 @@ class DataCollector(
                         playCueBeep()
                         delay(1200)
 
-                        val startLeft = bleManager.buffer.leftCount
-                        val startRight = bleManager.buffer.rightCount
+                        val captureStartUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L
+                        val captureEndUs = captureStartUs +
+                            (TARGET_POINTS - 1L) * SAMPLE_PERIOD_US
                         notifyState("$className — 请执行动作 (${CAPTURE_SECONDS}s)")
 
                         delay((CAPTURE_SECONDS * 1000).toLong())
                         delay(300)
 
-                        val needed = (CAPTURE_SECONDS * SAMPLE_RATE).toInt()
-                        val leftData = bleManager.buffer.getLeftRange(
-                            startLeft,
-                            minOf(startLeft + needed, bleManager.buffer.leftCount)
+                        val aligned = bleManager.alignedWindow(
+                            captureStartUs,
+                            captureEndUs,
+                            TARGET_POINTS
                         )
-                        val rightData = bleManager.buffer.getRightRange(
-                            startRight,
-                            minOf(startRight + needed, bleManager.buffer.rightCount)
-                        )
+                        val leftData = aligned?.left ?: FloatArray(0)
+                        val rightData = aligned?.right ?: FloatArray(0)
 
                         if (leftData.size >= TARGET_POINTS && rightData.size >= TARGET_POINTS) {
                             saveTrial(

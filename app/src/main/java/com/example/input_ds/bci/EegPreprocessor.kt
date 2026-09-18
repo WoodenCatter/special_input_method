@@ -1,14 +1,10 @@
 package com.example.input_ds.bci
 
+import org.json.JSONArray
+import org.json.JSONObject
+
 /**
- * 与 Ear_EEG_2 轮椅项目训练和实时推理保持一致的模型预处理：
- * 1. 500 Hz 双通道连续数据；
- * 2. scipy.signal.butter(2, [1, 45], "bandpass")；
- * 3. scipy.signal.filtfilt(..., padlen=15)；
- * 4. 滤波后截取模型窗口；输入法800ms模式为末尾400点；
- * 5. 输出通道顺序为 [左耳, 右耳]。
- *
- * 这里仅负责模型输入；实时绘图继续使用独立的显示滤波链路。
+ * 双通道统一预处理。所有调用方固定执行 1–45 Hz 带通。
  */
 object EegPreprocessor {
 
@@ -22,72 +18,134 @@ object EegPreprocessor {
         -2.150060682534536, 0.45841205794992834
     )
 
-    // scipy.signal.iirnotch(50 / 250, Q=30)
-    private val displayNotchB = doubleArrayOf(
-        0.9896361753628921, -1.6012649682336106, 0.9896361753628921
-    )
-    private val displayNotchA = doubleArrayOf(
-        1.0, -1.6012649682336106, 0.9792723507257841
-    )
-
-    // scipy.signal.butter(4, [0.1 / 250, 100 / 250], btype="bandpass")
-    private val displayBandB = doubleArrayOf(
-        0.04643589106059568, 0.0, -0.18574356424238272, 0.0,
-        0.2786153463635741, 0.0, -0.18574356424238272, 0.0,
-        0.04643589106059568
-    )
-    private val displayBandA = doubleArrayOf(
-        1.0, -4.78086529255385, 9.805984440680623, -11.596115069271498,
-        8.974602219379856, -4.724201487852284, 1.59455040371086,
-        -0.30417946736345464, 0.030224253271605914
-    )
-
     fun preprocess(
         left: FloatArray,
         right: FloatArray,
-        targetPoints: Int = 400
+        targetPoints: Int = 400,
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep> = EegPreprocessStep.DEFAULT
     ): Array<FloatArray>? {
-        if (targetPoints <= TRAINING_PAD_LENGTH ||
+        if (targetPoints <= 0 ||
             left.size < targetPoints ||
             right.size < targetPoints ||
-            left.size <= TRAINING_PAD_LENGTH ||
-            right.size <= TRAINING_PAD_LENGTH
+            left.isEmpty() ||
+            right.isEmpty()
         ) {
             return null
         }
         if (!left.isFinite() || !right.isFinite()) return null
 
-        // Ear_EEG_2 filters accumulated continuous samples before slicing the
-        // latest two-second model window.
-        val leftFiltered =
-            filtfilt(left, trainingB, trainingA, TRAINING_PAD_LENGTH)
-        val rightFiltered =
-            filtfilt(right, trainingB, trainingA, TRAINING_PAD_LENGTH)
+        val leftFiltered = applyFilterSteps(left, steps) ?: return null
+        val rightFiltered = applyFilterSteps(right, steps) ?: return null
         val result = arrayOf(
-            leftFiltered.copyOfRange(
+            applyWindowSteps(leftFiltered.copyOfRange(
                 leftFiltered.size - targetPoints,
                 leftFiltered.size
-            ),
-            rightFiltered.copyOfRange(
+            ), steps),
+            applyWindowSteps(rightFiltered.copyOfRange(
                 rightFiltered.size - targetPoints,
                 rightFiltered.size
-            )
+            ), steps)
         )
         return result.takeIf { channels ->
             channels.all { channel -> channel.isFinite() }
         }
     }
 
+    /** Executes the exact allow-listed preprocessing contract embedded in a trained ONNX model. */
+    fun preprocess(
+        left: FloatArray,
+        right: FloatArray,
+        contract: JSONObject
+    ): Array<FloatArray>? = runCatching {
+        val targetPoints = contract.getInt("window_points")
+        require(targetPoints > 0 && left.size >= targetPoints && right.size >= targetPoints)
+        require(left.isFinite() && right.isFinite())
+        val streamSteps = contract.optJSONArray("stream_steps") ?: JSONArray()
+        val windowSteps = contract.optJSONArray("window_steps") ?: JSONArray()
+        fun channel(input: FloatArray): FloatArray {
+            val streamed = applyContractSteps(input, streamSteps)
+            val window = streamed.copyOfRange(streamed.size - targetPoints, streamed.size)
+            return applyContractSteps(window, windowSteps)
+        }
+        arrayOf(channel(left), channel(right)).also { channels ->
+            require(channels.all { channel -> channel.isFinite() })
+        }
+    }.getOrNull()
+
     /**
      * 对最近的显示窗口应用桌面 signal_monitor.py 使用的滤波。
      * 数据不足时与桌面端一致，直接返回原始副本。
      */
     fun filterForDisplay(data: FloatArray): FloatArray {
-        if (data.size < 10 || !data.isFinite()) return data.copyOf()
-        val padLength = minOf(data.size / 3, DISPLAY_PAD_LENGTH).coerceAtLeast(1)
-        val notch = filtfilt(data, displayNotchB, displayNotchA, padLength)
-        return filtfilt(notch, displayBandB, displayBandA, padLength)
+        return preprocessForDisplay(data, EegPreprocessStep.DEFAULT) ?: data.copyOf()
     }
+
+    /** Processes the complete visible window with the same selected chain. */
+    fun preprocessForDisplay(
+        data: FloatArray,
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
+    ): FloatArray? {
+        if (data.isEmpty() || !data.isFinite()) return null
+        val filtered = applyFilterSteps(data, steps) ?: return null
+        return applyWindowSteps(filtered, steps).takeIf { it.isFinite() }
+    }
+
+    private fun applyFilterSteps(
+        input: FloatArray,
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
+    ): FloatArray? {
+        return filterIfLongEnough(
+            input.copyOf(),
+            trainingB,
+            trainingA,
+            TRAINING_PAD_LENGTH
+        )
+    }
+
+    private fun applyContractSteps(input: FloatArray, steps: JSONArray): FloatArray {
+        var output = input.copyOf()
+        for (index in 0 until steps.length()) {
+            val step = steps.getJSONObject(index)
+            output = when (step.getString("operation")) {
+                "bandpass" -> {
+                    require(step.optString("implementation", "butterworth_filtfilt") == "butterworth_filtfilt") {
+                        "手机端当前仅支持窗口级 butterworth_filtfilt"
+                    }
+                    val low = step.getDouble("low_hz")
+                    val high = step.getDouble("high_hz")
+                    val order = step.getInt("order")
+                    require(low == 1.0 && high == 45.0 && order == 2) {
+                        "手机端仅支持统一 1–45 Hz / 2 阶带通"
+                    }
+                    val coefficients = trainingB to trainingA
+                    val padLength = 3 * maxOf(coefficients.first.size, coefficients.second.size)
+                    filterIfLongEnough(output, coefficients.first, coefficients.second, padLength)
+                        ?: error("信号长度不足以执行带通滤波")
+                }
+                else -> error("不支持的预处理操作：${step.getString("operation")}")
+            }
+            require(output.isFinite())
+        }
+        return output
+    }
+
+    private fun filterIfLongEnough(
+        input: FloatArray,
+        numerator: DoubleArray,
+        denominator: DoubleArray,
+        preferredPadLength: Int
+    ): FloatArray? {
+        if (input.size < MIN_FILTER_POINTS) return null
+        val padLength =
+            minOf(input.size / 3, preferredPadLength).coerceAtLeast(1)
+        return filtfilt(input, numerator, denominator, padLength)
+            .takeIf { it.isFinite() }
+    }
+
+    private fun applyWindowSteps(
+        input: FloatArray,
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
+    ): FloatArray = input
 
     private fun filtfilt(
         input: FloatArray,
@@ -232,5 +290,5 @@ object EegPreprocessor {
     private fun FloatArray.isFinite(): Boolean = all(Float::isFinite)
 
     private const val TRAINING_PAD_LENGTH = 15
-    private const val DISPLAY_PAD_LENGTH = 27
+    private const val MIN_FILTER_POINTS = 10
 }

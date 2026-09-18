@@ -1,4 +1,4 @@
-package com.example.input_ds.rime
+ package com.example.input_ds.rime
 
 import android.content.Context
 import com.osfans.trime.data.opencc.OpenCCDictManager
