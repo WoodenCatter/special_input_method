@@ -1,0 +1,794 @@
+:root {
+    font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; /* Android 离线资源 */
+    color: #2f241c;
+    background: #f5efe5;
+    font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    min-height: 100%;
+    margin: 0;
+}
+
+body {
+    background:
+        radial-gradient(circle at 10% 0%, rgba(255, 245, 214, .95), transparent 38%),
+        linear-gradient(145deg, #f9f4eb, #eadfce);
+    overscroll-behavior: none;
+}
+
+button { font: inherit; }
+
+.app-shell {
+    width: min(1220px, 100%);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 18px 22px 24px;
+}
+
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.page-header h1 {
+    margin: 0;
+    color: #7e271d;
+    font-family: "STKaiti", "KaiTi", serif;
+    font-size: clamp(26px, 3vw, 40px);
+    letter-spacing: .12em;
+}
+
+.page-header p {
+    margin: 3px 0 0;
+    color: #79685a;
+    font-size: 14px;
+}
+
+.offline-badge {
+    padding: 7px 13px;
+    border: 1px solid #8cac79;
+    border-radius: 999px;
+    color: #315f2d;
+    background: #edf7e9;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.game-layout {
+    display: grid;
+    grid-template-columns: minmax(520px, 1fr) minmax(260px, 330px);
+    gap: 16px;
+    align-items: start;
+}
+
+.board-card, .info-card {
+    border: 1px solid rgba(112, 76, 49, .18);
+    border-radius: 18px;
+    background: rgba(255, 253, 248, .92);
+    box-shadow: 0 12px 34px rgba(84, 55, 35, .13);
+}
+
+.board-card { padding: 14px; }
+
+.turn-strip {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.player-chip {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    column-gap: 8px;
+    min-height: 48px;
+    padding: 7px 10px;
+    border-radius: 12px;
+    font-size: 13px;
+}
+
+.player-chip strong {
+    grid-column: 2;
+    font-size: 12px;
+}
+
+.red-player {
+    border: 1px solid #e0a69e;
+    background: #fff0ed;
+}
+
+.black-player {
+    border: 1px solid #aaa39d;
+    background: #f1efed;
+}
+
+.piece-dot {
+    display: grid;
+    grid-row: 1 / span 2;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: white;
+    font-family: "STKaiti", "KaiTi", serif;
+    font-weight: 800;
+}
+
+.red-dot { background: #b83329; }
+.black-dot { background: #2e2b29; }
+
+.turn-center {
+    color: #76685c;
+    font-size: 13px;
+    text-align: center;
+}
+
+.turn-label, .move-number { font-weight: 800; }
+.red-turn, .move-red { color: #b3261e; }
+.black-turn, .move-black { color: #292624; }
+
+.chess-board {
+    position: relative;
+    margin: 0 auto;
+    border: 6px solid #744326;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #f5dfb9, #dfbc84);
+    box-shadow: inset 0 0 22px rgba(104, 61, 31, .15), 0 7px 18px rgba(70, 40, 20, .22);
+    touch-action: none;
+}
+
+.board-grid {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+}
+
+.board-line { stroke: #75421f; stroke-width: 1.5; }
+.board-line-bold { stroke: #4e2a16; stroke-width: 2.5; }
+
+.chess-piece {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    box-shadow: 0 4px 8px rgba(39, 24, 14, .32);
+    cursor: pointer;
+    font-family: "STKaiti", "KaiTi", serif;
+    font-weight: 900;
+    transform: translate(-50%, -50%);
+    transition: transform .14s ease, box-shadow .14s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.chess-piece:active { transform: translate(-50%, -50%) scale(.94); }
+
+.chess-piece.red {
+    border: 3px solid #8e211b;
+    color: #fff9ef;
+    background: radial-gradient(circle at 32% 25%, #e76858, #ae281f 70%);
+}
+
+.chess-piece.black {
+    border: 3px solid #171513;
+    color: #fff9ef;
+    background: radial-gradient(circle at 32% 25%, #655d56, #25211e 70%);
+}
+
+.chess-piece.selected {
+    z-index: 5;
+    box-shadow: 0 0 0 5px rgba(25, 114, 210, .55), 0 6px 15px rgba(29, 82, 145, .42);
+    transform: translate(-50%, -50%) scale(1.11);
+}
+
+.chess-piece.bci-piece-focus {
+    z-index: 7;
+    box-shadow: 0 0 0 6px #ffd43b, 0 0 22px rgba(255, 179, 0, .95);
+    transform: translate(-50%, -50%) scale(1.16);
+}
+
+.move-hint {
+    position: absolute;
+    z-index: 4;
+    border: 3px solid rgba(25, 115, 66, .8);
+    border-radius: 50%;
+    background: rgba(63, 185, 105, .75);
+    box-shadow: 0 0 0 5px rgba(93, 209, 135, .22);
+    cursor: pointer;
+    transform: translate(-50%, -50%);
+    animation: pulse 1.25s ease-in-out infinite;
+}
+
+.move-hint.capture {
+    border-color: rgba(207, 48, 38, .9);
+    background: rgba(230, 73, 61, .25);
+    box-shadow: 0 0 0 5px rgba(230, 73, 61, .16);
+}
+
+.move-hint.bci-target-focus {
+    z-index: 8;
+    border-color: #ffe066;
+    background: #ff9f1c;
+    box-shadow: 0 0 0 7px rgba(255, 212, 59, .48), 0 0 24px rgba(255, 145, 0, .95);
+    animation: none;
+    transform: translate(-50%, -50%) scale(1.28);
+}
+
+@keyframes pulse {
+    50% { opacity: .62; transform: translate(-50%, -50%) scale(.82); }
+}
+
+.last-move-from, .last-move-to {
+    position: absolute;
+    z-index: 2;
+    width: 54px;
+    height: 54px;
+    border: 4px solid rgba(240, 163, 35, .95);
+    border-radius: 50%;
+    box-shadow: 0 0 12px rgba(240, 163, 35, .62);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+.river-text {
+    position: absolute;
+    color: #75421f;
+    font-family: "STKaiti", "KaiTi", serif;
+    font-weight: 900;
+    opacity: .48;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    user-select: none;
+}
+
+.control-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.control-button {
+    min-height: 48px;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 12px;
+    color: white;
+    box-shadow: 0 4px 10px rgba(58, 39, 25, .18);
+    cursor: pointer;
+    font-weight: 800;
+}
+
+.control-button:active { transform: translateY(1px); box-shadow: none; }
+.control-button.primary { background: #aa2d25; }
+.control-button.secondary { background: #376da5; }
+.control-button.navigation { background: #2f7d57; }
+.control-button.sound { background: #6d4c89; }
+.control-button.exit { background: #655b53; }
+.control-button.opacity-50 { opacity: .52; }
+
+.control-button:disabled {
+    color: #ece9e6;
+    background: #aaa6a2;
+    box-shadow: none;
+    cursor: default;
+    opacity: .58;
+}
+
+.control-button.bci-control-focus,
+.control-row.bci-group-focus {
+    outline: 5px solid #f6b800;
+    outline-offset: 3px;
+    box-shadow: 0 0 20px rgba(246, 184, 0, .62);
+}
+
+.bci-scan-panel {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 46px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border: 2px solid #d7c3a9;
+    border-radius: 11px;
+    background: #fff9ec;
+    transition: box-shadow .15s ease, border-color .15s ease;
+}
+
+.bci-scan-panel.bci-virtual-focus {
+    border-color: #e9a900;
+    box-shadow: 0 0 0 4px rgba(246, 184, 0, .26);
+}
+
+.bci-simulator {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px dashed rgba(94, 71, 52, .38);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, .56);
+}
+
+.bci-simulator-label {
+    color: #756558;
+    font-size: 13px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.bci-simulator-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.bci-simulator-button {
+    min-height: 44px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    color: white;
+    cursor: pointer;
+    font-weight: 900;
+    box-shadow: 0 3px 8px rgba(58, 39, 25, .2);
+    touch-action: manipulation;
+}
+
+.bci-simulator-button:active {
+    transform: translateY(1px) scale(.99);
+    box-shadow: none;
+}
+
+.bci-simulator-button.look-left,
+.bci-simulator-button.look-right { background: #376da5; }
+.bci-simulator-button.bite { background: #b13a31; }
+
+.scan-phase {
+    color: #7e271d;
+    font-weight: 800;
+}
+
+.scan-choice {
+    color: #3d332c;
+    text-align: center;
+}
+
+.scan-direction {
+    color: #786a5f;
+    font-size: 12px;
+}
+
+.scan-board-arrow {
+    position: absolute;
+    z-index: 10;
+    color: #e59600;
+    font-size: 25px;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 0 0 7px #fff, 0 0 12px rgba(255, 186, 0, .85);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+}
+
+.scan-row-arrow {
+    font-size: 21px;
+}
+
+.info-column { display: grid; gap: 14px; }
+.info-card { padding: 16px; }
+
+.info-card h2 {
+    margin: 0 0 12px;
+    color: #563b2c;
+    font-size: 18px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 9px 10px;
+    border-radius: 9px;
+    background: #f3ece3;
+}
+
+.stat-row + .stat-row { margin-top: 7px; }
+.status-value { color: #315f78; }
+
+.touch-guide, .ai-note {
+    margin: 11px 0 0;
+    color: #786a5f;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.move-history { max-height: 235px; overflow-y: auto; }
+.empty-history { margin: 0; color: #978b81; font-size: 14px; }
+
+.move-item {
+    padding: 7px 9px;
+    border-bottom: 1px solid #eee4d8;
+    font-size: 14px;
+}
+
+.ai-thinking {
+    min-height: 44px;
+    padding: 10px;
+    border-radius: 9px;
+    color: #4c3c31;
+    background: #f5efe7;
+    line-height: 1.5;
+}
+
+.game-over-modal {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(28, 21, 17, .62);
+}
+
+.game-over-modal.hidden { display: none; }
+
+.modal-card {
+    width: min(390px, 100%);
+    padding: 28px;
+    border-radius: 18px;
+    background: #fffdf8;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, .3);
+    text-align: center;
+}
+
+.modal-icon { font-size: 52px; }
+.modal-card h2 { margin: 8px 0; color: #4b3325; }
+.modal-card p { margin: 0 0 20px; color: #786a5f; }
+
+.game-over-restart {
+    display: grid;
+    width: 100%;
+    min-height: 70px;
+    place-items: center;
+    gap: 2px;
+}
+
+.game-over-action-label {
+    font-size: 18px;
+}
+
+.game-over-bci-hint {
+    color: #fff4a3;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+::-webkit-scrollbar { width: 7px; }
+::-webkit-scrollbar-thumb { border-radius: 5px; background: #b7a596; }
+
+@media (max-width: 900px) {
+    .app-shell { padding: 12px; }
+    .game-layout { grid-template-columns: 1fr; }
+    .info-column { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 640px) {
+    .page-header p, .offline-badge, .turn-center { display: none; }
+    .turn-strip { grid-template-columns: 1fr 1fr; }
+    .board-card { padding: 8px; }
+    .chess-board { border-width: 4px; }
+    .info-column { grid-template-columns: 1fr; }
+    .control-button { min-height: 44px; padding-inline: 7px; font-size: 14px; }
+    .bci-scan-panel { grid-template-columns: 1fr; gap: 3px; text-align: center; }
+    .scan-direction { display: none; }
+    .bci-simulator { grid-template-columns: 1fr; gap: 6px; }
+    .bci-simulator-label { text-align: center; }
+    .bci-simulator-button { min-height: 42px; padding-inline: 5px; }
+}
+
+/* 平板横屏三栏布局：控制 / 棋盘 / 指引与记录 */
+html, body {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.app-shell {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 10px 14px;
+}
+
+.game-layout {
+    display: grid;
+    grid-template-columns: minmax(126px, 156px) auto minmax(250px, 310px);
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    height: auto;
+    min-height: 0;
+}
+
+/* Old Huawei WebView may freeze vh/% heights at 0 during its first measure.
+   JavaScript supplies a real pixel height after the viewport is available. */
+html[style*="--chess-viewport-height"] .app-shell {
+    min-height: var(--chess-viewport-height);
+}
+
+html[style*="--chess-viewport-height"] .game-layout {
+    min-height: calc(var(--chess-viewport-height) - 20px);
+}
+
+html[style*="--chess-viewport-height"],
+html[style*="--chess-viewport-height"] body {
+    overflow-y: hidden;
+}
+
+.board-card {
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    padding: 7px;
+    border-radius: 14px;
+}
+
+.left-controls {
+    display: grid;
+    align-content: center;
+    gap: 14px;
+    min-width: 0;
+    transform: translateY(36px);
+}
+
+.left-control-group,
+.info-card {
+    padding: 12px;
+    border: 1px solid rgba(112, 76, 49, .18);
+    border-radius: 15px;
+    background: rgba(255, 253, 248, .94);
+    box-shadow: 0 9px 26px rgba(84, 55, 35, .12);
+}
+
+.left-control-group h2,
+.info-card h2 {
+    margin: 0 0 9px;
+    color: #563b2c;
+    font-size: 16px;
+    text-align: center;
+}
+
+.control-row,
+.bci-simulator-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    margin: 0;
+}
+
+.control-button,
+.bci-simulator-button {
+    width: 100%;
+    min-height: 44px;
+    padding: 7px 5px;
+    font-size: 15px;
+}
+
+.bci-simulator {
+    display: block;
+    margin: 0;
+    padding: 12px;
+    border-style: solid;
+    background: rgba(255, 253, 248, .94);
+}
+
+.info-column {
+    display: grid;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-self: center;
+    gap: 14px;
+    min-width: 0;
+    height: var(--chess-panel-height, 632px);
+    max-height: var(--chess-panel-height, 632px);
+    overflow: hidden;
+}
+
+.guide-card,
+.history-card {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.guide-card {
+    display: flex;
+    flex-direction: column;
+}
+
+.control-guide {
+    margin: 0;
+    padding-left: 22px;
+    color: #604f42;
+    font-size: clamp(16px, 1.55vw, 19px);
+    line-height: 1.7;
+}
+
+.bci-scan-panel {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    min-height: 96px;
+    margin-top: auto;
+    padding: 10px;
+    text-align: center;
+}
+
+.scan-phase {
+    font-size: 15px;
+}
+
+.scan-choice {
+    display: grid;
+    place-items: center;
+    min-height: 27px;
+    color: #253a2a;
+    font-size: 17px;
+}
+
+.scan-direction {
+    color: #24723b;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.ai-thinking {
+    min-height: 0;
+    margin: 9px 0 0;
+    padding: 7px 9px;
+    font-size: 13px;
+}
+
+.history-card {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.move-history {
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.move-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 9px 11px;
+    border-radius: 9px;
+    background: #f3ece3;
+    font-size: 14px;
+}
+
+.move-summary strong {
+    color: #9f2c24;
+    font-size: 18px;
+}
+
+.scan-board-arrow {
+    color: #25e65b;
+    font-family: Arial, sans-serif;
+    font-size: 52px;
+    -webkit-text-stroke: 2px #075f25;
+    text-shadow: 0 0 3px #fff, 0 0 10px #68ff8f, 0 0 20px rgba(18, 212, 72, .95);
+}
+
+.scan-row-arrow {
+    font-size: 48px;
+}
+
+.action-confirm-modal {
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(26, 18, 13, .72);
+}
+
+.action-confirm-modal.hidden {
+    display: none;
+}
+
+.action-confirm-card {
+    width: min(540px, 90vw);
+    padding: 32px;
+    border: 3px solid #d9c09c;
+    border-radius: 22px;
+    background: #fffdf8;
+    box-shadow: 0 22px 70px rgba(0, 0, 0, .42);
+}
+
+.action-confirm-card p {
+    margin: 0 0 28px;
+    color: #4b3021;
+    font-size: clamp(22px, 2.3vw, 30px);
+    font-weight: 900;
+    line-height: 1.45;
+    text-align: center;
+}
+
+.action-confirm-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+}
+
+.action-confirm-button {
+    min-height: 68px;
+    border: 0;
+    border-radius: 14px;
+    color: #fff;
+    font-size: 21px;
+    font-weight: 900;
+    box-shadow: 0 6px 14px rgba(54, 37, 26, .2);
+}
+
+.action-confirm-button.confirm {
+    background: #b8322a;
+}
+
+.action-confirm-button.cancel {
+    background: #3977b5;
+}
+
+.action-confirm-button.bci-control-focus {
+    outline: 6px solid #ffe044;
+    outline-offset: 5px;
+    box-shadow: 0 0 28px rgba(255, 224, 68, .9);
+    transform: scale(1.04);
+}
+
+@media (max-width: 850px), (orientation: portrait) {
+    html, body { height: auto; min-height: 100%; overflow: auto; }
+    html[style*="--chess-viewport-height"],
+    html[style*="--chess-viewport-height"] body { overflow-y: auto; }
+    .app-shell { height: auto; min-height: var(--chess-viewport-height, 0px); padding: 10px; }
+    .game-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    .board-card { grid-row: 1; }
+    .left-controls {
+        grid-row: 2;
+        grid-template-columns: 1fr 1fr;
+        transform: none;
+    }
+    .control-row,
+    .bci-simulator-buttons {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .bci-simulator-buttons .bite { grid-column: 1 / -1; grid-row: 2; }
+    .info-column {
+        grid-row: 3;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+    }
+}

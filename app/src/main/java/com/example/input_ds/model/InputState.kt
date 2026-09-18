@@ -1,5 +1,7 @@
 package com.example.input_ds.model
 
+import com.example.input_ds.engine.PredictionCandidate
+
 /**
  * 输入法状态机定义
  *
@@ -20,7 +22,17 @@ enum class InputPhase {
     LEVEL_3_CHAR_SELECT,
 
     /** 预测词选择 */
-    PREDICTION
+    PREDICTION,
+
+    /** 九键块首字母整句选择 */
+    INITIAL_PREDICTION
+}
+
+enum class PredictionStatus {
+    IDLE,
+    LOADING,
+    READY,
+    UNAVAILABLE
 }
 
 /**
@@ -41,7 +53,13 @@ enum class ControlSignal {
     RIGHT_LOOK,
 
     /** 咬牙 - 确认选择 */
-    BITE
+    BITE,
+
+    /** 六分类复合动作：先左后右。输入法和主页忽略，迷宫用于清障。 */
+    LEFT_RIGHT,
+
+    /** 六分类复合动作：先右后左。输入法和主页忽略，迷宫用于清障。 */
+    RIGHT_LEFT
 }
 
 /**
@@ -54,6 +72,7 @@ data class InputState(
     val highlightedBlockIndex: Int = 0,     // 当前高亮的块索引 (0-3 左侧 or 右侧)
     val highlightedLetterIndex: Int = 0,    // 二级：高亮字母索引
     val highlightedCharIndex: Int = 0,      // 三级：高亮汉字索引
+    val charPage: Int = 0,                  // 三级：候选网格页码
     val charScanDirection: Int = 1,         // 三级：汉字循环方向（1=右, -1=左）
     val highlightedPredictionIndex: Int = 0, // 预测词：高亮索引
 
@@ -76,8 +95,20 @@ data class InputState(
     val currentChar: String = "",                      // 当前正在输入的汉字（已确认）
 
     // === 预测 ===
-    val predictionCandidates: List<String> = emptyList(),
+    val predictionCandidates: List<PredictionCandidate> = emptyList(),
+    val predictionPage: Int = 0,
+    val isCommonPhraseSelection: Boolean = false,
+
+    // === 首字母整句 ===
+    val hasInitialPredictionOption: Boolean = false,
+    val initialBlocksKey: String = "",
+    val initialRequestId: String? = null,
+    val initialPredictionStatus: PredictionStatus = PredictionStatus.IDLE,
+    val initialCandidates: List<PredictionCandidate> = emptyList(),
+    val initialPage: Int = 0,
+    val highlightedInitialIndex: Int = 0,
+    val initialHasMore: Boolean = false,
 
     // === 系统 ===
-    val scanIntervalMs: Long = 1200L                   // 扫描间隔（毫秒）
+    val scanIntervalMs: Long = ScanSettings.DEFAULT_INTERVAL_MS // 单个高亮周期（毫秒）
 )

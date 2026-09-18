@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="color-scheme" content="light">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'none'; connect-src 'none'">
+    <title>中国象棋 · 离线版</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-shell">
+        <main class="game-layout">
+            <aside class="left-controls" aria-label="棋局操作">
+                <section class="left-control-group">
+                    <h2>棋局操作</h2>
+                    <div class="control-row">
+                        <button id="returnSelectionBtn" class="control-button navigation selection-return" type="button" disabled>
+                            <span aria-hidden="true">↪</span> 返回选择
+                        </button>
+                        <button id="returnColumnBtn" class="control-button navigation" type="button" disabled>
+                            <span aria-hidden="true">↩</span> 返回选路
+                        </button>
+                        <button id="returnRowBtn" class="control-button navigation" type="button" disabled>
+                            <span aria-hidden="true">↩</span> 返回选行
+                        </button>
+                        <button id="newGameBtn" class="control-button primary" type="button">
+                            <span aria-hidden="true">↻</span> 新游戏
+                        </button>
+                        <button id="undoBtn" class="control-button secondary" type="button">
+                            <span aria-hidden="true">↶</span> 悔棋
+                        </button>
+                        <button id="soundBtn" class="control-button sound" type="button" aria-label="切换声音">
+                            <span class="sound-icon" aria-hidden="true">🔊</span> 声音
+                        </button>
+                        <button id="exitBtn" class="control-button exit" type="button">
+                            <span aria-hidden="true">⌂</span> 退出
+                        </button>
+                    </div>
+                </section>
+
+            </aside>
+
+            <section class="board-card" aria-label="象棋棋盘">
+                <div id="chessboard" class="chess-board" role="grid" aria-label="中国象棋棋盘"></div>
+            </section>
+
+            <aside class="info-column">
+                <section class="info-card guide-card">
+                    <h2>操作说明</h2>
+                    <ul class="control-guide">
+                        <li><strong>左看 / 右看：</strong>向对应方向轮转</li>
+                        <li><strong>咬牙：</strong>确认当前高亮项</li>
+                        <li><strong>触摸：</strong>直接选择棋子或落点</li>
+                    </ul>
+                    <div id="bciScanPanel" class="bci-scan-panel" aria-live="polite">
+                        <span id="scanPhase" class="scan-phase">选择路</span>
+                        <strong id="scanChoice" class="scan-choice">准备扫描</strong>
+                        <span id="scanDirection" class="scan-direction">向左轮转</span>
+                    </div>
+                </section>
+
+                <section class="info-card history-card">
+                    <h2>走法记录</h2>
+                    <div id="moveHistory" class="move-history" aria-live="polite">
+                        <p class="empty-history">尚未落子</p>
+                    </div>
+                    <div class="move-summary">
+                        <span>已走步数</span>
+                        <strong id="moveCount">0</strong>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <div id="actionConfirmModal" class="action-confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="actionConfirmMessage">
+        <div class="action-confirm-card">
+            <p id="actionConfirmMessage">确定要开始新游戏吗？</p>
+            <div class="action-confirm-options">
+                <button id="confirmActionBtn" class="action-confirm-button confirm" type="button">确定</button>
+                <button id="cancelActionBtn" class="action-confirm-button cancel" type="button">返回</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="gameOverModal" class="game-over-modal hidden" role="dialog" aria-modal="true" aria-labelledby="gameOverTitle">
+        <div class="modal-card">
+            <div id="gameOverIcon" class="modal-icon"></div>
+            <h2 id="gameOverTitle"></h2>
+            <p id="gameOverMessage"></p>
+            <button id="closeModalBtn" class="control-button primary game-over-restart" type="button">
+                <span class="game-over-action-label">开始新游戏</span>
+                <span class="game-over-bci-hint">咬牙：确定</span>
+            </button>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+</html>

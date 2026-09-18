@@ -18,6 +18,11 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // Target tablets are ARM64; avoid packaging four copies of Godot and Rime.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -36,6 +41,11 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    // Godot needs random access to the embedded pack. Keeping .pck uncompressed
+    // avoids inflating the whole game pack during every cold start.
+    androidResources {
+        noCompress += listOf("pck", "mp3")
     }
 }
 
@@ -60,6 +70,10 @@ dependencies {
 
     // ONNX Runtime for EEG model inference
     implementation(libs.onnxruntime.android)
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // Godot 4.7.1 runtime used by the embedded wizard game module.
+    implementation("org.godotengine:godot:4.7.1.stable")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)

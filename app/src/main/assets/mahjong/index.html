@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>四人麻将</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="toolbar">
+      <div class="brand">四人麻将 <span>简化上海规则 · 单机</span></div>
+      <nav class="toolbar-actions" aria-label="牌局操作">
+        <button id="rules-settings-button" class="text-button settings-trigger">规则/设置</button>
+      </nav>
+    </header>
+
+    <main class="table" aria-label="麻将桌">
+      <section class="seat seat-top" aria-label="对家">
+        <div id="name-top" class="seat-name"></div>
+        <div id="concealed-top" class="concealed concealed-horizontal"></div>
+        <div id="melds-top" class="melds"></div>
+        <div id="discards-top" class="discards discard-horizontal"></div>
+      </section>
+
+      <section class="seat seat-left" aria-label="左家">
+        <div id="name-left" class="seat-name"></div>
+        <div id="concealed-left" class="concealed concealed-side"></div>
+        <div id="melds-left" class="melds melds-side"></div>
+        <div id="discards-left" class="discards discard-side"></div>
+      </section>
+
+      <section class="seat seat-right" aria-label="右家">
+        <div id="name-right" class="seat-name"></div>
+        <div id="concealed-right" class="concealed concealed-side"></div>
+        <div id="melds-right" class="melds melds-side"></div>
+        <div id="discards-right" class="discards discard-side"></div>
+      </section>
+
+      <div class="center-zone" aria-label="牌局提示">
+        <div class="table-center">
+          <div class="center-wall-count">牌墙剩余：<b id="wall-count">0</b> 张牌</div>
+          <div id="message" class="message" aria-live="polite">正在准备牌局…</div>
+        </div>
+      </div>
+
+      <section class="seat seat-bottom" aria-label="你的牌">
+        <div id="discards-bottom" class="discards discard-horizontal"></div>
+        <div id="melds-bottom" class="melds"></div>
+        <div class="hand-controls">
+          <div id="hand-bottom" class="human-hand" aria-label="你的手牌"></div>
+        </div>
+        <div id="name-bottom" class="seat-name bottom-seat-name"></div>
+      </section>
+
+      <div id="action-bar" class="action-bar" aria-label="可用操作"></div>
+    </main>
+  </div>
+
+  <div id="settings-panel" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="dialog rules-settings-dialog">
+      <h2 id="settings-title">麻将规则与设置</h2>
+      <section class="rules-section" aria-labelledby="rules-section-title">
+        <h3 id="rules-section-title">游戏规则</h3>
+        <p>采用便于单机练习的简化上海麻将：共 144 张牌，包含万、筒、条、风牌、三元牌和 8 张花牌。</p>
+        <ul>
+          <li>花牌摸到后立即亮出，并从牌墙末端补一张。</li>
+          <li>胡牌牌型为“四组顺子或刻子 + 一对将”，同时支持七对。</li>
+          <li>只能吃上家的牌；碰、杠、胡可响应任意一家，其中胡的优先级最高。</li>
+          <li>点击一张手牌进行选择，再点同一张或点击“打出”即可出牌。</li>
+          <li>耳机选牌默认从最右张向左轮转；操作按钮从左向右轮转。</li>
+          <li>耳机选择出牌、吃、碰、杠、胡或“过”后，需要再次咬牙确认。</li>
+        </ul>
+      </section>
+      <section class="settings-section" aria-labelledby="settings-section-title">
+        <h3 id="settings-section-title">游戏设置</h3>
+        <p>左看、右看改变轮转方向，咬牙选择当前高亮项。</p>
+        <div class="settings-actions">
+          <button id="settings-return-button" class="text-button settings-option return">返回牌局</button>
+          <button id="settings-restart-button" class="text-button settings-option restart">重新开始</button>
+          <button id="settings-exit-button" class="text-button settings-option exit">退出麻将</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="confirm-panel" class="overlay confirm-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="dialog confirm-dialog">
+      <h2 id="confirm-title">确定要执行吗？</h2>
+      <p id="confirm-detail"></p>
+      <div class="dialog-actions confirm-options">
+        <button id="confirm-yes-button" class="text-button confirm-yes">确定</button>
+        <button id="confirm-no-button" class="text-button confirm-no">返回选择</button>
+      </div>
+      <small>两个选项会自动轮转，咬牙选择当前高亮项</small>
+    </div>
+  </div>
+
+  <div id="game-over" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
+    <div class="dialog result-dialog">
+      <div class="result-icon">胡</div>
+      <h2 id="game-over-title"></h2>
+      <p id="game-over-detail"></p>
+      <div class="dialog-actions">
+        <button id="play-again-button" class="text-button primary">再来一局</button>
+        <button id="game-exit-button" class="text-button">退出游戏</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/engine.js"></script>
+  <script src="js/scan.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

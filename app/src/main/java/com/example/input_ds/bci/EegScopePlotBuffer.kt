@@ -62,7 +62,9 @@ internal class EegScopePlotBuffer(private val capacity: Int = 2_500) {
             }
         }
         return Snapshot(
-            values = values.copyOf(),
+            // The plot buffer is only mutated and drawn on the main thread.
+            // Reuse it instead of allocating a 2,500-float copy per update.
+            values = values,
             writePosition = writePosition,
             validCount = validCount,
             current = current,

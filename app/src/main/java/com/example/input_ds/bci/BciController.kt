@@ -4,30 +4,61 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.personalization.ClassificationProtocol
+import com.example.input_ds.personalization.CollectionSettings
+import com.example.input_ds.personalization.UserModelManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
-/**
- * BCI 实时控制器。
- *
- * 与桌面 real_time.py 对齐：
- * - 每次高亮切换为一个独立控制轮次；
- * - 轮次开始后按墙上时间采集 800 ms（400 点）；
- * - 800–1200 ms 用于预处理、推理和执行；
- * - 连续历史先做二阶 1–45 Hz filtfilt，再截取本轮 400 点；
- * - 模型输入不做 Z-score；
- * - 置信度达到 60% 才执行控制命令；
- * - 0=休息，1=咬牙，2=左看，3=右看。
- */
+internal data class BciWindowEpoch(
+    val commandEpoch: Long,
+    val acquisitionEpoch: Long
+)
+
+/** Invalidates in-flight command work whenever delivery or acquisition changes. */
+internal class BciCommandGate(initiallyEnabled: Boolean = true) {
+    private val lock = Any()
+    private var enabled = initiallyEnabled
+    private var commandEpoch = 0L
+
+    val isEnabled: Boolean
+        get() = synchronized(lock) { enabled }
+
+    fun setEnabled(value: Boolean): Boolean = synchronized(lock) {
+        if (enabled == value) return@synchronized false
+        enabled = value
+        commandEpoch++
+        true
+    }
+
+    fun invalidate() {
+        synchronized(lock) {
+            commandEpoch++
+        }
+    }
+
+    fun snapshot(acquisitionEpoch: Long): BciWindowEpoch? = synchronized(lock) {
+        if (enabled) BciWindowEpoch(commandEpoch, acquisitionEpoch) else null
+    }
+
+    fun isCurrent(snapshot: BciWindowEpoch, acquisitionEpoch: Long): Boolean =
+        synchronized(lock) {
+            enabled &&
+                commandEpoch == snapshot.commandEpoch &&
+                acquisitionEpoch == snapshot.acquisitionEpoch
+        }
+}
+
+/** Runs asynchronous BCI control over continuous, overlapping EEG windows. */
 class BciController(
     private val context: Context,
     private val bleManager: NaoyunBleManager,
@@ -36,53 +67,85 @@ class BciController(
     private var job: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    private val _prediction = MutableStateFlow("等待开始…")
+    private val _prediction = MutableStateFlow("等待启动…")
     val prediction: StateFlow<String> = _prediction
-
     private val _classId = MutableStateFlow(-1)
     val classId: StateFlow<Int> = _classId
-
     private val _confidence = MutableStateFlow(0f)
     val confidence: StateFlow<Float> = _confidence
-
     private val _status = MutableStateFlow("未启动")
     val status: StateFlow<String> = _status
 
     private var modelInference: ModelInference? = null
+    private var loadedModelContract: JSONObject? = null
+    private var calibration: AsyncCalibration? = null
+    private var asyncDetector: FourClassActionDetector? = null
+    private var sixActionDetector: SixActionDetector? = null
+    private var asyncLogger: AsyncControlLogger? = null
+    private val commandGate = BciCommandGate()
     @Volatile private var controlActive = false
-    @Volatile private var highlightEpoch = 0L
+
+    val isCommandDeliveryEnabled: Boolean
+        get() = commandGate.isEnabled
+
+    /**
+     * Suppresses semantic commands without stopping BLE acquisition. Re-enabling
+     * requires one new complete model window before a command can be delivered.
+     */
+    fun setCommandDeliveryEnabled(enabled: Boolean) {
+        if (!commandGate.setEnabled(enabled)) return
+        _status.value = if (enabled) {
+            "控制命令已开启，等待新完整窗口"
+        } else {
+            "控制命令已屏蔽"
+        }
+        Log.d(TAG, "command delivery enabled=$enabled; pending windows invalidated")
+    }
+
+    /** Invalidates in-flight work while preserving the current gate state. */
+    fun invalidatePendingCommands() {
+        commandGate.invalidate()
+        Log.d(TAG, "pending command windows invalidated")
+    }
 
     fun loadModel(): Boolean {
         modelInference = ModelInference(context)
         val loaded = modelInference!!.loadModel()
-        if (loaded && modelInference!!.inputPoints != MODEL_WINDOW_POINTS) {
-            _status.value =
-                "模型要求 ${modelInference!!.inputPoints} 点，" +
-                        "输入法800ms模型应为 400 点"
-            Log.e(
-                TAG,
-                "模型窗口不匹配: model=${modelInference!!.inputPoints}, " +
-                        "required=$MODEL_WINDOW_POINTS"
-            )
+        val usesActiveModel = loaded && modelInference!!.loadedFromActiveModel
+        loadedModelContract = if (usesActiveModel) UserModelManager.activePreprocessingContract(context) else null
+        calibration = if (!loaded) null else runCatching {
+            val resolvedCalibration = if (usesActiveModel) {
+                AsyncCalibrationManager.loadForActiveModel(context, modelInference!!.inputPoints)
+            } else {
+                AsyncCalibrationManager.loadForBuiltInModel(modelInference!!.inputPoints)
+            }
+            resolvedCalibration.also {
+                require(it.protocol == modelInference!!.protocol) {
+                    "模型协议 ${modelInference!!.protocol.wireName} 与校准协议 ${it.protocol.wireName} 不一致"
+                }
+            }
+        }.getOrElse { error ->
+            _status.value = "校准加载失败：${error.message ?: "未知错误"}"
             modelInference?.close()
             modelInference = null
+            loadedModelContract = null
+            Log.e(TAG, "calibration load failed", error)
             return false
         }
         _status.value = if (loaded) {
-            "模型已就绪：高亮后采集800ms，置信度门槛60%"
+            "模型已就绪：${modelInference!!.inputPoints} 点窗口"
         } else {
             "模型加载失败：${modelInference?.lastError ?: "未知错误"}"
         }
-        Log.d(
-            "BciController",
-            "ONNX 加载结果=$loaded, windowPoints=$MODEL_WINDOW_POINTS, " +
-                    "confidence=$MIN_CONFIDENCE"
-        )
+        Log.d(TAG, "ONNX loaded=$loaded windowPoints=${modelInference?.inputPoints}")
         return loaded
     }
 
     val isModelLoaded: Boolean
         get() = modelInference?.isLoaded == true
+
+    val loadedProtocol: ClassificationProtocol?
+        get() = modelInference?.takeIf { it.isLoaded }?.protocol
 
     fun start() {
         if (controlActive) return
@@ -90,122 +153,238 @@ class BciController(
             _status.value = "模型未加载，控制未启动"
             return
         }
-
-        bleManager.resetSynchronizedData()
+        commandGate.invalidate()
         controlActive = true
-        highlightEpoch++
+        asyncDetector = null
+        sixActionDetector = null
+        when (calibration?.protocol) {
+            ClassificationProtocol.FOUR_CLASS -> asyncDetector = calibration?.let(::FourClassActionDetector)
+            ClassificationProtocol.SIX_ACTION -> sixActionDetector = calibration?.let(::SixActionDetector)
+            null -> Unit
+        }
         _classId.value = -1
         _confidence.value = 0f
-        _prediction.value = "等待高亮轮次…"
-        _status.value = "控制已启动，等待输入法高亮"
+        _prediction.value = "异步监听中…"
+        _status.value = "异步控制已启动：75%重叠滑窗；${calibration?.source}"
+        Log.d(TAG, "异步控制已启动 modelPoints=${modelInference?.inputPoints} calibration=$calibration")
+        startAsynchronousLoop()
     }
 
-    /**
-     * Called immediately after the UI presents a new highlighted item.
-     * A newer highlight cancels and invalidates every older inference result.
-     */
-    fun onHighlightStarted(blockDurationMs: Long) {
-        if (!controlActive || !isModelLoaded) return
-        val epoch = ++highlightEpoch
+    private fun startAsynchronousLoop() {
+        val modelPoints = modelInference?.inputPoints ?: return
+        val stridePoints = AsyncWindowPolicy.stridePoints(modelPoints)
+        val selectedPreprocessing = bleManager.preprocessing.value
+        val modelContract = loadedModelContract
+        val fourDetector = asyncDetector
+        val sixDetector = sixActionDetector
+        if (fourDetector == null && sixDetector == null) {
+            _status.value = "当前模型没有匹配的异步动作检测器"
+            controlActive = false
+            return
+        }
+        val protocol = modelInference?.protocol ?: return
+        asyncLogger?.close()
+        asyncLogger = AsyncControlLogger(
+            context,
+            modelPoints,
+            stridePoints,
+            calibration ?: return,
+            modelContract.describePreprocessing(selectedPreprocessing),
+            modelInference?.loadedModelDescription ?: "未知模型",
+            protocol = protocol,
+            classOrder = modelInference?.labelNames ?: protocol.labelNames
+        )
         job?.cancel()
         job = scope.launch {
-            val startedAtMs = SystemClock.elapsedRealtime()
-            val startSample = bleManager.buffer.synchronizedCount()
-            _status.value = "本轮采集中：0/$MODEL_WINDOW_POINTS 点（800ms）"
-            delay(CAPTURE_DURATION_MS)
-            ensureActive()
+            var activeEpoch: BciWindowEpoch? = null
+            var epochStartSample = bleManager.buffer.synchronizedCount()
+            var lastProcessedEnd = epochStartSample
+            while (isActive && controlActive) {
+                val acquisitionEpoch = bleManager.synchronizedDataEpoch.value
+                val windowEpoch = commandGate.snapshot(acquisitionEpoch)
+                if (windowEpoch == null) {
+                    activeEpoch = null
+                    delay(ASYNC_POLL_INTERVAL_MS)
+                    continue
+                }
 
-            val available = bleManager.buffer.synchronizedCount()
-            val endSample = startSample + MODEL_WINDOW_POINTS
-            if (available < endSample) {
-                _status.value =
-                    "本轮数据不足：${(available - startSample).coerceAtLeast(0)}/" +
-                            "$MODEL_WINDOW_POINTS 点，未执行"
-                return@launch
-            }
+                val available = bleManager.buffer.synchronizedCount()
+                if (windowEpoch != activeEpoch) {
+                    fourDetector?.reset()
+                    sixDetector?.reset()
+                    activeEpoch = windowEpoch
+                    epochStartSample = available
+                    lastProcessedEnd = available
+                    Log.d(
+                        TAG,
+                        "new inference epoch command=${windowEpoch.commandEpoch} " +
+                            "acquisition=${windowEpoch.acquisitionEpoch} start=$available"
+                    )
+                }
 
-            val historyStart =
-                (endSample - MAX_FILTER_HISTORY_POINTS).coerceAtLeast(0)
-            val left = bleManager.buffer.getLeftRange(historyStart, endSample)
-            val right = bleManager.buffer.getRightRange(historyStart, endSample)
-            _status.value = "800ms采集完成，正在推理"
-            val processed =
-                EegPreprocessor.preprocess(left, right, MODEL_WINDOW_POINTS)
-            if (processed == null) {
-                _status.value = "本轮预处理失败，未执行"
-                return@launch
-            }
-
-            val result = modelInference?.predictResult(processed)
-            if (result == null) {
-                _status.value =
-                    "推理失败：${modelInference?.lastError ?: "未知错误"}"
-                return@launch
-            }
-            val elapsedMs = SystemClock.elapsedRealtime() - startedAtMs
-            if (epoch != highlightEpoch ||
-                elapsedMs >= blockDurationMs ||
-                !controlActive
-            ) {
-                _status.value = "推理结果已超过当前高亮周期，已丢弃"
-                Log.d(TAG, "丢弃过期结果 epoch=$epoch elapsed=${elapsedMs}ms")
-                return@launch
-            }
-
-            val classId = result.classId
-            val className =
-                CLASS_NAMES[classId.coerceIn(CLASS_NAMES.indices)]
-            _classId.value = classId
-            _confidence.value = result.confidence
-            val passesThreshold = result.confidence >= MIN_CONFIDENCE
-            _prediction.value = buildString {
-                append(className)
-                append(" ${"%.0f".format(result.confidence * 100)}%")
-                if (!passesThreshold) append("（低于门槛）")
-            }
-
-            val signal = when (classId) {
-                1 -> ControlSignal.BITE
-                2 -> ControlSignal.LEFT_LOOK
-                3 -> ControlSignal.RIGHT_LOOK
-                else -> null
-            }
-            if (signal != null && passesThreshold) {
-                _status.value =
-                    "已执行：$className ${"%.0f".format(result.confidence * 100)}% " +
-                            "（${elapsedMs}ms）"
-                withContext(Dispatchers.Main.immediate) {
-                    if (epoch == highlightEpoch && controlActive) {
-                        onSignal(signal)
+                if (available - epochStartSample < modelPoints ||
+                    available - lastProcessedEnd < stridePoints
+                ) {
+                    delay(ASYNC_POLL_INTERVAL_MS)
+                    continue
+                }
+                // Always evaluate the newest complete window to avoid control lag.
+                val endSample = available
+                lastProcessedEnd = endSample
+                val rawStart = endSample - modelPoints
+                val rawLeft = bleManager.buffer.getLeftRange(rawStart, endSample)
+                val rawRight = bleManager.buffer.getRightRange(rawStart, endSample)
+                if (rawLeft.size != modelPoints || rawRight.size != modelPoints) {
+                    _status.value = "异步窗口点数不足，已跳过"
+                    continue
+                }
+                val historyStart = (endSample - MAX_FILTER_HISTORY_POINTS).coerceAtLeast(0)
+                val left = bleManager.buffer.getLeftRange(historyStart, endSample)
+                val right = bleManager.buffer.getRightRange(historyStart, endSample)
+                val inferenceStarted = SystemClock.elapsedRealtime()
+                val processed = if (modelContract != null) {
+                    EegPreprocessor.preprocess(left, right, modelContract)
+                } else {
+                    EegPreprocessor.preprocess(left, right, modelPoints, selectedPreprocessing)
+                }
+                if (processed == null) {
+                    _status.value = "异步窗口预处理失败，已跳过"
+                    continue
+                }
+                val result = modelInference?.predictResult(processed)
+                if (result == null) {
+                    _status.value = "异步推理失败：${modelInference?.lastError ?: "未知错误"}"
+                    continue
+                }
+                val currentAcquisitionEpoch = bleManager.synchronizedDataEpoch.value
+                if (!commandGate.isCurrent(windowEpoch, currentAcquisitionEpoch)) {
+                    Log.d(TAG, "inference epoch changed; discard end=$endSample")
+                    continue
+                }
+                if (bleManager.buffer.synchronizedCount() - endSample >= stridePoints) {
+                    Log.d(TAG, "异步结果已落后一个步长，丢弃 end=$endSample")
+                    continue
+                }
+                val timestampMs = endSample * 1000L / SAMPLE_RATE_HZ
+                val fourDecision = fourDetector?.update(
+                    result.probabilities,
+                    rawLeft,
+                    rawRight,
+                    timestampMs
+                )
+                val sixDecision = sixDetector?.update(
+                    result.probabilities,
+                    rawLeft,
+                    rawRight,
+                    timestampMs
+                )
+                val eventClass = fourDecision?.eventClass ?: sixDecision?.eventClass
+                val label = modelInference?.labelNames?.getOrNull(result.classId) ?: "unknown"
+                val className = CollectionSettings.LABEL_DISPLAY[label] ?: label
+                _classId.value = result.classId
+                _confidence.value = result.confidence
+                _prediction.value = "$className ${"%.0f".format(result.confidence * 100)}%"
+                val elapsed = SystemClock.elapsedRealtime() - inferenceStarted
+                if (fourDecision != null) {
+                    asyncLogger?.logWindow(
+                        endSample, result.probabilities, fourDecision, elapsed,
+                        modelPoints, rawLeft, rawRight
+                    )
+                } else if (sixDecision != null) {
+                    asyncLogger?.logWindow(
+                        endSample, result.probabilities, sixDecision, elapsed,
+                        modelPoints, rawLeft, rawRight
+                    )
+                }
+                _status.value = when {
+                    fourDecision != null -> buildString {
+                        append("异步 ${fourDecision.state} · 活动量 ${"%.1f".format(fourDecision.features.activityStdUv)}µV")
+                        append(" · 极性 ${"%.2f".format(fourDecision.features.directionScore)} · ${elapsed}ms")
+                    }
+                    sixDecision != null -> buildString {
+                        append("六分类 ${sixDecision.snapshot.state} · 活动量 ${"%.1f".format(sixDecision.features.activityStdUv)}µV")
+                        append(" · 模板 ${sixDecision.features.motionAllowedClass ?: "-"} · ${elapsed}ms")
+                    }
+                    else -> "异步控制等待中"
+                }
+                eventClass?.toSignal(protocol)?.let { signal ->
+                    withContext(Dispatchers.Main.immediate) {
+                        if (
+                            controlActive && commandGate.isCurrent(
+                                windowEpoch,
+                                bleManager.synchronizedDataEpoch.value
+                            )
+                        ) {
+                            onSignal(signal)
+                        }
                     }
                 }
-            } else if (signal != null) {
-                _status.value =
-                    "置信度不足，未执行：$className " +
-                            "${"%.0f".format(result.confidence * 100)}% < 60%"
-            } else {
-                _status.value =
-                    "静息 ${"%.0f".format(result.confidence * 100)}%，不执行命令"
             }
+        }
+    }
+
+    private fun Int.toSignal(protocol: ClassificationProtocol): ControlSignal? = when (protocol) {
+        ClassificationProtocol.FOUR_CLASS -> when (this) {
+            1 -> ControlSignal.BITE
+            2 -> ControlSignal.LEFT_LOOK
+            3 -> ControlSignal.RIGHT_LOOK
+            else -> null
+        }
+        ClassificationProtocol.SIX_ACTION -> when (this) {
+            1 -> ControlSignal.LEFT_LOOK
+            2 -> ControlSignal.RIGHT_LOOK
+            3 -> ControlSignal.BITE
+            4 -> ControlSignal.LEFT_RIGHT
+            5 -> ControlSignal.RIGHT_LEFT
+            else -> null
         }
     }
 
     fun stop() {
         controlActive = false
-        highlightEpoch++
+        commandGate.invalidate()
         job?.cancel()
         job = null
         modelInference?.close()
         modelInference = null
+        loadedModelContract = null
+        asyncDetector?.reset()
+        asyncDetector = null
+        sixActionDetector?.reset()
+        sixActionDetector = null
+        asyncLogger?.close()
+        asyncLogger = null
+        calibration = null
         _status.value = "已停止"
     }
 
+    private fun JSONObject?.describePreprocessing(fallback: Set<EegPreprocessStep>): String {
+        val steps = this?.optJSONArray("window_steps")
+            ?: return EegPreprocessStep.describe(fallback)
+        if (steps.length() == 0) return "原始信号"
+        return buildList {
+            for (index in 0 until steps.length()) {
+                val step = steps.optJSONObject(index) ?: continue
+                add(
+                    when (step.optString("operation")) {
+                        "bandpass" -> "${step.optDouble("low_hz").compact()}–${step.optDouble("high_hz").compact()}Hz 带通"
+                        "zscore" -> "Z-score"
+                        "scale" -> "缩放"
+                        "clip" -> "截幅"
+                        else -> step.optString("operation", "未知预处理")
+                    }
+                )
+            }
+        }.joinToString(" + ").ifBlank { "原始信号" }
+    }
+
+    private fun Double.compact(): String =
+        if (this % 1.0 == 0.0) toInt().toString() else toString()
+
     private companion object {
         const val TAG = "BciController"
-        const val MODEL_WINDOW_POINTS = 400
-        const val CAPTURE_DURATION_MS = 800L
+        const val SAMPLE_RATE_HZ = 500L
         const val MAX_FILTER_HISTORY_POINTS = 15_000
-        const val MIN_CONFIDENCE = 0.60f
-        val CLASS_NAMES = arrayOf("静息", "咬牙", "左看", "右看")
+        const val ASYNC_POLL_INTERVAL_MS = 20L
     }
 }

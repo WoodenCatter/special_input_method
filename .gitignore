@@ -1,15 +1,44 @@
+# Android Studio / Gradle local state
 *.iml
-.gradle
-.kotlin/
-/local.properties
+/.gradle/
+/.kotlin/
 /.idea/
+/.vscode/
 /.serena/
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+/.codex/
+/local.properties
+
+# Generated build output
+/build/
+**/build/
+/captures/
+.externalNativeBuild/
+.cxx/
 *.apk
 *.aab
+*.hprof
+*.log
+
+# Signing credentials must stay local
+*.jks
+*.keystore
+keystore.properties
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+
+# Local screenshots and downloaded reference archives
 /current_phone_screen.png
+/codex_after_launch.png
+/chinese-chess-ai.zip
+/doudizhu-online.zip
+
+# Reference projects used while adapting the packaged modules. Their runtime
+# files already live under app/src/main; do not upload duplicate source trees.
+/CCTVcom-Live/
+/doudizhu-online/
+/chinese-chess-ai/*
+!/chinese-chess-ai/chinese-chess-ai-main/
+/chinese-chess-ai/chinese-chess-ai-main/*
+!/chinese-chess-ai/chinese-chess-ai-main/LICENSE

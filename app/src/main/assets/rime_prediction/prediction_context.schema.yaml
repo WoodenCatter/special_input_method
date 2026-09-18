@@ -1,0 +1,41 @@
+schema:
+  schema_id: prediction_context
+  name: 后续预测上下文
+  version: "1.0"
+
+switches:
+  - name: prediction
+    reset: 1
+    states: [关闭预测, 开启预测]
+
+engine:
+  processors:
+    - predictor
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - abc_segmentor
+    - fallback_segmentor
+  translators:
+    - predict_translator
+    - script_translator
+
+speller:
+  alphabet: "zyxwvutsrqponmlkjihgfedcba'"
+  delimiter: " '"
+
+translator:
+  dictionary: prediction_context
+  enable_user_dict: false
+  enable_sentence: true
+  enable_completion: true
+
+predictor:
+  db: predict.db
+  max_candidates: 48
+  max_iterations: 1
+
+menu:
+  page_size: 16

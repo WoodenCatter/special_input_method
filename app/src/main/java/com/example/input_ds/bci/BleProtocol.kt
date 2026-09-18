@@ -6,7 +6,7 @@ package com.example.input_ds.bci
  */
 object BleProtocol {
     // ── 设备过滤 ──
-    const val DEVICE_NAME_FILTER = "Naoyun"
+    const val DEVICE_NAME_FILTER = "Naoyun Pods BLE"
 
     // ── BLE UUID ──
     const val CMD_SERVICE_UUID = "30ae0100-0000-1000-8000-009034122420"

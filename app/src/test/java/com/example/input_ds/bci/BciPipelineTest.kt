@@ -13,6 +13,42 @@ import kotlin.math.sqrt
 class BciPipelineTest {
 
     @Test
+    fun selectablePreprocessing_emptySelectionKeepsRawModelWindow() {
+        val left = FloatArray(600) { it.toFloat() }
+        val right = FloatArray(600) { (-it).toFloat() }
+
+        val result = EegPreprocessor.preprocess(
+            left,
+            right,
+            targetPoints = 400,
+            steps = emptySet()
+        )
+
+        assertNotNull(result)
+        assertArrayEquals(left.copyOfRange(200, 600), result!![0], 0f)
+        assertArrayEquals(right.copyOfRange(200, 600), result[1], 0f)
+    }
+
+    @Test
+    fun selectablePreprocessing_zScoreIsSharedByPlotAndInference() {
+        val input = FloatArray(400) { index -> 20f + index * 0.5f }
+        val steps = setOf(EegPreprocessStep.Z_SCORE)
+
+        val plot = EegPreprocessor.preprocessForDisplay(input, steps)!!
+        val model = EegPreprocessor.preprocess(
+            input,
+            input,
+            targetPoints = 400,
+            steps = steps
+        )!![0]
+
+        assertArrayEquals(plot, model, 1e-6f)
+        assertEquals(0.0, model.map(Float::toDouble).average(), 1e-6)
+        val rms = sqrt(model.map { it.toDouble() * it }.average())
+        assertEquals(1.0, rms, 1e-6)
+    }
+
+    @Test
     fun packetAssembler_handlesNoiseFragmentsAndMultiplePackets() {
         val left = buildPacket(earFlag = 0, rawSample = 1)
         val right = buildPacket(earFlag = 1, rawSample = -1, lengthAsSampleCount = true)
@@ -202,18 +238,88 @@ class BciPipelineTest {
     }
 
     @Test
-    fun stereoPacketAligner_waitsForMatchingPacketCounter() {
+    fun stereoPacketAligner_waitsForTheSameProtocolCounter() {
         val aligner = EegStereoPacketAligner()
-        val left1 = EegDataParser.parseEegData(buildPacket(0, 10), "left")!!
-        val right1 = EegDataParser.parseEegData(buildPacket(1, 20), "right")!!
+        val left = eegPacket("left", 10, 1f, 2f, 3f)
 
-        assertNull(aligner.append(left1))
-        val stereo = aligner.append(right1)
+        assertNull(aligner.append(left))
+        assertNull(aligner.append(eegPacket("right", 99, 11f, 12f, 13f)))
+        val stereo = aligner.append(eegPacket("right", 10, 21f, 22f, 23f))
 
         assertNotNull(stereo)
-        assertEquals(left1.packetCount, stereo!!.packetCount)
-        assertArrayEquals(left1.samples, stereo.left, 0f)
-        assertArrayEquals(right1.samples, stereo.right, 0f)
+        assertArrayEquals(left.samples, stereo!!.left, 0f)
+        assertArrayEquals(floatArrayOf(21f, 22f, 23f), stereo.right, 0f)
+        assertEquals(10, stereo.packetCount)
+        assertTrue(!stereo.resynchronized)
+        assertEquals(1, aligner.stats().exactMatches)
+    }
+
+    @Test
+    fun stereoPacketAligner_burstyCallbacksDoNotChangeStereoPhase() {
+        val aligner = EegStereoPacketAligner()
+
+        for (counter in 40..45) {
+            assertNull(aligner.append(eegPacket("left", counter, counter.toFloat())))
+        }
+        for (counter in 40..45) {
+            val stereo = aligner.append(eegPacket("right", counter, (-counter).toFloat()))
+            assertNotNull(stereo)
+            assertEquals(counter, stereo!!.packetCount)
+            assertTrue(!stereo.resynchronized)
+        }
+
+        assertEquals(6, aligner.stats().exactMatches)
+        assertEquals(0, aligner.stats().resyncMatches)
+    }
+
+    @Test
+    fun stereoPacketAligner_recoversAtNextSharedCounterAfterLoss() {
+        val aligner = EegStereoPacketAligner()
+
+        assertNull(aligner.append(eegPacket("left", 10, 10f)))
+        assertNotNull(aligner.append(eegPacket("right", 10, 20f)))
+        assertNull(aligner.append(eegPacket("left", 11, 11f)))
+        assertNull(aligner.append(eegPacket("left", 12, 12f)))
+        val recovered = aligner.append(eegPacket("right", 12, 22f))
+
+        assertNotNull(recovered)
+        assertTrue(recovered!!.resynchronized)
+        assertEquals(1, recovered.missingPacketPairs)
+        assertEquals(12, recovered.packetCount)
+        assertArrayEquals(floatArrayOf(12f), recovered.left, 0f)
+        assertArrayEquals(floatArrayOf(22f), recovered.right, 0f)
+    }
+
+    @Test
+    fun stereoPacketAligner_dropsDuplicatesWithoutRepublishing() {
+        val aligner = EegStereoPacketAligner()
+
+        assertNull(aligner.append(eegPacket("left", 10, 1f)))
+        assertNull(aligner.append(eegPacket("left", 10, 2f)))
+        val first = aligner.append(eegPacket("right", 10, 3f))
+        assertNotNull(first)
+        assertArrayEquals(floatArrayOf(2f), first!!.left, 0f)
+
+        assertNull(aligner.append(eegPacket("right", 10, 4f)))
+        assertNull(aligner.append(eegPacket("left", 10, 5f)))
+        assertEquals(1, aligner.stats().totalMatches)
+        assertTrue(aligner.stats().leftDroppedPackets > 0)
+        assertTrue(aligner.stats().rightDroppedPackets > 0)
+    }
+
+    @Test
+    fun stereoPacketAligner_counterWrapRemainsContinuous() {
+        val aligner = EegStereoPacketAligner()
+
+        for (counter in listOf(254, 255, 0, 1)) {
+            assertNull(aligner.append(eegPacket("left", counter, counter.toFloat())))
+            val stereo = aligner.append(eegPacket("right", counter, counter.toFloat()))
+            assertNotNull(stereo)
+            assertTrue(!stereo!!.resynchronized)
+        }
+
+        assertEquals(4, aligner.stats().exactMatches)
+        assertEquals(0, aligner.stats().missingPacketPairs)
     }
 
     @Test
@@ -296,6 +402,17 @@ class BciPipelineTest {
         packet[packet.lastIndex] = crc8Maxim(packet, packet.lastIndex).toByte()
         return packet
     }
+
+    private fun eegPacket(
+        side: String,
+        counter: Int,
+        vararg values: Float
+    ): EegDataParser.EegPacket = EegDataParser.EegPacket(
+        earSide = side,
+        leadOff = 0,
+        packetCount = counter,
+        samples = values
+    )
 
     private fun crc8Maxim(data: ByteArray, length: Int): Int {
         var crc = 0
