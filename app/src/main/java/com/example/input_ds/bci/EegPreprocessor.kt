@@ -4,8 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 可组合的双通道预处理。绘图与推理调用同一组批处理步骤，步骤顺序由
- * [EegPreprocessStep] 固定，避免多选时产生不确定结果。
+ * 双通道统一预处理。所有调用方固定执行 1–45 Hz 带通。
  */
 object EegPreprocessor {
 
@@ -19,43 +18,11 @@ object EegPreprocessor {
         -2.150060682534536, 0.45841205794992834
     )
 
-    // scipy.signal.butter(4, [0.1 / 250, 40.0 / 250], btype="bandpass")
-    private val csanetB = doubleArrayOf(
-        0.002215442022975766, 0.0, -0.008861768091903064, 0.0,
-        0.013292652137854596, 0.0, -0.008861768091903064, 0.0,
-        0.002215442022975766
-    )
-    private val csanetA = doubleArrayOf(
-        1.0, -6.693691566973611, 19.645825697627185, -33.0528927641038,
-        34.89262138048841, -23.678748864838038, 10.089583587913928,
-        -2.4680554995106556, 0.2653580293966755
-    )
-
-    // scipy.signal.iirnotch(50 / 250, Q=30)
-    private val displayNotchB = doubleArrayOf(
-        0.9896361753628921, -1.6012649682336106, 0.9896361753628921
-    )
-    private val displayNotchA = doubleArrayOf(
-        1.0, -1.6012649682336106, 0.9792723507257841
-    )
-
-    // scipy.signal.butter(4, [0.1 / 250, 100 / 250], btype="bandpass")
-    private val displayBandB = doubleArrayOf(
-        0.04643589106059568, 0.0, -0.18574356424238272, 0.0,
-        0.2786153463635741, 0.0, -0.18574356424238272, 0.0,
-        0.04643589106059568
-    )
-    private val displayBandA = doubleArrayOf(
-        1.0, -4.78086529255385, 9.805984440680623, -11.596115069271498,
-        8.974602219379856, -4.724201487852284, 1.59455040371086,
-        -0.30417946736345464, 0.030224253271605914
-    )
-
     fun preprocess(
         left: FloatArray,
         right: FloatArray,
         targetPoints: Int = 400,
-        steps: Set<EegPreprocessStep> = EegPreprocessStep.DEFAULT
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep> = EegPreprocessStep.DEFAULT
     ): Array<FloatArray>? {
         if (targetPoints <= 0 ||
             left.size < targetPoints ||
@@ -110,19 +77,13 @@ object EegPreprocessor {
      * 数据不足时与桌面端一致，直接返回原始副本。
      */
     fun filterForDisplay(data: FloatArray): FloatArray {
-        return preprocessForDisplay(
-            data,
-            setOf(
-                EegPreprocessStep.NOTCH_50_HZ,
-                EegPreprocessStep.BANDPASS_0_1_100_HZ
-            )
-        ) ?: data.copyOf()
+        return preprocessForDisplay(data, EegPreprocessStep.DEFAULT) ?: data.copyOf()
     }
 
     /** Processes the complete visible window with the same selected chain. */
     fun preprocessForDisplay(
         data: FloatArray,
-        steps: Set<EegPreprocessStep>
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
     ): FloatArray? {
         if (data.isEmpty() || !data.isFinite()) return null
         val filtered = applyFilterSteps(data, steps) ?: return null
@@ -131,45 +92,14 @@ object EegPreprocessor {
 
     private fun applyFilterSteps(
         input: FloatArray,
-        steps: Set<EegPreprocessStep>
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
     ): FloatArray? {
-        var output = input.copyOf()
-        for (step in EegPreprocessStep.entries) {
-            if (step !in steps) continue
-            output = when (step) {
-                EegPreprocessStep.NOTCH_50_HZ ->
-                    filterIfLongEnough(
-                        output,
-                        displayNotchB,
-                        displayNotchA,
-                        DISPLAY_PAD_LENGTH
-                    ) ?: return null
-                EegPreprocessStep.BANDPASS_0_1_100_HZ ->
-                    filterIfLongEnough(
-                        output,
-                        displayBandB,
-                        displayBandA,
-                        DISPLAY_PAD_LENGTH
-                    ) ?: return null
-                EegPreprocessStep.BANDPASS_0_1_40_HZ ->
-                    filterIfLongEnough(
-                        output,
-                        csanetB,
-                        csanetA,
-                        DISPLAY_PAD_LENGTH
-                    ) ?: return null
-                EegPreprocessStep.BANDPASS_1_45_HZ ->
-                    filterIfLongEnough(
-                        output,
-                        trainingB,
-                        trainingA,
-                        TRAINING_PAD_LENGTH
-                    ) ?: return null
-                EegPreprocessStep.REMOVE_MEAN,
-                EegPreprocessStep.Z_SCORE -> output
-            }
-        }
-        return output
+        return filterIfLongEnough(
+            input.copyOf(),
+            trainingB,
+            trainingA,
+            TRAINING_PAD_LENGTH
+        )
     }
 
     private fun applyContractSteps(input: FloatArray, steps: JSONArray): FloatArray {
@@ -184,25 +114,13 @@ object EegPreprocessor {
                     val low = step.getDouble("low_hz")
                     val high = step.getDouble("high_hz")
                     val order = step.getInt("order")
-                    val coefficients = when {
-                        low == 1.0 && high == 45.0 && order == 2 -> trainingB to trainingA
-                        low == 0.1 && high == 40.0 && order == 4 -> csanetB to csanetA
-                        else -> error("手机端不支持该带通参数：$low–$high Hz / $order 阶")
+                    require(low == 1.0 && high == 45.0 && order == 2) {
+                        "手机端仅支持统一 1–45 Hz / 2 阶带通"
                     }
+                    val coefficients = trainingB to trainingA
                     val padLength = 3 * maxOf(coefficients.first.size, coefficients.second.size)
                     filterIfLongEnough(output, coefficients.first, coefficients.second, padLength)
                         ?: error("信号长度不足以执行带通滤波")
-                }
-                "zscore" -> zScore(output, step.optDouble("epsilon", 1e-6))
-                "scale" -> {
-                    val factor = step.getDouble("factor")
-                    val offset = step.optDouble("offset", 0.0)
-                    FloatArray(output.size) { (output[it] * factor + offset).toFloat() }
-                }
-                "clip" -> {
-                    val minimum = step.getDouble("minimum").toFloat()
-                    val maximum = step.getDouble("maximum").toFloat()
-                    FloatArray(output.size) { output[it].coerceIn(minimum, maximum) }
                 }
                 else -> error("不支持的预处理操作：${step.getString("operation")}")
             }
@@ -226,40 +144,8 @@ object EegPreprocessor {
 
     private fun applyWindowSteps(
         input: FloatArray,
-        steps: Set<EegPreprocessStep>
-    ): FloatArray {
-        var output = input
-        if (EegPreprocessStep.REMOVE_MEAN in steps) {
-            output = removeMean(output)
-        }
-        if (EegPreprocessStep.Z_SCORE in steps) {
-            output = zScore(output)
-        }
-        return output
-    }
-
-    private fun removeMean(input: FloatArray): FloatArray {
-        val mean = input.fold(0.0) { sum, value -> sum + value } / input.size
-        return FloatArray(input.size) { index ->
-            (input[index] - mean).toFloat()
-        }
-    }
-
-    private fun zScore(input: FloatArray): FloatArray {
-        return zScore(input, 1e-8)
-    }
-
-    private fun zScore(input: FloatArray, epsilon: Double): FloatArray {
-        val centered = removeMean(input)
-        val variance =
-            centered.fold(0.0) { sum, value -> sum + value * value } /
-                    centered.size
-        val standardDeviation = kotlin.math.sqrt(variance)
-        val denominator = maxOf(standardDeviation, epsilon)
-        return FloatArray(centered.size) { index ->
-            (centered[index] / denominator).toFloat()
-        }
-    }
+        @Suppress("UNUSED_PARAMETER") steps: Set<EegPreprocessStep>
+    ): FloatArray = input
 
     private fun filtfilt(
         input: FloatArray,
@@ -404,6 +290,5 @@ object EegPreprocessor {
     private fun FloatArray.isFinite(): Boolean = all(Float::isFinite)
 
     private const val TRAINING_PAD_LENGTH = 15
-    private const val DISPLAY_PAD_LENGTH = 27
     private const val MIN_FILTER_POINTS = 10
 }

@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.UserModelManager
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.nio.FloatBuffer
 
@@ -104,6 +105,7 @@ class ModelInference(private val context: Context) {
                 ?: ClassificationProtocol.inferLegacy(labelNames)
                 ?: error("ONNX 缺少有效分类协议")
             require(labelNames == protocol.labelNames) { "ONNX 分类协议与标签顺序不一致" }
+            validateAsyncControl(metadata["async_control"], inputPoints)
             // The production API names the tensor `logits`; v0.3.0 does not
             // require an equivalent custom-metadata entry.
             outputSemantics = metadata["output_semantics"] ?: OUTPUT_LOGITS
@@ -228,6 +230,38 @@ class ModelInference(private val context: Context) {
         val json = JSONArray(requireNotNull(raw))
         List(json.length()) { json.getString(it) }
     }.getOrDefault(emptyList())
+
+    private fun validateAsyncControl(raw: String?, points: Int) {
+        if (raw.isNullOrBlank()) return
+        val json = JSONObject(raw)
+        if (json.length() == 0) return
+        require(json.optString("version", "1") in setOf("1", "2")) {
+            "ONNX 异步控制版本不受支持"
+        }
+        require(json.getInt("window_points") == points) { "ONNX 异步窗口与输入点数不一致" }
+        require(json.getInt("stride_points") == AsyncWindowPolicy.stridePoints(points)) {
+            "ONNX 异步步长与客户端不一致"
+        }
+        require(json.getInt("task_overlap_samples") == AsyncWindowPolicy.taskOverlapPoints(points)) {
+            "ONNX 动作覆盖阈值与客户端不一致"
+        }
+        require(json.optInt("evidence_windows", AsyncWindowPolicy.EVIDENCE_WINDOWS) == AsyncWindowPolicy.EVIDENCE_WINDOWS)
+        require(json.optInt("support_required", AsyncWindowPolicy.SUPPORT_REQUIRED) == AsyncWindowPolicy.SUPPORT_REQUIRED)
+        require(json.optString("evidence_mode", "support_confidence") == "support_confidence")
+        require(
+            json.optInt(
+                "physical_support_required",
+                AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
+            ) == AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
+        )
+        require(json.optInt("rest_reset_required", AsyncWindowPolicy.REST_RESET_REQUIRED) == AsyncWindowPolicy.REST_RESET_REQUIRED)
+        require(
+            kotlin.math.abs(
+                json.optDouble("confidence_threshold", AsyncWindowPolicy.CONFIDENCE_THRESHOLD.toDouble()) -
+                    AsyncWindowPolicy.CONFIDENCE_THRESHOLD
+            ) <= 1e-6
+        ) { "ONNX 异步置信阈值与客户端不一致" }
+    }
 
     @Synchronized
     fun close() {

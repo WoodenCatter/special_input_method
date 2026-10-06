@@ -1,44 +1,43 @@
-# Android Studio / Gradle local state
-*.iml
-/.gradle/
-/.kotlin/
-/.idea/
-/.vscode/
-/.serena/
-/.codex/
-/local.properties
-
-# Generated build output
-/build/
+# Android / Gradle generated files
+.gradle/
+.kotlin/
 **/build/
-/captures/
+local.properties
+captures/
 .externalNativeBuild/
 .cxx/
 *.apk
 *.aab
+*.ap_
 *.hprof
-*.log
 
-# Signing credentials must stay local
+# IDE files
+.idea/
+*.iml
+.vscode/
+.serena/
+
+# Signing files and local secrets
 *.jks
 *.keystore
 keystore.properties
+signing.properties
+.env
+.env.*
+!.env.example
 
-# Operating-system metadata
+# Python helper-script caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# OS and local diagnostic files
 .DS_Store
 Thumbs.db
-
-# Local screenshots and downloaded reference archives
+Desktop.ini
+*.log
 /current_phone_screen.png
-/codex_after_launch.png
-/chinese-chess-ai.zip
-/doudizhu-online.zip
-
-# Reference projects used while adapting the packaged modules. Their runtime
-# files already live under app/src/main; do not upload duplicate source trees.
-/CCTVcom-Live/
-/doudizhu-online/
-/chinese-chess-ai/*
-!/chinese-chess-ai/chinese-chess-ai-main/
-/chinese-chess-ai/chinese-chess-ai-main/*
-!/chinese-chess-ai/chinese-chess-ai-main/LICENSE
+/codex_window.xml

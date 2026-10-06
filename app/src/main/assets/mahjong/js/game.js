@@ -7,6 +7,141 @@
   const SEAT_NAMES = ["你 · 东", "右家 · 南", "对家 · 西", "左家 · 北"];
   const CLAIM_PRIORITY = { hu: 4, kong: 3, pong: 3, chow: 2 };
   const AI_ACTION_DELAY_MS = 1500;
+  const TILE_AUDIO_FILES = [
+    "wan_1.wav", "wan_2.wav", "wan_3.wav", "wan_4.wav", "wan_5.wav", "wan_6.wav", "wan_7.wav", "wan_8.wav", "wan_9.wav",
+    "tong_1.wav", "tong_2.wav", "tong_3.wav", "tong_4.wav", "tong_5.wav", "tong_6.wav", "tong_7.wav", "tong_8.wav", "tong_9.wav",
+    "tiao_1.wav", "tiao_2.wav", "tiao_3.wav", "tiao_4.wav", "tiao_5.wav", "tiao_6.wav", "tiao_7.wav", "tiao_8.wav", "tiao_9.wav",
+    "wind_east.wav", "wind_south.wav", "wind_west.wav", "wind_north.wav",
+    "dragon_red.wav", "dragon_green.wav", "dragon_white.wav"
+  ];
+  const ACTION_AUDIO_FILES = {
+    chow: "action_chi.wav",
+    pong: "action_peng.wav",
+    kong: "action_gang.wav",
+    hu: "action_hu.wav",
+    zimo: "action_zimo.wav",
+    buhua: "action_buhua.wav"
+  };
+
+  // 0=玩家，1=右家，2=对家，3=左家。后续只需调整这里即可互换角色声音。
+  const SEAT_AUDIO_VOICES = [
+    "voice_03_youth_male",
+    "voice_01_deep_male",
+    "voice_04_dubbed_male",
+    "voice_05_entertainment_female"
+  ];
+  const NARRATOR_AUDIO_VOICE = "voice_02_female_narrator";
+
+  class MahjongAudio {
+    constructor() {
+      this.enabled = this.loadEnabledSetting();
+      this.queue = [];
+      this.current = null;
+      this.generation = 0;
+      this.bgm = new Audio("audio/bgm/mahjong_bgm.mp3");
+      this.bgm.loop = true;
+      this.bgm.preload = "auto";
+      this.bgm.volume = 0.36;
+    }
+
+    loadEnabledSetting() {
+      try {
+        const saved = window.localStorage.getItem("mahjong_sound_enabled");
+        if (saved !== null) return saved !== "false";
+        return window.localStorage.getItem("mahjong_speech_enabled") !== "false";
+      } catch (_error) {
+        return true;
+      }
+    }
+
+    setEnabled(enabled) {
+      this.enabled = Boolean(enabled);
+      try {
+        window.localStorage.setItem("mahjong_sound_enabled", this.enabled ? "true" : "false");
+        window.localStorage.setItem("mahjong_speech_enabled", this.enabled ? "true" : "false");
+      } catch (_error) {
+        // The game still works if a WebView blocks local storage.
+      }
+      if (this.enabled) {
+        this.startBgm(true);
+      } else {
+        this.stopAll();
+        this.stopBgm(true);
+      }
+    }
+
+    toggle() {
+      this.setEnabled(!this.enabled);
+      return this.enabled;
+    }
+
+    stopAll() {
+      this.generation += 1;
+      this.queue.length = 0;
+      if (this.current) {
+        this.current.pause();
+        this.current.removeAttribute("src");
+        this.current.load();
+        this.current = null;
+      }
+    }
+
+    startBgm(restart) {
+      if (!this.enabled) return;
+      if (restart) {
+        try { this.bgm.currentTime = 0; } catch (_error) { }
+      }
+      const playResult = this.bgm.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(() => {});
+    }
+
+    stopBgm(reset) {
+      this.bgm.pause();
+      if (reset) {
+        try { this.bgm.currentTime = 0; } catch (_error) { }
+      }
+    }
+
+    playTile(seat, tileType) {
+      const filename = TILE_AUDIO_FILES[tileType];
+      if (filename) this.enqueue(SEAT_AUDIO_VOICES[seat], filename);
+    }
+
+    playAction(seat, action) {
+      const filename = ACTION_AUDIO_FILES[action];
+      if (filename) this.enqueue(SEAT_AUDIO_VOICES[seat], filename);
+    }
+
+    playSystem(filename) {
+      this.enqueue(NARRATOR_AUDIO_VOICE, filename);
+    }
+
+    enqueue(voice, filename) {
+      if (!this.enabled || !voice || !filename) return;
+      this.queue.push("audio/" + voice + "/" + filename);
+      this.pump();
+    }
+
+    pump() {
+      if (!this.enabled || this.current || !this.queue.length) return;
+      const generation = this.generation;
+      const audio = new Audio(this.queue.shift());
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (this.current === audio) this.current = null;
+        if (generation === this.generation) this.pump();
+      };
+      this.current = audio;
+      audio.preload = "auto";
+      audio.volume = 1;
+      audio.addEventListener("ended", finish, { once: true });
+      audio.addEventListener("error", finish, { once: true });
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(finish);
+    }
+  }
 
   class MahjongGame {
     constructor() {
@@ -21,10 +156,12 @@
       this.lastEvent = "";
       this.gameOver = false;
       this.currentActions = [];
+      this.audio = new MahjongAudio();
       this.scan = {
         cursor: new ScanCursor(),
         intervalMs: 1500,
         timer: null,
+        firstDwellUntil: 0,
         settingsReturn: null,
         confirmReturn: null,
         pending: null
@@ -45,13 +182,16 @@
         settings: document.getElementById("settings-panel"),
         confirm: document.getElementById("confirm-panel"),
         confirmTitle: document.getElementById("confirm-title"),
-        confirmDetail: document.getElementById("confirm-detail")
+        confirmDetail: document.getElementById("confirm-detail"),
+        settingsSound: document.getElementById("settings-sound-button")
       };
+      this.updateSoundButton();
     }
 
     bindEvents() {
       document.getElementById("rules-settings-button").addEventListener("click", () => this.openSettings());
       document.getElementById("settings-return-button").addEventListener("click", () => this.closeSettings());
+      document.getElementById("settings-sound-button").addEventListener("click", () => this.toggleSound());
       document.getElementById("settings-restart-button").addEventListener("click", () => {
         this.requestConfirmation({
           kind: "restart",
@@ -95,6 +235,8 @@
 
     startRound() {
       this.roundToken += 1;
+      this.audio.stopAll();
+      this.audio.startBgm(false);
       this.gameOver = false;
       this.el.gameOver.classList.add("hidden");
       this.el.settings.classList.add("hidden");
@@ -121,6 +263,8 @@
       this.turn = HUMAN;
       this.phase = "humanDiscard";
       this.addMessage("新牌局开始，你是东家，请选择一张牌打出");
+      this.audio.playSystem("system_game_start.wav");
+      this.audio.playSystem("system_your_turn.wav");
       this.prepareHumanTurn();
       this.render();
       this.syncBciForGamePhase();
@@ -146,7 +290,10 @@
       let tile = fromTail ? this.wall.pop() : this.wall.shift();
       while (tile && Core.isFlower(tile.type)) {
         player.flowers.push(tile);
-        if (announce) this.addMessage(player.name + " 补花 " + Core.tileName(tile.type));
+        if (announce) {
+          this.addMessage(player.name + " 补花 " + Core.tileName(tile.type));
+          this.audio.playAction(seat, "buhua");
+        }
         tile = this.wall.pop();
       }
       if (!tile) return false;
@@ -171,6 +318,7 @@
         if (seat === HUMAN) {
           this.phase = "humanDiscard";
           this.addMessage("轮到你摸牌，请选择一张牌打出");
+          this.audio.playSystem("system_your_turn.wav");
           this.prepareHumanTurn();
           this.render();
           this.syncBciForGamePhase();
@@ -237,6 +385,7 @@
       this.phase = "checkingClaims";
       this.setActions([]);
       this.addMessage(player.name + " 打出 " + Core.tileName(tile.type));
+      this.audio.playTile(seat, tile.type);
       this.render();
       this.setScanWaiting("等待其他玩家响应");
       this.schedule(() => this.offerClaims(seat, tile), 420);
@@ -383,18 +532,21 @@
         this.takeTileOfType(seat, tile.type);
         player.melds.push({ kind: "pong", tiles: [tile.type, tile.type, tile.type], from: discarder });
         this.addMessage(player.name + " 碰 " + Core.tileName(tile.type));
+        this.audio.playAction(seat, "pong");
       } else if (option.kind === "kong") {
         this.takeTileOfType(seat, tile.type);
         this.takeTileOfType(seat, tile.type);
         this.takeTileOfType(seat, tile.type);
         player.melds.push({ kind: "kong", tiles: [tile.type, tile.type, tile.type, tile.type], from: discarder });
         this.addMessage(player.name + " 明杠 " + Core.tileName(tile.type));
+        this.audio.playAction(seat, "kong");
       } else {
         const needed = option.sequence.slice();
         needed.splice(needed.indexOf(tile.type), 1);
         needed.forEach(type => this.takeTileOfType(seat, type));
         player.melds.push({ kind: "chow", tiles: option.sequence.slice(), from: discarder });
         this.addMessage(player.name + " 吃 " + option.sequence.map(Core.tileName).join("、"));
+        this.audio.playAction(seat, "chow");
       }
 
       Core.sortTiles(player.hand);
@@ -433,6 +585,7 @@
         meld.tiles.push(option.type);
         this.addMessage(player.name + " 补杠 " + Core.tileName(option.type));
       }
+      this.audio.playAction(seat, "kong");
       if (!this.drawFor(seat, true, true, seat === HUMAN)) {
         this.finishDrawGame();
         return;
@@ -485,6 +638,8 @@
       this.phase = "gameOver";
       this.setActions([]);
       this.addMessage(this.players[seat].name + " 胡牌（" + method + "）");
+      this.audio.playAction(seat, method === "自摸" ? "zimo" : "hu");
+      this.audio.playSystem(seat === HUMAN ? "result_player_win.wav" : "result_player_lose.wav");
       this.render();
       this.el.gameOverTitle.textContent = seat === HUMAN ? "恭喜，你胡牌了！" : this.players[seat].name + "胡牌";
       this.el.gameOverDetail.textContent = method + (winningTile ? " · " + Core.tileName(winningTile.type) : "");
@@ -497,6 +652,7 @@
       this.phase = "gameOver";
       this.setActions([]);
       this.addMessage("牌墙已摸完，本局流局");
+      this.audio.playSystem("result_draw.wav");
       this.render();
       this.el.gameOverTitle.textContent = "本局流局";
       this.el.gameOverDetail.textContent = "牌墙已经摸完，四家均未胡牌";
@@ -542,12 +698,13 @@
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) return;
       this.scan.intervalMs = Math.max(1100, Math.min(3000, Math.round(parsed)));
-      this.restartScanTimer();
+      const remainingFirstDwell = Math.max(0, this.scan.firstDwellUntil - Date.now());
+      this.restartScanTimer(remainingFirstDwell > this.scan.intervalMs ? remainingFirstDwell : undefined);
     }
 
-    setScanPhase(phase, candidates, direction, startIndex) {
+    setScanPhase(phase, candidates, direction, startIndex, initialDelayMs) {
       this.scan.cursor.setPhase(phase, candidates, direction, startIndex);
-      this.restartScanTimer();
+      this.restartScanTimer(initialDelayMs);
       this.renderBciFocus();
     }
 
@@ -555,14 +712,29 @@
       this.setScanPhase("waiting", [], 1);
     }
 
-    restartScanTimer() {
-      if (this.scan.timer) window.clearInterval(this.scan.timer);
+    restartScanTimer(initialDelayMs) {
+      if (this.scan.timer) {
+        window.clearTimeout(this.scan.timer);
+        window.clearInterval(this.scan.timer);
+      }
       this.scan.timer = null;
       if (!this.scan.cursor.candidates.length) return;
-      this.scan.timer = window.setInterval(() => {
+      const advance = () => {
         this.scan.cursor.advance();
         this.renderBciFocus();
-      }, this.scan.intervalMs);
+      };
+      const firstDelay = Number(initialDelayMs);
+      if (Number.isFinite(firstDelay) && firstDelay > this.scan.intervalMs) {
+        this.scan.firstDwellUntil = Date.now() + firstDelay;
+        this.scan.timer = window.setTimeout(() => {
+          this.scan.firstDwellUntil = 0;
+          advance();
+          this.scan.timer = window.setInterval(advance, this.scan.intervalMs);
+        }, firstDelay);
+      } else {
+        this.scan.firstDwellUntil = 0;
+        this.scan.timer = window.setInterval(advance, this.scan.intervalMs);
+      }
     }
 
     removeBciUtilityButtons() {
@@ -627,7 +799,9 @@
       this.players[HUMAN].hand.forEach(tile => {
         candidates.push({ kind: "tile", tileId: tile.id, tileType: tile.type, label: Core.tileName(tile.type) });
       });
-      this.setScanPhase("discard", candidates, -1, candidates.length - 1);
+      // The newly drawn tile is the first highlighted card. Keep it visible for
+      // three seconds before the normal scan interval resumes.
+      this.setScanPhase("discard", candidates, -1, candidates.length - 1, 3000);
     }
 
     startGameOverScan() {
@@ -636,6 +810,29 @@
         { kind: "again", label: "再来一局" },
         { kind: "result_exit", label: "退出游戏" }
       ], 1, 0);
+    }
+
+    updateSoundButton() {
+      if (!this.el.settingsSound) return;
+      this.el.settingsSound.textContent = "游戏声音：" + (this.audio.enabled ? "开" : "关");
+      this.el.settingsSound.setAttribute("aria-pressed", this.audio.enabled ? "true" : "false");
+    }
+
+    settingsCandidates() {
+      return [
+        { kind: "settings_return", label: "返回牌局" },
+        { kind: "settings_sound", label: "游戏声音：" + (this.audio.enabled ? "开" : "关") },
+        { kind: "settings_restart", label: "重新开始" },
+        { kind: "settings_exit", label: "退出麻将" }
+      ];
+    }
+
+    toggleSound() {
+      this.audio.toggle();
+      this.updateSoundButton();
+      if (!this.el.settings.classList.contains("hidden")) {
+        this.setScanPhase("settings", this.settingsCandidates(), 1, 1);
+      }
     }
 
     openSettings() {
@@ -647,11 +844,7 @@
         };
       }
       this.el.settings.classList.remove("hidden");
-      this.setScanPhase("settings", [
-        { kind: "settings_return", label: "返回牌局" },
-        { kind: "settings_restart", label: "重新开始" },
-        { kind: "settings_exit", label: "退出麻将" }
-      ], 1, 0);
+      this.setScanPhase("settings", this.settingsCandidates(), 1, 0);
     }
 
     closeSettings() {
@@ -749,6 +942,7 @@
       else if (candidate.kind === "back_actions") this.syncBciForGamePhase();
       else if (candidate.kind === "settings") this.openSettings();
       else if (candidate.kind === "settings_return") this.closeSettings();
+      else if (candidate.kind === "settings_sound") this.toggleSound();
       else if (candidate.kind === "settings_restart") {
         this.requestConfirmation({
           kind: "restart",
@@ -792,6 +986,7 @@
       else if (current.kind === "back_actions") target = document.getElementById("bci-back-actions");
       else if (current.kind === "settings") target = document.getElementById("rules-settings-button");
       else if (current.kind === "settings_return") target = document.getElementById("settings-return-button");
+      else if (current.kind === "settings_sound") target = document.getElementById("settings-sound-button");
       else if (current.kind === "settings_restart") target = document.getElementById("settings-restart-button");
       else if (current.kind === "settings_exit") target = document.getElementById("settings-exit-button");
       else if (current.kind === "confirm_yes") target = document.getElementById("confirm-yes-button");

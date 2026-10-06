@@ -34,159 +34,72 @@ data class DetectorResult(
 
 class FourClassActionDetector(
     private val calibration: AsyncCalibration,
-    private val refractoryMs: Long = 250L,
-    private val sameDirectionIntervalMs: Long = 1_000L
+    @Suppress("UNUSED_PARAMETER") private val refractoryMs: Long = 250L,
+    @Suppress("UNUSED_PARAMETER") private val sameDirectionIntervalMs: Long = 1_000L
 ) {
     enum class State { REST, POSSIBLE_ACTION, IN_ACTION, REFRACTORY }
 
     private var state = State.REST
-    private var candidateClass = -1
-    private var candidateAge = 0
-    private var candidateHits = 0
-    private var activeClass = -1
-    private var releaseHits = 0
-    private var refractoryUntil = 0L
-    private val lastDirectionEventAt = LongArray(4) { Long.MIN_VALUE }
-    private var activeDirectionReturned = false
+    private val temporalEvidence = TemporalEvidenceAccumulator(CLASS_COUNT)
+    private val directionPhysicalEvidence = ArrayDeque<Boolean>()
+    private val bitePhysicalEvidence = ArrayDeque<Boolean>()
 
     fun reset() {
         state = State.REST
-        candidateClass = -1
-        candidateAge = 0
-        candidateHits = 0
-        activeClass = -1
-        releaseHits = 0
-        refractoryUntil = 0L
-        activeDirectionReturned = false
-        lastDirectionEventAt.fill(Long.MIN_VALUE)
+        temporalEvidence.reset()
+        directionPhysicalEvidence.clear()
+        bitePhysicalEvidence.clear()
     }
 
     fun update(
         probabilities: FloatArray,
         leftRaw: FloatArray,
         rightRaw: FloatArray,
-        timestampMs: Long
+        @Suppress("UNUSED_PARAMETER") timestampMs: Long
     ): DetectorResult {
         require(probabilities.size >= CLASS_COUNT)
         val features = calculateFeatures(leftRaw, rightRaw, calibration.directionMinStdUv)
-        val control = probabilities.copyOf()
-        when (features.allowedDirectionClass) {
-            LEFT_CLASS -> control[RIGHT_CLASS] = 0f
-            RIGHT_CLASS -> control[LEFT_CLASS] = 0f
-            else -> {
-                control[LEFT_CLASS] = 0f
-                control[RIGHT_CLASS] = 0f
-            }
-        }
+        val hasDirectionEvidence = features.allowedDirectionClass != null
+        // The differential feature validates that an eye movement happened.
+        // Its sign is phase-dependent in an asynchronous rolling window, so
+        // the model—not the sign heuristic—owns the left/right class decision.
+        directionPhysicalEvidence.pushEvidence(hasDirectionEvidence)
+        bitePhysicalEvidence.pushEvidence(features.activityStdUv >= calibration.biteMinStdUv)
 
         val strongBite = probabilities[BITE_CLASS] >= STRONG_BITE_PROBABILITY &&
             features.activityStdUv >= calibration.biteMinStdUv
-        val allowedDirection = features.allowedDirectionClass
-        val strongDirection = allowedDirection != null &&
-            probabilities[allowedDirection] >= STRONG_DIRECTION_PROBABILITY &&
+        val modelDirection = if (probabilities[LEFT_CLASS] >= probabilities[RIGHT_CLASS]) {
+            LEFT_CLASS
+        } else {
+            RIGHT_CLASS
+        }
+        val strongDirection = hasDirectionEvidence &&
+            probabilities[modelDirection] >= STRONG_DIRECTION_PROBABILITY &&
             abs(features.directionScore) >= STRONG_DIRECTION_SCORE &&
             features.activityStdUv >= calibration.directionMinStdUv
 
-        if (state == State.REFRACTORY && timestampMs >= refractoryUntil) {
-            state = State.REST
-        }
-        var event: Int? = null
-        when (state) {
-            State.REFRACTORY -> {
-                // 不应期尚未结束。
-            }
-            State.IN_ACTION -> {
-                val returned = activeClass == LEFT_CLASS &&
-                    features.directionScore >= BASE_DIRECTION_SCORE ||
-                    activeClass == RIGHT_CLASS && features.directionScore <= -BASE_DIRECTION_SCORE
-                if (returned) {
-                    activeDirectionReturned = true
-                    enterRefractory(timestampMs)
-                } else {
-                    if (control.getOrElse(activeClass) { 0f } <= EXIT_THRESHOLD) releaseHits++
-                    else releaseHits = 0
-                    if (releaseHits >= RELEASE_WINDOWS || probabilities[REST_CLASS] >= REST_RELEASE_THRESHOLD) {
-                        enterRefractory(timestampMs)
-                    }
-                }
-            }
-            State.REST, State.POSSIBLE_ACTION -> {
-                val immediate = when {
-                    strongBite -> BITE_CLASS
-                    strongDirection -> allowedDirection
-                    else -> null
-                }
-                if (immediate != null && canEmit(immediate, timestampMs)) {
-                    event = emit(immediate, timestampMs)
-                } else {
-                    val possible = bestEnteringClass(control)
-                    if (possible == null) {
-                        if (state == State.POSSIBLE_ACTION) {
-                            candidateAge++
-                            if (candidateAge >= CONFIRMATION_WINDOWS) clearCandidate()
-                        }
-                    } else {
-                        if (candidateClass != possible) {
-                            candidateClass = possible
-                            candidateAge = 1
-                            candidateHits = 1
-                            state = State.POSSIBLE_ACTION
-                        } else {
-                            candidateAge++
-                            candidateHits++
-                        }
-                        if (candidateHits >= REQUIRED_HITS && canEmit(possible, timestampMs)) {
-                            event = emit(possible, timestampMs)
-                        } else if (candidateAge >= CONFIRMATION_WINDOWS) {
-                            clearCandidate()
-                        }
-                    }
-                }
+        val temporal = temporalEvidence.update(probabilities) { candidate ->
+            when (candidate) {
+                LEFT_CLASS, RIGHT_CLASS -> directionPhysicalEvidence.count { it } >=
+                    AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
+                BITE_CLASS -> bitePhysicalEvidence.count { it } >=
+                    AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
+                else -> false
             }
         }
-        return DetectorResult(event, control, features, state, strongBite, strongDirection)
-    }
-
-    private fun bestEnteringClass(control: FloatArray): Int? {
-        // 咬牙证据优先接管尚未确认的方向候选。
-        if (control[BITE_CLASS] >= BITE_ENTER_THRESHOLD) return BITE_CLASS
-        val candidates = buildList {
-            if (control[LEFT_CLASS] >= DIRECTION_ENTER_THRESHOLD) add(LEFT_CLASS)
-            if (control[RIGHT_CLASS] >= DIRECTION_ENTER_THRESHOLD) add(RIGHT_CLASS)
+        state = when {
+            temporal.lockedClass != null -> State.IN_ACTION
+            temporal.candidateClass != REST_CLASS -> State.POSSIBLE_ACTION
+            else -> State.REST
         }
-        return candidates.maxByOrNull { control[it] }
-    }
-
-    private fun canEmit(classId: Int, timestampMs: Long): Boolean {
-        if (classId !in LEFT_CLASS..RIGHT_CLASS) return true
-        if (activeDirectionReturned) return true
-        val previous = lastDirectionEventAt[classId]
-        return previous == Long.MIN_VALUE || timestampMs - previous >= sameDirectionIntervalMs
-    }
-
-    private fun emit(classId: Int, timestampMs: Long): Int {
-        activeClass = classId
-        state = State.IN_ACTION
-        releaseHits = 0
-        clearCandidate(keepState = true)
-        if (classId in LEFT_CLASS..RIGHT_CLASS) lastDirectionEventAt[classId] = timestampMs
-        activeDirectionReturned = false
-        return classId
-    }
-
-    private fun enterRefractory(timestampMs: Long) {
-        state = State.REFRACTORY
-        refractoryUntil = timestampMs + refractoryMs
-        activeClass = -1
-        releaseHits = 0
-        clearCandidate(keepState = true)
-    }
-
-    private fun clearCandidate(keepState: Boolean = false) {
-        candidateClass = -1
-        candidateAge = 0
-        candidateHits = 0
-        if (!keepState) state = State.REST
+        return DetectorResult(
+            temporal.eventClass,
+            temporal.evidence,
+            features,
+            state,
+            strongBite,
+            strongDirection
+        )
     }
 
     companion object {
@@ -195,17 +108,10 @@ class FourClassActionDetector(
         const val LEFT_CLASS = 2
         const val RIGHT_CLASS = 3
         private const val CLASS_COUNT = 4
-        private const val BITE_ENTER_THRESHOLD = 0.75f
-        private const val DIRECTION_ENTER_THRESHOLD = 0.90f
         private const val STRONG_DIRECTION_PROBABILITY = 0.94f
         private const val STRONG_DIRECTION_SCORE = 0.80f
         private const val BASE_DIRECTION_SCORE = 0.50f
-        private const val STRONG_BITE_PROBABILITY = 0.50f
-        private const val EXIT_THRESHOLD = 0.30f
-        private const val REST_RELEASE_THRESHOLD = 0.70f
-        private const val CONFIRMATION_WINDOWS = 3
-        private const val REQUIRED_HITS = 2
-        private const val RELEASE_WINDOWS = 2
+        private const val STRONG_BITE_PROBABILITY = 0.90f
 
         fun calculateFeatures(
             left: FloatArray,
@@ -238,5 +144,10 @@ class FourClassActionDetector(
             }
             return WindowFeatures(std, score, allowed)
         }
+    }
+
+    private fun ArrayDeque<Boolean>.pushEvidence(value: Boolean) {
+        addLast(value)
+        while (size > AsyncWindowPolicy.EVIDENCE_WINDOWS) removeFirst()
     }
 }

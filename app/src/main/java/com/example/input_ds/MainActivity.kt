@@ -33,6 +33,7 @@ import com.example.input_ds.data.LanguageModel
 import com.example.input_ds.data.UserDictionary
 import com.example.input_ds.doudizhu.DoudizhuInputBus
 import com.example.input_ds.game.MazeAction
+import com.example.input_ds.game.MazeExitChoice
 import com.example.input_ds.game.MazeGame
 import com.example.input_ds.game.MazeProtocol
 import com.example.input_ds.game.SnakeAction
@@ -40,6 +41,8 @@ import com.example.input_ds.game.SnakeClimbGame
 import com.example.input_ds.mahjong.MahjongInputBus
 import com.example.input_ds.model.AppDestination
 import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.model.EntertainmentHubModule
+import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.HomeModule
 import com.example.input_ds.model.HomeSelectionState
 import com.example.input_ds.music.MusicInputBus
@@ -56,6 +59,7 @@ import com.example.input_ds.ui.components.MainScreen
 import com.example.input_ds.ui.doudizhu.DoudizhuScreen
 import com.example.input_ds.ui.game.MazeScreen
 import com.example.input_ds.ui.game.SnakeClimbScreen
+import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
 import com.example.input_ds.ui.mahjong.MahjongScreen
 import com.example.input_ds.ui.music.MusicScreen
@@ -76,6 +80,7 @@ class MainActivity : ComponentActivity() {
 
     private val destination = mutableStateOf(AppDestination.HOME)
     private val homeSelection = mutableStateOf(HomeSelectionState())
+    private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
     private val mazeState = mutableStateOf(
         MazeGame.create(MazeProtocol.FOUR_CLASS)
     )
@@ -94,7 +99,7 @@ class MainActivity : ComponentActivity() {
     private val wizardGameLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        navigateTo(AppDestination.HOME)
+        navigateTo(AppDestination.ENTERTAINMENT)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,6 +132,8 @@ class MainActivity : ComponentActivity() {
                         }
                     } else if (bleState in setOf(
                             NaoyunBleManager.State.IDLE,
+                            NaoyunBleManager.State.STREAM_STALLED,
+                            NaoyunBleManager.State.RECOVERING,
                             NaoyunBleManager.State.DISCONNECTED,
                             NaoyunBleManager.State.ERROR
                         )
@@ -153,24 +160,49 @@ class MainActivity : ComponentActivity() {
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
-            BackHandler { navigateTo(AppDestination.HOME) }
+            BackHandler {
+                val parent = when (destination.value) {
+                    AppDestination.ENTERTAINMENT -> AppDestination.HOME
+                    AppDestination.ASYNC_MAZE,
+                    AppDestination.SNAKE_CLIMB,
+                    AppDestination.WIZARD_GAME,
+                    AppDestination.CHINESE_CHESS,
+                    AppDestination.DOUDIZHU,
+                    AppDestination.MAHJONG,
+                    AppDestination.TV,
+                    AppDestination.MUSIC -> AppDestination.ENTERTAINMENT
+                    else -> AppDestination.HOME
+                }
+                navigateTo(parent)
+            }
         }
 
         when (destination.value) {
             AppDestination.HOME -> HomeScreen(
                 selection = homeSelection.value,
+                scanIntervalMs = vm.state.value.scanIntervalMs,
                 bleManager = bleManager,
                 onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
-                    homeSelection.value = HomeSelectionState(HomeModule.entries.indexOf(module))
+                    homeSelection.value = homeSelection.value.copy(
+                        selectedIndex = HomeModule.entries.indexOf(module)
+                    )
                     enterModule(module)
                 },
-                onMoveLeft = { homeSelection.value = homeSelection.value.moveLeft() },
-                onMoveRight = { homeSelection.value = homeSelection.value.moveRight() },
-                onConfirm = {
-                    homeSelection.value.selectedModule
-                        .takeUnless { it == HomeModule.SETTINGS }
-                        ?.let(::enterModule)
+                onAdvance = { homeSelection.value = homeSelection.value.advance() }
+            )
+
+            AppDestination.ENTERTAINMENT -> EntertainmentScreen(
+                selection = entertainmentSelection.value,
+                scanIntervalMs = vm.state.value.scanIntervalMs,
+                onSelect = { module ->
+                    entertainmentSelection.value = entertainmentSelection.value.copy(
+                        selectedIndex = EntertainmentHubModule.entries.indexOf(module)
+                    )
+                    enterEntertainmentModule(module)
+                },
+                onAdvance = {
+                    entertainmentSelection.value = entertainmentSelection.value.advance()
                 }
             )
 
@@ -179,8 +211,9 @@ class MainActivity : ComponentActivity() {
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
                 controlStatus = bciStatus.value,
-                onBack = { navigateTo(AppDestination.HOME) },
-                onAction = { action -> mazeState.value = MazeGame.applyAction(mazeState.value, action) },
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) },
+                onAction = ::applyMazeAction,
+                onExitDecision = ::resolveMazeExit,
                 onReset = { resetMazeForActiveModel() }
             )
 
@@ -188,7 +221,7 @@ class MainActivity : ComponentActivity() {
                 state = snakeState.value,
                 moveIntervalMs = vm.state.value.scanIntervalMs,
                 onAction = ::applySnakeAction,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.WIZARD_GAME -> AuroraBackground {
@@ -199,27 +232,27 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.CHINESE_CHESS -> ChineseChessScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.DOUDIZHU -> DoudizhuScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.MAHJONG -> MahjongScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
-            AppDestination.TELEVISION -> TvScreen(
+            AppDestination.TV -> TvScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.MUSIC -> MusicScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.HOME) }
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.SETTINGS -> CollectionScreen(
@@ -256,7 +289,9 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onBlockClick = vm::selectBlockByTouch,
                         onPinyinClick = vm::selectPinyinByTouch,
+                        onPinyinNavigationClick = vm::selectPinyinNavigationByTouch,
                         onCharacterClick = vm::selectCharacterByTouch,
+                        onCommonPhraseClick = vm::selectCommonPhraseByTouch,
                         onPredictionClick = vm::selectPredictionByTouch,
                         onInitialPredictionClick = vm::selectInitialPredictionByTouch
                     )
@@ -268,25 +303,32 @@ class MainActivity : ComponentActivity() {
     private fun enterModule(module: HomeModule) {
         when (module) {
             HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.INPUT_METHOD)
-            HomeModule.MAZE -> {
+            HomeModule.ENTERTAINMENT -> navigateTo(AppDestination.ENTERTAINMENT)
+            HomeModule.SETTINGS -> navigateTo(AppDestination.SETTINGS)
+        }
+    }
+
+    private fun enterEntertainmentModule(module: EntertainmentHubModule) {
+        when (module) {
+            EntertainmentHubModule.MAZE -> {
                 resetMazeForActiveModel()
                 if (bleManager.state.value == NaoyunBleManager.State.READY) restartBciController()
                 navigateTo(AppDestination.ASYNC_MAZE)
             }
-            HomeModule.SNAKE_CLIMB -> {
+            EntertainmentHubModule.SNAKE_CLIMB -> {
                 snakeState.value = SnakeClimbGame.create()
                 navigateTo(AppDestination.SNAKE_CLIMB)
             }
-            HomeModule.WIZARD_GAME -> {
+            EntertainmentHubModule.WIZARD_GAME -> {
                 navigateTo(AppDestination.WIZARD_GAME)
                 wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
             }
-            HomeModule.CHINESE_CHESS -> navigateTo(AppDestination.CHINESE_CHESS)
-            HomeModule.DOUDIZHU -> navigateTo(AppDestination.DOUDIZHU)
-            HomeModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
-            HomeModule.TELEVISION -> navigateTo(AppDestination.TELEVISION)
-            HomeModule.MUSIC -> navigateTo(AppDestination.MUSIC)
-            HomeModule.SETTINGS -> navigateTo(AppDestination.SETTINGS)
+            EntertainmentHubModule.CHINESE_CHESS -> navigateTo(AppDestination.CHINESE_CHESS)
+            EntertainmentHubModule.DOUDIZHU -> navigateTo(AppDestination.DOUDIZHU)
+            EntertainmentHubModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
+            EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
+            EntertainmentHubModule.MUSIC -> navigateTo(AppDestination.MUSIC)
+            EntertainmentHubModule.BACK -> navigateTo(AppDestination.HOME)
         }
     }
 
@@ -301,11 +343,19 @@ class MainActivity : ComponentActivity() {
         if (WizardGameInputBus.dispatch(signal)) return
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
-                ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.moveLeft()
-                ControlSignal.RIGHT_LOOK -> homeSelection.value = homeSelection.value.moveRight()
-                ControlSignal.BITE -> homeSelection.value.selectedModule
-                    .takeUnless { it == HomeModule.SETTINGS }
-                    ?.let(::enterModule)
+                ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.changeDirection(-1)
+                ControlSignal.RIGHT_LOOK -> homeSelection.value = homeSelection.value.changeDirection(1)
+                ControlSignal.BITE -> enterModule(homeSelection.value.selectedModule)
+                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            AppDestination.ENTERTAINMENT -> when (signal) {
+                ControlSignal.LEFT_LOOK -> entertainmentSelection.value =
+                    entertainmentSelection.value.changeDirection(-1)
+                ControlSignal.RIGHT_LOOK -> entertainmentSelection.value =
+                    entertainmentSelection.value.changeDirection(1)
+                ControlSignal.BITE -> enterEntertainmentModule(
+                    entertainmentSelection.value.selectedModule
+                )
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
@@ -317,7 +367,7 @@ class MainActivity : ComponentActivity() {
                     ControlSignal.LEFT_RIGHT -> MazeAction.LEFT_RIGHT
                     ControlSignal.RIGHT_LEFT -> MazeAction.RIGHT_LEFT
                 }
-                mazeState.value = MazeGame.applyAction(mazeState.value, action)
+                applyMazeAction(action)
             }
             AppDestination.SNAKE_CLIMB -> {
                 val action = when (signal) {
@@ -338,7 +388,7 @@ class MainActivity : ComponentActivity() {
             AppDestination.MAHJONG -> {
                 MahjongInputBus.dispatch(signal)
             }
-            AppDestination.TELEVISION -> {
+            AppDestination.TV -> {
                 TvInputBus.dispatch(signal)
             }
             AppDestination.MUSIC -> {
@@ -352,7 +402,7 @@ class MainActivity : ComponentActivity() {
     private fun applySnakeAction(action: SnakeAction) {
         val next = SnakeClimbGame.applyAction(snakeState.value, action)
         snakeState.value = next
-        if (next.exitRequested) navigateTo(AppDestination.HOME)
+        if (next.exitRequested) navigateTo(AppDestination.ENTERTAINMENT)
     }
 
     private fun startBciController() {
@@ -406,6 +456,18 @@ class MainActivity : ComponentActivity() {
         mazeState.value = MazeGame.create(protocol)
     }
 
+    private fun applyMazeAction(action: MazeAction) {
+        val nextState = MazeGame.applyAction(mazeState.value, action)
+        mazeState.value = nextState
+        if (nextState.exitConfirmed) navigateTo(AppDestination.ENTERTAINMENT)
+    }
+
+    private fun resolveMazeExit(choice: MazeExitChoice) {
+        val nextState = MazeGame.resolveExitDialog(mazeState.value, choice)
+        mazeState.value = nextState
+        if (nextState.exitConfirmed) navigateTo(AppDestination.ENTERTAINMENT)
+    }
+
     private fun activeModelIdentity(): String {
         val repository = PersonalizationRepository(applicationContext)
         val userId = repository.activeUserId() ?: return "builtin-four-class"
@@ -427,6 +489,8 @@ class MainActivity : ComponentActivity() {
         NaoyunBleManager.State.READY -> if (bciActive.value) "耳机已连接 · 控制运行中" else "耳机已连接"
         NaoyunBleManager.State.SCANNING -> "正在扫描耳机"
         NaoyunBleManager.State.CONNECTING, NaoyunBleManager.State.INITIALIZING -> "正在连接耳机"
+        NaoyunBleManager.State.STREAM_STALLED -> "耳机数据流中断"
+        NaoyunBleManager.State.RECOVERING -> "正在自动恢复耳机数据流"
         NaoyunBleManager.State.ERROR -> "耳机连接异常"
         else -> "耳机未连接"
     }
@@ -446,7 +510,14 @@ private fun DeviceFlow(
 ) {
     val bleState by bleManager.state.collectAsState()
     var screen by remember {
-        mutableStateOf(if (bleState == NaoyunBleManager.State.READY) "monitor" else "scan")
+        mutableStateOf(
+            if (bleState in setOf(
+                    NaoyunBleManager.State.READY,
+                    NaoyunBleManager.State.STREAM_STALLED,
+                    NaoyunBleManager.State.RECOVERING
+                )
+            ) "monitor" else "scan"
+        )
     }
 
     LaunchedEffect(bleState) {

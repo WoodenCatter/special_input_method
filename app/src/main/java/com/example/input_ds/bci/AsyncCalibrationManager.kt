@@ -20,6 +20,7 @@ import kotlin.math.roundToInt
 
 object AsyncCalibrationManager {
     private const val FILE_NAME = "async_calibration.json"
+    private const val CALIBRATION_VERSION = 2
     private const val TEMPLATE_POINTS = 64
     private const val FALLBACK_DIRECTION_STD_UV = 70f
     private const val FALLBACK_BITE_STD_UV = 105f
@@ -81,19 +82,33 @@ object AsyncCalibrationManager {
         val arrays = readStereoNpz(npz)
         val points = session.windowPoints
         val grouped = mutableMapOf<String, MutableList<TrialFeature>>()
-        session.markers.forEach { marker ->
-            val start = maxOf(marker.leftSample, marker.rightSample)
+        fun addFeature(label: String, start: Int) {
             val end = start + points
-            if (start < 0 || end > arrays.first.size || end > arrays.second.size) return@forEach
+            if (start < 0 || end > arrays.first.size || end > arrays.second.size) return
             val difference = FloatArray(points) { index -> arrays.first[start + index] - arrays.second[start + index] }
             require(difference.all(Float::isFinite)) { "Session 校准窗口包含 NaN/Inf" }
-            grouped.getOrPut(marker.label) { mutableListOf() }.add(
+            grouped.getOrPut(label) { mutableListOf() }.add(
                 TrialFeature(
                     activity = standardDeviation(difference),
                     robustSpan = robustSpan(difference),
                     template = normalizeTemplate(resample(difference, TEMPLATE_POINTS))
                 )
             )
+        }
+        if (session.asyncTrials.isNotEmpty()) {
+            session.asyncTrials.forEach { trial ->
+                addFeature(trial.taskLabel, trial.taskStartSample)
+                if (trial.taskStartSample - trial.trialStartSample >= points) {
+                    addFeature("rest", trial.trialStartSample)
+                }
+                if (trial.trialEndSample - trial.taskEndSample >= points) {
+                    addFeature("rest", trial.trialEndSample - points)
+                }
+            }
+        } else {
+            session.markers.forEach { marker ->
+                addFeature(marker.label, maxOf(marker.leftSample, marker.rightSample))
+            }
         }
         return when (session.protocol) {
             ClassificationProtocol.FOUR_CLASS -> generateFour(session, points, grouped, output)
@@ -219,6 +234,7 @@ object AsyncCalibrationManager {
             }
         }
         val content = JSONObject().apply {
+                put("calibration_version", CALIBRATION_VERSION)
                 put("protocol", session.protocol.wireName)
                 put("session_id", session.sessionId)
                 put("label_names", JSONArray(session.labelNames))
@@ -243,7 +259,8 @@ object AsyncCalibrationManager {
     ): AsyncCalibration? = runCatching {
         if (!file.isFile) return@runCatching null
         val json = JSONObject(file.readText(Charsets.UTF_8))
-        if (json.optString("protocol") != session.protocol.wireName ||
+        if (json.optInt("calibration_version", 1) != CALIBRATION_VERSION ||
+            json.optString("protocol") != session.protocol.wireName ||
             json.optInt("window_points") != expectedPoints
         ) return@runCatching null
         val sessionId = json.optString("session_id")
@@ -293,9 +310,16 @@ object AsyncCalibrationManager {
         windowPoints: Int
     ): Pair<Float, Float> {
         val coverage = minOf(1f, CollectionSettings.SAMPLE_RATE_HZ.toFloat() / windowPoints)
-        fun threshold(actionP10: Float, fraction: Float) =
-            minOf(actionP10, maxOf(restP95 * 1.5f, actionP10 * fraction * coverage))
-        return threshold(directionP10, 0.75f) to threshold(biteP10, 0.95f)
+        fun threshold(actionP10: Float, fraction: Float, restMultiplier: Float) =
+            minOf(
+                actionP10,
+                maxOf(restP95 * restMultiplier, actionP10 * fraction * coverage)
+            )
+        // Full cued trials overestimate the activity present in an arbitrary
+        // asynchronous sliding window. Keep a wide margin over rest while
+        // allowing windows that contain only part of the eye movement.
+        return threshold(directionP10, 0.60f, 2.5f) to
+            threshold(biteP10, 0.95f, 1.5f)
     }
 
     internal fun calculateSixThresholds(

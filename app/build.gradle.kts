@@ -18,7 +18,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Target tablets are ARM64; avoid packaging four copies of Godot and Rime.
+        // The rehabilitation tablet and the embedded Godot game use ARM64.
+        // Restricting the APK avoids packaging unused Godot and Rime runtimes.
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -42,9 +43,8 @@ android {
     buildFeatures {
         compose = true
     }
-    // Godot needs random access to the embedded pack. Keeping .pck uncompressed
-    // avoids inflating the whole game pack during every cold start.
     androidResources {
+        // Godot needs random access to its pack; bundled songs are already compressed.
         noCompress += listOf("pck", "mp3")
     }
 }
@@ -71,6 +71,14 @@ dependencies {
     // ONNX Runtime for EEG model inference
     implementation(libs.onnxruntime.android)
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Entertainment playback (music playlists and HLS television streams)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.datasource.okhttp)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp.dnsoverhttps)
 
     // Godot 4.7.1 runtime used by the embedded wizard game module.
     implementation("org.godotengine:godot:4.7.1.stable")

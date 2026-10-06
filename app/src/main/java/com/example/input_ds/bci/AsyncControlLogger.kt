@@ -35,10 +35,24 @@ internal class AsyncControlLogger(
         File(directory, "run.json").writeText(
             JSONObject().apply {
                 put("mode", "ASYNCHRONOUS")
+                put(
+                    "detector_contract",
+                    if (protocol == ClassificationProtocol.FOUR_CLASS) {
+                        "four-class-candidate-gate-support-temporal-v4"
+                    } else {
+                        "six-action-candidate-gate-support-temporal-v3"
+                    }
+                )
                 put("sample_rate_hz", 500)
                 put("window_points", windowPoints)
                 put("stride_points", stridePoints)
-                put("stride_fraction", AsyncWindowPolicy.STRIDE_FRACTION.toDouble())
+                put("stride_seconds", AsyncWindowPolicy.STRIDE_SECONDS.toDouble())
+                put("evidence_windows", AsyncWindowPolicy.EVIDENCE_WINDOWS)
+                put("confidence_threshold", AsyncWindowPolicy.CONFIDENCE_THRESHOLD.toDouble())
+                put("support_required", AsyncWindowPolicy.SUPPORT_REQUIRED)
+                put("evidence_mode", "support_confidence")
+                put("physical_support_required", AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED)
+                put("rest_reset_required", AsyncWindowPolicy.REST_RESET_REQUIRED)
                 put("protocol", protocol.wireName)
                 put("session_id", calibration.sessionId ?: JSONObject.NULL)
                 put("class_order", JSONArray(classOrder))
@@ -47,10 +61,7 @@ internal class AsyncControlLogger(
                 if (protocol == ClassificationProtocol.SIX_ACTION) {
                     put("sequence_min_std_uv", calibration.sequenceMinStdUv.toDouble())
                     put("sequence_min_span_uv", calibration.sequenceMinSpanUv.toDouble())
-                    put("template_min_correlation", 0.55)
-                    put("template_min_margin", 0.05)
                     put("template_shift_fraction", 0.25)
-                    put("model_template_fusion_weight", 0.5)
                 }
                 put("calibration_source", calibration.source)
                 put("preprocessing", preprocessing)
@@ -81,6 +92,8 @@ internal class AsyncControlLogger(
             put("activity_std_uv", decision.features.activityStdUv.toDouble())
             put("direction_score", decision.features.directionScore.toDouble())
             put("allowed_direction_class", decision.features.allowedDirectionClass ?: JSONObject.NULL)
+            put("direction_evidence", decision.features.allowedDirectionClass != null)
+            put("direction_class_source", "model")
             put("strong_bite", decision.strongBite)
             put("strong_direction", decision.strongDirection)
             put("detector_state", decision.state.name)

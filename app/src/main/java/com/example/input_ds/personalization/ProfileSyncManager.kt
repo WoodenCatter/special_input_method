@@ -1,6 +1,8 @@
 package com.example.input_ds.personalization
 
 import android.content.Context
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 /** Keeps the offline local identity linked to exactly one server profile for this device. */
 class ProfileSyncManager(context: Context) {
@@ -42,6 +44,32 @@ class ProfileSyncManager(context: Context) {
             .filter { it.isLegacy && it.clientProfileId == null }
     }
 
+    /** Restores normal server profiles after Android has deleted the app's private storage. */
+    fun restoreServerProfiles(): List<LocalUser> {
+        val binding = requireNotNull(repository.deviceServerBinding()) { "Device server account is not bound" }
+        val client = BrainApiClient(binding.serverUserId, binding.apiKey)
+        return client.listProfiles().map { original ->
+            val profile = if (original.clientProfileId == null && original.isLegacy) {
+                val recoveredClientId = legacyRecoveryClientId(original.profileId)
+                client.associateLegacyProfile(
+                    profileId = original.profileId,
+                    clientProfileId = recoveredClientId,
+                    displayName = original.displayName
+                )
+            } else {
+                original
+            }
+            profile.clientProfileId?.let { clientProfileId ->
+                repository.restoreRemoteProfile(
+                    profileId = profile.profileId,
+                    clientProfileId = clientProfileId,
+                    displayName = profile.displayName,
+                    enabled = profile.enabled
+                )
+            }
+        }.filterNotNull()
+    }
+
     fun associateLegacyProfile(localUserId: String, profileId: String): LocalUser {
         val localUser = requireNotNull(repository.findUser(localUserId)) { "Local user does not exist" }
         require(localUser.profileId == null) { "This local user already has a server profile" }
@@ -68,3 +96,8 @@ class ProfileSyncManager(context: Context) {
         const val PROFILE_DISABLED = "PROFILE_DISABLED"
     }
 }
+
+internal fun legacyRecoveryClientId(profileId: String): String =
+    UUID.nameUUIDFromBytes(
+        "inputds-legacy-profile:$profileId".toByteArray(StandardCharsets.UTF_8)
+    ).toString()

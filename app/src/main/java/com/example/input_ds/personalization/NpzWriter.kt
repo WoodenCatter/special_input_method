@@ -8,6 +8,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.zip.Deflater
 
 object NpzWriter {
     fun packFloatArrays(outputFile: File, arrays: Map<String, Pair<File, Int>>) {
@@ -15,6 +16,9 @@ object NpzWriter {
         outputFile.parentFile?.mkdirs()
         val temporary = File(outputFile.parentFile, "${outputFile.name}.tmp")
         ZipOutputStream(BufferedOutputStream(temporary.outputStream())).use { zip ->
+            // The stream is already uploaded in durable chunks; keep the local
+            // compatibility NPZ uncompressed so final packaging is I/O-bound.
+            zip.setLevel(Deflater.NO_COMPRESSION)
             arrays.forEach { (key, sourceAndCount) ->
                 val (source, count) = sourceAndCount
                 require(source.length() == count.toLong() * Float.SIZE_BYTES) {

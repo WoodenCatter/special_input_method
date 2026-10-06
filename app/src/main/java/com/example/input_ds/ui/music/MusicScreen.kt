@@ -137,6 +137,7 @@ fun MusicScreen(scanIntervalMs: Long, onBack: () -> Unit) {
     var playlistDirection by remember { mutableIntStateOf(1) }
     var volumeIndex by remember { mutableIntStateOf(0) }
     var settingsIndex by remember { mutableIntStateOf(0) }
+    var settingsDirection by remember { mutableIntStateOf(1) }
     var deleteIndex by remember { mutableIntStateOf(0) }
     var deleteDirection by remember { mutableIntStateOf(1) }
     var confirmIndex by remember { mutableIntStateOf(0) }
@@ -193,6 +194,7 @@ fun MusicScreen(scanIntervalMs: Long, onBack: () -> Unit) {
 
     fun openSettings() {
         settingsIndex = 0
+        settingsDirection = 1
         focusMode = MusicFocusMode.SETTINGS
     }
 
@@ -369,22 +371,14 @@ fun MusicScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             MusicFocusMode.SETTINGS -> when (signal) {
-                ControlSignal.LEFT_LOOK -> moveSettingsFocus(-1)
-                ControlSignal.RIGHT_LOOK -> moveSettingsFocus(1)
+                ControlSignal.LEFT_LOOK -> settingsDirection = -1
+                ControlSignal.RIGHT_LOOK -> settingsDirection = 1
                 ControlSignal.BITE -> executeSetting(settingsIndex)
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             MusicFocusMode.DELETE_LIST -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    deleteDirection = -1
-                    val candidateCount = tracks.size + 1
-                    deleteIndex = (deleteIndex - 1 + candidateCount) % candidateCount
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    deleteDirection = 1
-                    val candidateCount = tracks.size + 1
-                    deleteIndex = (deleteIndex + 1) % candidateCount
-                }
+                ControlSignal.LEFT_LOOK -> deleteDirection = -1
+                ControlSignal.RIGHT_LOOK -> deleteDirection = 1
                 ControlSignal.BITE -> {
                     if (deleteIndex == 0) returnFromOverlay()
                     else tracks.getOrNull(deleteIndex - 1)?.let(::requestDelete)
@@ -455,6 +449,13 @@ fun MusicScreen(scanIntervalMs: Long, onBack: () -> Unit) {
         if (focusMode == MusicFocusMode.PLAYLIST && tracks.isNotEmpty()) {
             delay(scanDelay)
             playlistIndex = (playlistIndex + playlistDirection + tracks.size) % tracks.size
+        }
+    }
+
+    LaunchedEffect(focusMode, settingsIndex, settingsDirection, tracks.size, scanDelay) {
+        if (focusMode == MusicFocusMode.SETTINGS) {
+            delay(scanDelay)
+            moveSettingsFocus(settingsDirection)
         }
     }
 
@@ -934,7 +935,7 @@ private fun SettingsOverlay(
 ) {
     MusicOverlay(widthFraction = .52f) {
         Text("音乐设置", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text("进入设置不会暂停歌曲 · 左看/右看移动焦点 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("进入设置不会暂停歌曲 · 光标自动跳转 · 左看/右看改变方向 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
         SETTINGS_LABELS.forEachIndexed { index, label ->
             val enabled = index != 1 || hasMusic
             FocusOptionButton(
@@ -963,7 +964,7 @@ private fun DeleteListOverlay(
     }
     MusicOverlay(widthFraction = .68f) {
         Text("删除音乐", style = MaterialTheme.typography.headlineMedium)
-        Text("光标自动跳转，咬牙选择后还会再次确认", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("光标自动跳转 · 左看/右看改变方向 · 咬牙选择后再次确认", color = MaterialTheme.colorScheme.onSurfaceVariant)
         FocusOptionButton(
             text = "返回设置",
             focused = selectedIndex == 0,

@@ -1,5 +1,6 @@
 package com.example.input_ds.personalization
 
+import com.example.input_ds.bci.AsyncWindowPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -40,6 +41,38 @@ class BrainApiClient(
         val totalTrainingJobs: Int
     )
     data class UploadResult(val datasetId: String, val version: Int, val preprocessingSha256: String?)
+    data class StreamingUploadSnapshot(val uploadId: String, val uploadedChunks: Set<Int>)
+    data class DatasetVersionRef(val datasetId: String, val version: Int)
+    data class ServerDataset(
+        val datasetId: String,
+        val version: Int,
+        val profileId: String,
+        val originalFilename: String,
+        val collectedAt: String,
+        val uploadedAt: String,
+        val sampleCount: Int,
+        val protocol: ClassificationProtocol,
+        val labelNames: List<String>,
+        val markers: List<SessionMarker>,
+        val asyncTrials: List<AsyncTrialAnnotation>,
+        val sessionId: String,
+        val rounds: Int,
+        val trainingEpochs: Int,
+        val windowPoints: Int,
+        val preprocessingSha256: String?
+    )
+    data class ServerTrainingJob(
+        val jobId: String,
+        val profileId: String,
+        val modelKey: String,
+        val datasets: List<DatasetVersionRef>,
+        val status: String,
+        val progress: Double,
+        val accuracy: Double?,
+        val error: String?,
+        val artifactAvailable: Boolean,
+        val updatedAt: String?
+    )
     data class JobSnapshot(
         val jobId: String,
         val status: String,
@@ -57,21 +90,30 @@ class BrainApiClient(
         val retryAfterSeconds: Long? = null
     ) : Exception(message) {
         val isTransient: Boolean get() = statusCode == 429 || statusCode == 502 || statusCode == 503 || statusCode < 0
+        val isStreamingUnsupported: Boolean
+            get() = statusCode == 404 || statusCode == 405 || statusCode == 501
     }
 
+    private val tokenCacheKey = UUID.nameUUIDFromBytes(
+        "$baseUrl\u0000$serverUserId\u0000$apiKey".toByteArray(StandardCharsets.UTF_8)
+    ).toString()
     @Volatile private var accessToken: String? = null
-    @Volatile private var tokenExpiresAtMs: Long = 0
 
     fun authenticate() {
-        val response = requestJson(
-            method = "POST",
-            path = "/api/v1/auth/token",
-            body = JSONObject().put("user_id", serverUserId).put("api_key", apiKey),
-            authenticated = false
-        )
-        accessToken = response.getString("access_token")
-        val expiresIn = response.optLong("expires_in", 900L)
-        tokenExpiresAtMs = System.currentTimeMillis() + (expiresIn - 30L).coerceAtLeast(30L) * 1000L
+        accessToken = AUTH_TOKENS.getOrLoad(tokenCacheKey) {
+            val response = requestJson(
+                method = "POST",
+                path = "/api/v1/auth/token",
+                body = JSONObject().put("user_id", serverUserId).put("api_key", apiKey),
+                authenticated = false
+            )
+            val expiresIn = response.optLong("expires_in", 900L)
+            SharedAuthTokenCache.Token(
+                value = response.getString("access_token"),
+                expiresAtMs = System.currentTimeMillis() +
+                    (expiresIn - 30L).coerceAtLeast(30L) * 1000L
+            )
+        }
     }
 
     fun listModels(): List<ServerModel> {
@@ -118,6 +160,41 @@ class BrainApiClient(
     fun listProfiles(): List<ServerProfile> {
         val response = requestArray("GET", "/api/v1/me/profiles")
         return List(response.length()) { parseProfile(response.getJSONObject(it)) }
+    }
+
+    fun listDatasets(profileId: String): List<ServerDataset> {
+        require(profileId.matches(PROFILE_ID_REGEX)) { "Invalid profile_id" }
+        val response = requestArray(
+            "GET",
+            "/api/v1/me/datasets?profile_id=${encodePath(profileId)}"
+        )
+        return List(response.length()) { parseDataset(response.getJSONObject(it)) }
+    }
+
+    fun listTrainingJobs(profileId: String): List<ServerTrainingJob> {
+        require(profileId.matches(PROFILE_ID_REGEX)) { "Invalid profile_id" }
+        val response = requestArray(
+            "GET",
+            "/api/v1/me/training-jobs?profile_id=${encodePath(profileId)}"
+        )
+        return List(response.length()) { parseTrainingJob(response.getJSONObject(it)) }
+    }
+
+    fun downloadDataset(
+        profileId: String,
+        datasetId: String,
+        version: Int,
+        destination: File
+    ) {
+        require(profileId.matches(PROFILE_ID_REGEX)) { "Invalid profile_id" }
+        require(datasetId.matches(PROFILE_ID_REGEX)) { "Invalid dataset_id" }
+        require(version > 0) { "Invalid dataset version" }
+        downloadBinary(
+            path = "/api/v1/me/datasets/${encodePath(datasetId)}/file" +
+                "?profile_id=${encodePath(profileId)}&version=$version",
+            destination = destination,
+            emptyMessage = "服务器返回的采集文件为空"
+        )
     }
 
     fun associateLegacyProfile(
@@ -204,7 +281,6 @@ class BrainApiClient(
 
     fun uploadContinuousDataset(
         session: TrainingSession,
-        run: ModelRun,
         npzFile: File
     ): UploadResult {
         require(npzFile.isFile && npzFile.length() > 0) { "连续 NPZ 文件不存在或为空" }
@@ -213,12 +289,11 @@ class BrainApiClient(
         while (true) {
             val response = uploadMultipart(
                 file = npzFile,
-                metadata = buildDatasetMetadata(session, run),
+                metadata = buildDatasetMetadata(session),
                 profileId = requireNotNull(session.profileId) { "Session has no server profile_id" }
             )
             if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED && !refreshed) {
-                accessToken = null
-                authenticate()
+                refreshTokenAfterUnauthorized()
                 refreshed = true
                 continue
             }
@@ -232,6 +307,152 @@ class BrainApiClient(
         }
     }
 
+    /** Uploads every locally sealed chunk. It is safe to call repeatedly after process death. */
+    internal fun uploadAvailableStreamingChunks(store: StreamingUploadStore) {
+        var manifest = requireNotNull(store.load()) { "本地流式上传清单不存在" }
+        if (manifest.unsupported || manifest.finalized) return
+        val profileId = requireNotNull(manifest.profileId) { "流式上传缺少 profile_id" }
+        val snapshot = if (manifest.uploadId == null) {
+            createStreamingUpload(manifest, profileId)
+        } else {
+            getStreamingUpload(manifest.uploadId)
+        }
+        store.setRemote(snapshot.uploadId, snapshot.uploadedChunks)
+        manifest = requireNotNull(store.load())
+        for (chunk in manifest.chunks.filterNot { it.uploaded }.sortedBy { it.index }) {
+            val file = store.chunkFile(chunk)
+            require(file.isFile && file.length() > 0) { "流式分块 ${chunk.index} 丢失" }
+            uploadStreamingChunk(snapshot.uploadId, chunk, file)
+            store.markUploaded(chunk.index)
+        }
+    }
+
+    /** Finalizes the already uploaded stream and returns a normal trainable dataset version. */
+    internal fun finalizeStreamingDataset(
+        session: TrainingSession,
+        store: StreamingUploadStore
+    ): UploadResult {
+        store.finalizedResult()?.let { return it }
+        val profileId = requireNotNull(session.profileId) { "Session has no server profile_id" }
+        store.setProfileId(profileId)
+        uploadAvailableStreamingChunks(store)
+        val manifest = requireNotNull(store.load())
+        require(manifest.chunks.isNotEmpty()) { "没有可提交的流式分块" }
+        require(manifest.chunks.all { it.uploaded }) { "仍有流式分块未上传" }
+        require(manifest.chunks.sumOf { it.sampleCount.toLong() } == session.sampleCount.toLong()) {
+            "流式分块总点数与 Session 不一致"
+        }
+        val uploadId = requireNotNull(manifest.uploadId)
+        val body = JSONObject().apply {
+            put("profile_id", profileId)
+            put("client_session_id", session.sessionId)
+            put("total_sample_count", session.sampleCount)
+            put("metadata", buildDatasetMetadata(session))
+            put("chunks", JSONArray().apply {
+                manifest.chunks.sortedBy { it.index }.forEach { chunk ->
+                    put(JSONObject().apply {
+                        put("index", chunk.index)
+                        put("start_sample", chunk.startSample)
+                        put("sample_count", chunk.sampleCount)
+                        put("sha256", chunk.sha256)
+                    })
+                }
+            })
+        }
+        val json = requestJson(
+            "POST",
+            "/api/v1/me/streaming-datasets/${encodePath(uploadId)}/finalize",
+            body
+        )
+        return UploadResult(
+            datasetId = json.getString("dataset_id"),
+            version = json.getInt("version"),
+            preprocessingSha256 = json.optNullableString("inference_preprocessing_sha256")
+        ).also(store::markFinalized)
+    }
+
+    private fun createStreamingUpload(
+        manifest: StreamingUploadManifest,
+        profileId: String
+    ): StreamingUploadSnapshot {
+        val body = JSONObject().apply {
+            put("profile_id", profileId)
+            put("client_session_id", manifest.sessionId)
+            put("protocol_version", StreamingUploadStore.STREAM_PROTOCOL_VERSION)
+            put("chunk_format_version", StreamingUploadStore.CHUNK_FORMAT_VERSION)
+            put("chunk_points", manifest.chunkPoints)
+            put("sampling_rate_hz", CollectionSettings.SAMPLE_RATE_HZ)
+            put("channels", JSONArray(listOf("left_ear", "right_ear")))
+            put("value_unit", "uV")
+            put("classification_protocol", manifest.protocol.serverWireName)
+            put("label_names", JSONArray(manifest.labelNames))
+            put(
+                "inference_preprocessing",
+                PreprocessingPreset.UNIFIED_1_45.contract(
+                    (manifest.actionSeconds * CollectionSettings.SAMPLE_RATE_HZ).roundToInt()
+                )
+            )
+        }
+        return parseStreamingSnapshot(requestJson("POST", "/api/v1/me/streaming-datasets", body))
+    }
+
+    private fun getStreamingUpload(uploadId: String): StreamingUploadSnapshot =
+        parseStreamingSnapshot(
+            requestJson("GET", "/api/v1/me/streaming-datasets/${encodePath(uploadId)}")
+        )
+
+    private fun parseStreamingSnapshot(json: JSONObject): StreamingUploadSnapshot {
+        val uploaded = json.optJSONArray("uploaded_chunks") ?: JSONArray()
+        return StreamingUploadSnapshot(
+            uploadId = json.getString("upload_id"),
+            uploadedChunks = buildSet {
+                for (index in 0 until uploaded.length()) {
+                    when (val item = uploaded.opt(index)) {
+                        is Number -> add(item.toInt())
+                        is JSONObject -> add(item.getInt("index"))
+                    }
+                }
+            }
+        )
+    }
+
+    private fun uploadStreamingChunk(uploadId: String, chunk: StreamingChunk, file: File) {
+        ensureToken()
+        var refreshed = false
+        while (true) {
+            val connection = openConnection(
+                "PUT",
+                "/api/v1/me/streaming-datasets/${encodePath(uploadId)}/chunks/${chunk.index}",
+                authenticated = true
+            ).apply {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/vnd.inputds.eeg-chunk")
+                setRequestProperty("X-Chunk-SHA256", chunk.sha256)
+                setRequestProperty("X-Start-Sample", chunk.startSample.toString())
+                setRequestProperty("X-Sample-Count", chunk.sampleCount.toString())
+                setFixedLengthStreamingMode(file.length())
+            }
+            val response = try {
+                BufferedOutputStream(connection.outputStream).use { output ->
+                    file.inputStream().use { it.copyTo(output) }
+                }
+                Response(connection.responseCode, readBody(connection), connection.getHeaderField("Retry-After"))
+            } catch (error: Exception) {
+                connection.disconnect()
+                throw ApiException(-1, error.message ?: "流式分块上传失败")
+            } finally {
+                connection.disconnect()
+            }
+            if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED && !refreshed) {
+                refreshTokenAfterUnauthorized()
+                refreshed = true
+                continue
+            }
+            checkResponse(response)
+            return
+        }
+    }
+
     fun createTrainingJob(session: TrainingSession, run: ModelRun): JobSnapshot {
         val datasetId = requireNotNull(run.datasetId)
         val version = requireNotNull(run.datasetVersion)
@@ -239,7 +460,7 @@ class BrainApiClient(
             put("profile_id", requireNotNull(session.profileId) { "Session has no server profile_id" })
             put("model_key", run.modelKey)
             put("datasets", JSONArray().put(JSONObject().put("dataset_id", datasetId).put("version", version)))
-            put("validation_split", 0.25)
+            put("validation_split", if (session.asyncTrials.isEmpty()) 0.25 else 0.15)
             put("hyperparameters", JSONObject().apply {
                 put("label_names", JSONArray(session.labelNames))
                 put("epochs", session.trainingEpochs)
@@ -263,7 +484,10 @@ class BrainApiClient(
             if (request.optString("profile_id") != profileId) continue
             if (request.optString("model_key") != run.modelKey) continue
             val requestedProtocol = request.optString("protocol")
-            if (requestedProtocol.isNotBlank() && requestedProtocol != session.protocol.wireName) continue
+            if (
+                requestedProtocol.isNotBlank() &&
+                requestedProtocol !in setOf(session.protocol.wireName, session.protocol.serverWireName)
+            ) continue
             val requestedEpochs = request.optJSONObject("hyperparameters")
                 ?.optInt("epochs", 20) ?: 20
             if (requestedEpochs != session.trainingEpochs) continue
@@ -286,18 +510,25 @@ class BrainApiClient(
         parseJob(requestJson("GET", "/api/v1/me/training-jobs/$jobId"))
 
     fun downloadModel(jobId: String, destination: File) {
+        downloadBinary(
+            path = "/api/v1/me/training-jobs/$jobId/model",
+            destination = destination,
+            emptyMessage = "服务器返回的 ONNX 文件为空"
+        )
+    }
+
+    private fun downloadBinary(path: String, destination: File, emptyMessage: String) {
         ensureToken()
         var refreshed = false
         while (true) {
-            val connection = openConnection("GET", "/api/v1/me/training-jobs/$jobId/model", authenticated = true)
+            val connection = openConnection("GET", path, authenticated = true)
             val code = runCatching { connection.responseCode }.getOrElse {
                 connection.disconnect()
                 throw ApiException(-1, it.message ?: "网络连接失败")
             }
             if (code == HttpURLConnection.HTTP_UNAUTHORIZED && !refreshed) {
                 connection.disconnect()
-                accessToken = null
-                authenticate()
+                refreshTokenAfterUnauthorized()
                 refreshed = true
                 continue
             }
@@ -311,12 +542,13 @@ class BrainApiClient(
                 BufferedOutputStream(destination.outputStream()).use { output -> input.copyTo(output) }
             }
             connection.disconnect()
-            require(destination.length() > 0) { "服务器返回的 ONNX 文件为空" }
+            require(destination.length() > 0) { emptyMessage }
             return
         }
     }
 
-    private fun buildDatasetMetadata(session: TrainingSession, run: ModelRun): JSONObject = JSONObject().apply {
+    private fun buildDatasetMetadata(session: TrainingSession): JSONObject = JSONObject().apply {
+        val windowPoints = (session.actionSeconds * CollectionSettings.SAMPLE_RATE_HZ).roundToInt()
         put("collected_at", session.collectedAtIso)
         put("data_mode", "continuous_marked")
         put("data_format", "npz")
@@ -328,13 +560,41 @@ class BrainApiClient(
             put("right_key", "right")
         })
         put("sampling_rate_hz", CollectionSettings.SAMPLE_RATE_HZ)
+        put("classification_protocol", session.protocol.serverWireName)
+        put("label_names", JSONArray(session.labelNames))
         put("channels", JSONArray(listOf("left_ear", "right_ear")))
         put("channel_order", JSONArray(listOf("left_ear", "right_ear")))
         put("value_unit", "uV")
         put("sample_count", session.sampleCount)
-        put("target_points", (session.actionSeconds * CollectionSettings.SAMPLE_RATE_HZ).roundToInt())
-        put("markers", JSONArray().apply { session.markers.forEach { put(it.toJson()) } })
-        put("inference_preprocessing", run.preset.contract((session.actionSeconds * CollectionSettings.SAMPLE_RATE_HZ).roundToInt()))
+        put("target_points", windowPoints)
+        put("markers", JSONArray().apply {
+            session.markers.forEach { marker ->
+                put(marker.toJson().apply {
+                    if (markerRoundForUpload(marker.round) == null) remove("round")
+                })
+            }
+        })
+        if (session.asyncTrials.isNotEmpty()) {
+            put("async_trials", JSONArray().apply { session.asyncTrials.forEach { put(it.toJson()) } })
+            put("async_windowing", JSONObject().apply {
+                put("version", "2")
+                put("window_points", windowPoints)
+                put("stride_points", AsyncWindowPolicy.stridePoints(windowPoints))
+                put("task_overlap_samples", AsyncWindowPolicy.taskOverlapPoints(windowPoints))
+                put("evidence_windows", AsyncWindowPolicy.EVIDENCE_WINDOWS)
+                put("confidence_threshold", AsyncWindowPolicy.CONFIDENCE_THRESHOLD.toDouble())
+                put("support_required", AsyncWindowPolicy.SUPPORT_REQUIRED)
+                put("evidence_mode", "support_confidence")
+                put("physical_support_required", AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED)
+                put("rest_reset_required", AsyncWindowPolicy.REST_RESET_REQUIRED)
+            })
+        }
+        put(
+            "inference_preprocessing",
+            PreprocessingPreset.UNIFIED_1_45.contract(
+                windowPoints
+            )
+        )
         put("training_windows", JSONObject().apply {
             put("start_offset_samples", 0)
             put("augmentation_count", 1)
@@ -342,8 +602,8 @@ class BrainApiClient(
         })
         put("device", "android-ear-eeg-v1")
         put("parameters", JSONObject().apply {
-            put("protocol_version", "input-adapter-v2")
-            put("classification_protocol", session.protocol.wireName)
+            put("protocol_version", if (session.asyncTrials.isEmpty()) "input-adapter-v2" else "async-trial-v1")
+            put("classification_protocol", session.protocol.serverWireName)
             put("session_id", session.sessionId)
             put("rounds", session.rounds)
             put("training_epochs", session.trainingEpochs)
@@ -359,6 +619,70 @@ class BrainApiClient(
             progress = json.optDouble("progress", 0.0),
             accuracy = metrics?.optDouble("accuracy", Double.NaN)?.takeIf { it.isFinite() },
             error = json.optNullableString("error"),
+            updatedAt = json.optNullableString("updated_at")
+        )
+    }
+
+    private fun parseDataset(json: JSONObject): ServerDataset {
+        val labelsJson = json.optJSONArray("label_names") ?: JSONArray()
+        val labels = List(labelsJson.length()) { labelsJson.getString(it) }
+        val protocol = ClassificationProtocol.fromWireName(
+            json.optString("classification_protocol")
+        ) ?: ClassificationProtocol.inferLegacy(labels)
+            ?: error("服务器数据缺少可识别的分类协议")
+        require(labels == protocol.labelNames) { "服务器数据标签顺序与分类协议不一致" }
+        val markersJson = json.optJSONArray("markers") ?: JSONArray()
+        val trialsJson = json.optJSONArray("async_trials") ?: JSONArray()
+        val parameters = json.optJSONObject("parameters") ?: JSONObject()
+        val windowPoints = json.optJSONObject("inference_preprocessing")
+            ?.optInt("window_points", 0)
+            ?.takeIf { it > 0 }
+            ?: json.optInt("target_points", 0).takeIf { it > 0 }
+            ?: CollectionSettings.SAMPLE_RATE_HZ
+        return ServerDataset(
+            datasetId = json.getString("dataset_id"),
+            version = json.getInt("version"),
+            profileId = json.getString("profile_id"),
+            originalFilename = json.optString("original_filename", "recording.npz"),
+            collectedAt = json.getString("collected_at"),
+            uploadedAt = json.getString("uploaded_at"),
+            sampleCount = json.optInt("sample_count", windowPoints).coerceAtLeast(1),
+            protocol = protocol,
+            labelNames = labels,
+            markers = List(markersJson.length()) {
+                SessionMarker.fromJson(markersJson.getJSONObject(it))
+            },
+            asyncTrials = List(trialsJson.length()) {
+                AsyncTrialAnnotation.fromJson(trialsJson.getJSONObject(it))
+            },
+            sessionId = parameters.optString("session_id")
+                .takeIf { it.isNotBlank() }
+                ?: json.getString("dataset_id"),
+            rounds = parameters.optInt("rounds", 1).coerceAtLeast(1),
+            trainingEpochs = parameters.optInt("training_epochs", 20).coerceAtLeast(1),
+            windowPoints = windowPoints,
+            preprocessingSha256 = json.optNullableString("inference_preprocessing_sha256")
+        )
+    }
+
+    private fun parseTrainingJob(json: JSONObject): ServerTrainingJob {
+        val request = json.getJSONObject("request")
+        val refs = request.getJSONArray("datasets")
+        val metrics = json.optJSONObject("metrics")
+        return ServerTrainingJob(
+            jobId = json.getString("job_id"),
+            profileId = json.getString("profile_id"),
+            modelKey = request.getString("model_key"),
+            datasets = List(refs.length()) { index ->
+                refs.getJSONObject(index).let {
+                    DatasetVersionRef(it.getString("dataset_id"), it.getInt("version"))
+                }
+            },
+            status = json.optString("status", "queued"),
+            progress = json.optDouble("progress", 0.0),
+            accuracy = metrics?.optDouble("accuracy", Double.NaN)?.takeIf { it.isFinite() },
+            error = json.optNullableString("error"),
+            artifactAvailable = json.optNullableString("artifact_filename") != null,
             updatedAt = json.optNullableString("updated_at")
         )
     }
@@ -385,8 +709,7 @@ class BrainApiClient(
         while (true) {
             val response = execute(method, path, body?.toString()?.toByteArray(StandardCharsets.UTF_8), authenticated)
             if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED && authenticated && !refreshed) {
-                accessToken = null
-                authenticate()
+                refreshTokenAfterUnauthorized()
                 refreshed = true
                 continue
             }
@@ -401,8 +724,7 @@ class BrainApiClient(
         while (true) {
             val response = execute(method, path, authenticated = true)
             if (response.code == HttpURLConnection.HTTP_UNAUTHORIZED && !refreshed) {
-                accessToken = null
-                authenticate()
+                refreshTokenAfterUnauthorized()
                 refreshed = true
                 continue
             }
@@ -412,7 +734,14 @@ class BrainApiClient(
     }
 
     private fun ensureToken() {
-        if (accessToken == null || System.currentTimeMillis() >= tokenExpiresAtMs) authenticate()
+        authenticate()
+    }
+
+    private fun refreshTokenAfterUnauthorized() {
+        val rejectedToken = accessToken
+        AUTH_TOKENS.invalidate(tokenCacheKey, rejectedToken)
+        accessToken = null
+        authenticate()
     }
 
     private fun execute(
@@ -525,6 +854,8 @@ class BrainApiClient(
     private data class Response(val code: Int, val body: String, val retryAfter: String?)
 
     companion object {
+        private val AUTH_TOKENS = SharedAuthTokenCache()
+
         internal fun supportedProtocolsFromWireNames(
             wireNames: List<String>?
         ): Set<ClassificationProtocol> = wireNames?.mapNotNull(
@@ -540,3 +871,6 @@ class BrainApiClient(
             URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
     }
 }
+
+/** Legacy server records used zero as "round not recorded"; the current API represents it by omission. */
+internal fun markerRoundForUpload(round: Int): Int? = round.takeIf { it >= 1 }

@@ -28,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.input_ds.bci.EegScopePlotBuffer
-import com.example.input_ds.bci.EegPreprocessStep
 import com.example.input_ds.bci.EegPreprocessor
 import com.example.input_ds.bci.NaoyunBleManager
 import com.example.input_ds.ui.theme.DarkBackground
@@ -40,13 +39,6 @@ import com.example.input_ds.ui.theme.SurfaceDark
 import com.example.input_ds.ui.theme.TextGray
 import com.example.input_ds.ui.theme.TextWhite
 import com.example.input_ds.ui.theme.auroraBackground
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun BleScanScreen(
@@ -165,6 +157,7 @@ fun SignalMonitorScreen(
     onDisconnect: () -> Unit = {}
 ) {
     val deviceInfo by bleManager.deviceInfo.collectAsState()
+    val streamDiagnostics by bleManager.streamDiagnostics.collectAsState()
 
     Column(Modifier.fillMaxSize().auroraBackground().padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
@@ -196,8 +189,35 @@ fun SignalMonitorScreen(
             fontSize = 10.sp,
             color = TextGray
         )
+        if (streamDiagnostics.leftLeadOff != null || streamDiagnostics.rightLeadOff != null) {
+            Text(
+                "电极接触原始值 L:${streamDiagnostics.leftLeadOff ?: "--"} " +
+                    "R:${streamDiagnostics.rightLeadOff ?: "--"}（数值突变时优先检查佩戴）",
+                fontSize = 10.sp,
+                color = TextGray
+            )
+        }
+        if (streamDiagnostics.leftRateHz != null && streamDiagnostics.rightRateHz != null) {
+            Text(
+                "时钟 L:${"%.2f".format(streamDiagnostics.leftRateHz)} Hz " +
+                    "R:${"%.2f".format(streamDiagnostics.rightRateHz)} Hz · " +
+                    "拟合P95 ${"%.1f".format(streamDiagnostics.leftClockResidualMs ?: 0.0)}/" +
+                    "${"%.1f".format(streamDiagnostics.rightClockResidualMs ?: 0.0)} ms",
+                fontSize = 10.sp,
+                color = TextGray
+            )
+        }
         Spacer(Modifier.height(4.dp))
 
+        if (streamDiagnostics.delayed || streamDiagnostics.stalledSide != null) {
+            Text(
+                "数据延迟 L:${streamDiagnostics.leftAgeMs ?: "--"}ms " +
+                    "R:${streamDiagnostics.rightAgeMs ?: "--"}ms " +
+                    "配对:${streamDiagnostics.pairAgeMs ?: "--"}ms",
+                fontSize = 10.sp,
+                color = ErrorRed
+            )
+        }
         AndroidView(
             factory = { EegStereoView(it, bleManager) },
             modifier = Modifier.weight(1f).fillMaxWidth()
@@ -207,7 +227,7 @@ fun SignalMonitorScreen(
     }
 }
 
-/** Aurora glass styled, fixed-range five-second stereo signal plot. */
+/** Aurora glass styled, fixed-range five-second rolling timeline. */
 @SuppressLint("ViewConstructor")
 internal class EegStereoView(
     context: Context,
@@ -217,13 +237,9 @@ internal class EegStereoView(
     private val rightBuffer = EegScopePlotBuffer(BUFFER_SIZE)
     private var leftSnapshot = leftBuffer.snapshot()
     private var rightSnapshot = rightBuffer.snapshot()
-    private var lastRenderedCount = -1
     private val leftPath = Path()
     private val rightPath = Path()
     private var refreshRunning = false
-    private var processingScope =
-        CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private var processingJob: Job? = null
 
     private val panelBackground = android.graphics.Color.parseColor("#0B1025")
     private val headerBackground = android.graphics.Color.parseColor("#121936")
@@ -292,9 +308,6 @@ internal class EegStereoView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        processingScope.cancel()
-        processingScope =
-            CoroutineScope(Dispatchers.Default + SupervisorJob())
         resetPlot()
         refreshRunning = true
         removeCallbacks(refreshRunnable)
@@ -304,65 +317,31 @@ internal class EegStereoView(
     override fun onDetachedFromWindow() {
         refreshRunning = false
         removeCallbacks(refreshRunnable)
-        processingJob?.cancel()
-        processingScope.cancel()
         super.onDetachedFromWindow()
     }
 
     private fun resetPlot() {
-        processingJob?.cancel()
         leftBuffer.reset()
         rightBuffer.reset()
         leftSnapshot = leftBuffer.snapshot()
         rightSnapshot = rightBuffer.snapshot()
-        lastRenderedCount = -1
         invalidate()
     }
 
     private fun requestVisibleWindow() {
-        val currentCount = bleManager.buffer.synchronizedCount()
-        if (currentCount == lastRenderedCount) return
-        if (currentCount <= 0) {
-            leftBuffer.reset()
-            rightBuffer.reset()
-            leftSnapshot = leftBuffer.snapshot()
-            rightSnapshot = rightBuffer.snapshot()
-            lastRenderedCount = currentCount
-            invalidate()
-            return
-        }
-        if (processingJob?.isActive == true) return
-
-        val startSample = (currentCount - BUFFER_SIZE).coerceAtLeast(0)
-        processingJob = processingScope.launch {
-            // The graph always uses the product-level display contract. Raw
-            // samples remain unchanged for upload and collection storage.
-            val leftRaw = bleManager.buffer.getLeftRange(startSample, currentCount)
-            val rightRaw = bleManager.buffer.getRightRange(startSample, currentCount)
-            val alignedCount = minOf(leftRaw.size, rightRaw.size)
-            if (alignedCount == 0) return@launch
-            val leftProcessed = EegPreprocessor.preprocessForDisplay(
-                leftRaw.copyOf(alignedCount),
-                DISPLAY_PREPROCESSING
-            ) ?: return@launch
-            val rightProcessed = EegPreprocessor.preprocessForDisplay(
-                rightRaw.copyOf(alignedCount),
-                DISPLAY_PREPROCESSING
-            ) ?: return@launch
-            withContext(Dispatchers.Main.immediate) {
-                if (!refreshRunning || !isAttachedToWindow) {
-                    return@withContext
-                }
-                leftBuffer.reset()
-                rightBuffer.reset()
-                leftBuffer.appendAligned(startSample, leftProcessed)
-                rightBuffer.appendAligned(startSample, rightProcessed)
-                leftSnapshot = leftBuffer.snapshot()
-                rightSnapshot = rightBuffer.snapshot()
-                lastRenderedCount = currentCount
-                invalidate()
-            }
-        }
+        // Rebuild the complete visible window on the latest two clock models.
+        // Incrementally appending a permanently aligned stream would freeze old
+        // timing errors and make the channels drift apart during a long session.
+        val raw = bleManager.latestAlignedWindowAtMost(BUFFER_SIZE, MIN_VISIBLE_POINTS) ?: return
+        val left = EegPreprocessor.filterForDisplay(raw.left)
+        val right = EegPreprocessor.filterForDisplay(raw.right)
+        leftBuffer.reset()
+        rightBuffer.reset()
+        leftBuffer.append(left)
+        rightBuffer.append(right)
+        leftSnapshot = leftBuffer.snapshot()
+        rightSnapshot = rightBuffer.snapshot()
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -398,7 +377,9 @@ internal class EegStereoView(
         canvas.drawText("+200µV", 6f, plotTop + 24f, axisPaint)
         canvas.drawText("0", 6f, plotCenter + 8f, axisPaint)
         canvas.drawText("-200µV", 6f, plotBottom - 6f, axisPaint)
-        canvas.drawText("过去 5 秒", width - 92f, height - 6f, axisPaint)
+        canvas.drawText("-5 s", 6f, height - 6f, axisPaint)
+        val nowLabel = "现在"
+        canvas.drawText(nowLabel, width - axisPaint.measureText(nowLabel) - 6f, height - 6f, axisPaint)
 
         if (minOf(leftSnapshot.validCount, rightSnapshot.validCount) < 2) {
             canvas.drawText("等待数据…", width / 2f - 80f, plotCenter, emptyPaint)
@@ -411,6 +392,13 @@ internal class EegStereoView(
         drawSnapshot(canvas, rightSnapshot, rightPath, rightPaint, width, plotCenter, plotHeight)
 
         canvas.restore()
+        when (bleManager.state.value) {
+            NaoyunBleManager.State.STREAM_STALLED ->
+                canvas.drawText("双耳数据流中断", width / 2f - 110f, plotCenter, emptyPaint)
+            NaoyunBleManager.State.RECOVERING ->
+                canvas.drawText("正在自动恢复数据流…", width / 2f - 140f, plotCenter, emptyPaint)
+            else -> Unit
+        }
     }
 
     private fun drawSnapshot(
@@ -422,39 +410,19 @@ internal class EegStereoView(
         plotCenter: Float,
         plotHeight: Float
     ) {
-        when {
-            snapshot.validCount < BUFFER_SIZE ->
-                drawSegment(canvas, snapshot.values, 0, snapshot.validCount, path, paint, width, plotCenter, plotHeight)
-            snapshot.writePosition == 0 ->
-                drawSegment(canvas, snapshot.values, 0, BUFFER_SIZE, path, paint, width, plotCenter, plotHeight)
-            else -> {
-                drawSegment(canvas, snapshot.values, 0, snapshot.writePosition, path, paint, width, plotCenter, plotHeight)
-                drawSegment(canvas, snapshot.values, snapshot.writePosition, BUFFER_SIZE, path, paint, width, plotCenter, plotHeight)
-            }
-        }
-    }
-
-    private fun drawSegment(
-        canvas: Canvas,
-        values: FloatArray,
-        start: Int,
-        endExclusive: Int,
-        path: Path,
-        paint: Paint,
-        width: Float,
-        plotCenter: Float,
-        plotHeight: Float
-    ) {
-        if (endExclusive - start < 2) return
-        val step = maxOf(1, (endExclusive - start) / MAX_POINTS_PER_SEGMENT)
+        if (snapshot.validCount < 2) return
+        val step = maxOf(
+            1,
+            (snapshot.validCount + MAX_POINTS_PER_SEGMENT - 1) / MAX_POINTS_PER_SEGMENT
+        )
         path.reset()
-        var index = start
+        var index = 0
         var lastDrawn = -1
-        while (index < endExclusive) {
+        while (index < snapshot.validCount) {
             appendPathPoint(
                 path,
                 index,
-                values[index],
+                snapshot.chronologicalValueAt(index),
                 width,
                 plotCenter,
                 plotHeight,
@@ -463,11 +431,11 @@ internal class EegStereoView(
             lastDrawn = index
             index += step
         }
-        if (lastDrawn != endExclusive - 1) {
+        if (lastDrawn != snapshot.validCount - 1) {
             appendPathPoint(
                 path,
-                endExclusive - 1,
-                values[endExclusive - 1],
+                snapshot.validCount - 1,
+                snapshot.chronologicalValueAt(snapshot.validCount - 1),
                 width,
                 plotCenter,
                 plotHeight,
@@ -497,12 +465,12 @@ internal class EegStereoView(
         const val SAMPLE_RATE = 500
         const val WINDOW_SECONDS = 5
         const val BUFFER_SIZE = SAMPLE_RATE * WINDOW_SECONDS
+        const val MIN_VISIBLE_POINTS = 32
         const val FIXED_Y_RANGE_UV = 200f
         const val HEADER_HEIGHT = 52f
         const val FOOTER_HEIGHT = 24f
         const val PLOT_HEIGHT_RATIO = 0.42f
         const val MAX_POINTS_PER_SEGMENT = 800
-        const val REFRESH_INTERVAL_MS = 40L
-        val DISPLAY_PREPROCESSING = EegPreprocessStep.DEFAULT
+        const val REFRESH_INTERVAL_MS = 50L
     }
 }

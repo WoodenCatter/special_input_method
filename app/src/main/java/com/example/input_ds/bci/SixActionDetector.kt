@@ -38,15 +38,15 @@ data class SixDetectorResult(
 )
 
 /**
- * Six-action asynchronous detector from the validated six_action protocol.
- * Model probabilities and the four motion templates are fused into one motion
- * candidate before the event state machine is evaluated.
+ * Six-action asynchronous detector. The model owns the semantic class; physical
+ * amplitude/span checks only reject implausible motion, while the shared V1.0
+ * temporal accumulator owns confirmation, one-shot locking and Rest re-arming.
  */
 class SixActionDetector(
     private val calibration: AsyncCalibration,
-    private val sampleRateHz: Int = 500,
-    private val refractoryMs: Long = 250L,
-    private val sameActionIntervalMs: Long = 750L
+    @Suppress("UNUSED_PARAMETER") private val sampleRateHz: Int = 500,
+    @Suppress("UNUSED_PARAMETER") private val refractoryMs: Long = 250L,
+    @Suppress("UNUSED_PARAMETER") private val sameActionIntervalMs: Long = 750L
 ) {
     enum class State { REST, POSSIBLE_ACTION, IN_ACTION, REFRACTORY }
 
@@ -58,8 +58,8 @@ class SixActionDetector(
     private var releaseHits = 0
     private var refractoryUntil = 0L
     private var sequenceEndpointSeen = false
-    private val lastEventAt = LongArray(CLASS_COUNT) { Long.MIN_VALUE }
-    private val returnedSinceLastEvent = BooleanArray(CLASS_COUNT)
+    private val temporalEvidence = TemporalEvidenceAccumulator(CLASS_COUNT)
+    private val physicalEvidence = ArrayDeque<Set<Int>>()
 
     init {
         require(calibration.protocol == ClassificationProtocol.SIX_ACTION) {
@@ -82,74 +82,56 @@ class SixActionDetector(
         releaseHits = 0
         refractoryUntil = 0L
         sequenceEndpointSeen = false
-        lastEventAt.fill(Long.MIN_VALUE)
-        returnedSinceLastEvent.fill(false)
+        temporalEvidence.reset()
+        physicalEvidence.clear()
     }
 
     fun update(
         probabilities: FloatArray,
         leftRaw: FloatArray,
         rightRaw: FloatArray,
-        timestampMs: Long
+        @Suppress("UNUSED_PARAMETER") timestampMs: Long
     ): SixDetectorResult {
         require(probabilities.size == CLASS_COUNT && probabilities.all { it.isFinite() && it >= 0f })
         require(leftRaw.isNotEmpty() && leftRaw.size == rightRaw.size)
         val gated = gateMotion(probabilities, leftRaw, rightRaw, calibration)
         val control = gated.first
         val features = gated.second
-        val immediate = mutableSetOf<Int>()
-        features.motionAllowedClass?.let { allowed ->
-            if (control[allowed] >= MOTION_ENTER_THRESHOLD &&
-                (allowed in SEQUENCE_CLASSES || probabilities.indices.maxByOrNull { probabilities[it] } == allowed)
-            ) {
-                immediate += allowed
-            }
-        }
         val strongBite = probabilities[BITE_CLASS] >= STRONG_BITE_PROBABILITY &&
             features.activityStdUv >= calibration.biteMinStdUv
-        if (strongBite) {
-            immediate.removeAll(MOTION_CLASSES.toSet())
-            immediate += BITE_CLASS
+        val currentPhysicalClasses = buildSet {
+            features.motionAllowedClass?.let(::add)
+            if (features.activityStdUv >= calibration.biteMinStdUv) add(BITE_CLASS)
         }
-
-        if (state == State.REFRACTORY && timestampMs >= refractoryUntil) state = State.REST
-        var event: Int? = null
-        when (state) {
-            State.REFRACTORY -> Unit
-            State.IN_ACTION -> updateActive(control, features, timestampMs)
-            State.REST, State.POSSIBLE_ACTION -> {
-                val instantClass = when {
-                    strongBite -> BITE_CLASS
-                    else -> immediate.maxByOrNull { priority(it) }
-                }
-                if (instantClass != null && canEmit(instantClass, timestampMs)) {
-                    event = emit(instantClass, timestampMs)
-                } else {
-                    val possible = bestEnteringClass(control)
-                    if (possible == null) {
-                        if (state == State.POSSIBLE_ACTION && ++candidateAge >= CONFIRMATION_WINDOWS) clearCandidate()
-                    } else if (candidateClass != possible) {
-                        candidateClass = possible
-                        candidateAge = 1
-                        candidateHits = 1
-                        state = State.POSSIBLE_ACTION
-                    } else {
-                        candidateAge++
-                        candidateHits++
-                        if (candidateHits >= REQUIRED_HITS && canEmit(possible, timestampMs)) {
-                            event = emit(possible, timestampMs)
-                        } else if (candidateAge >= CONFIRMATION_WINDOWS) {
-                            clearCandidate()
-                        }
-                    }
-                }
-            }
+        physicalEvidence.addLast(currentPhysicalClasses)
+        while (physicalEvidence.size > AsyncWindowPolicy.EVIDENCE_WINDOWS) {
+            physicalEvidence.removeFirst()
+        }
+        val temporal = temporalEvidence.update(control) { candidate ->
+            physicalEvidence.count { candidate in it } >=
+                AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
+        }
+        activeClass = temporal.lockedClass ?: -1
+        candidateClass = temporal.candidateClass.takeIf { it != REST_CLASS } ?: -1
+        candidateHits = temporal.support
+        candidateAge = temporal.queuedWindows
+        releaseHits = temporal.restStreak
+        refractoryUntil = 0L
+        sequenceEndpointSeen = false
+        state = when {
+            temporal.lockedClass != null -> State.IN_ACTION
+            temporal.candidateClass != REST_CLASS -> State.POSSIBLE_ACTION
+            else -> State.REST
+        }
+        val singleWindowClasses = buildSet {
+            val winner = probabilities.indices.maxByOrNull { probabilities[it] } ?: REST_CLASS
+            if (winner != REST_CLASS && winner in currentPhysicalClasses) add(winner)
         }
         return SixDetectorResult(
-            eventClass = event,
-            controlProbabilities = control,
+            eventClass = temporal.eventClass,
+            controlProbabilities = temporal.evidence,
             features = features,
-            singleWindowClasses = immediate,
+            singleWindowClasses = singleWindowClasses,
             strongBite = strongBite,
             snapshot = snapshot()
         )
@@ -166,98 +148,6 @@ class SixActionDetector(
         sequenceEndpointSeen = sequenceEndpointSeen
     )
 
-    private fun updateActive(
-        control: FloatArray,
-        features: SixMotionFeatures,
-        timestampMs: Long
-    ) {
-        when (activeClass) {
-            LEFT_RIGHT_CLASS, RIGHT_LEFT_CLASS -> {
-                val endpointClass = if (activeClass == LEFT_RIGHT_CLASS) RIGHT_CLASS else LEFT_CLASS
-                val returnClass = if (activeClass == LEFT_RIGHT_CLASS) LEFT_CLASS else RIGHT_CLASS
-                if (!sequenceEndpointSeen && features.sequencePhaseClass == endpointClass) {
-                    sequenceEndpointSeen = true
-                } else if (sequenceEndpointSeen && features.sequencePhaseClass == returnClass) {
-                    enterRefractory(timestampMs, sequenceResidualRefractoryMs())
-                } else if (control[activeClass] <= EXIT_THRESHOLD && control[REST_CLASS] >= REST_RELEASE_THRESHOLD) {
-                    enterRefractory(timestampMs, refractoryMs)
-                }
-            }
-            LEFT_CLASS, RIGHT_CLASS -> {
-                val returned = activeClass == LEFT_CLASS && features.sequencePhaseClass == RIGHT_CLASS ||
-                    activeClass == RIGHT_CLASS && features.sequencePhaseClass == LEFT_CLASS
-                if (returned) {
-                    returnedSinceLastEvent[activeClass] = true
-                    enterRefractory(timestampMs, refractoryMs)
-                } else {
-                    if (control[activeClass] <= EXIT_THRESHOLD) releaseHits++ else releaseHits = 0
-                    if (releaseHits >= RELEASE_WINDOWS || control[REST_CLASS] >= REST_RELEASE_THRESHOLD) {
-                        enterRefractory(timestampMs, refractoryMs)
-                    }
-                }
-            }
-            else -> {
-                if (control.getOrElse(activeClass) { 0f } <= EXIT_THRESHOLD) releaseHits++ else releaseHits = 0
-                if (releaseHits >= RELEASE_WINDOWS || control[REST_CLASS] >= REST_RELEASE_THRESHOLD) {
-                    enterRefractory(timestampMs, refractoryMs)
-                }
-            }
-        }
-    }
-
-    private fun bestEnteringClass(control: FloatArray): Int? {
-        if (control[BITE_CLASS] >= BITE_ENTER_THRESHOLD) return BITE_CLASS
-        return MOTION_CLASSES
-            .filter { control[it] >= MOTION_ENTER_THRESHOLD }
-            .maxByOrNull { control[it] }
-    }
-
-    private fun canEmit(classId: Int, timestampMs: Long): Boolean {
-        val previous = lastEventAt[classId]
-        return returnedSinceLastEvent[classId] || previous == Long.MIN_VALUE || timestampMs - previous >= sameActionIntervalMs
-    }
-
-    private fun emit(classId: Int, timestampMs: Long): Int {
-        activeClass = classId
-        state = State.IN_ACTION
-        releaseHits = 0
-        clearCandidate(keepState = true)
-        lastEventAt[classId] = timestampMs
-        returnedSinceLastEvent[classId] = false
-        // Endpoint/return ordering starts after the event window. Treating the
-        // event window itself as an endpoint makes overlap position decide the
-        // lock state and can release a sequence on its first tail window.
-        sequenceEndpointSeen = false
-        return classId
-    }
-
-    private fun enterRefractory(timestampMs: Long, durationMs: Long) {
-        state = State.REFRACTORY
-        refractoryUntil = timestampMs + durationMs
-        activeClass = -1
-        releaseHits = 0
-        sequenceEndpointSeen = false
-        clearCandidate(keepState = true)
-    }
-
-    private fun clearCandidate(keepState: Boolean = false) {
-        candidateClass = -1
-        candidateAge = 0
-        candidateHits = 0
-        if (!keepState) state = State.REST
-    }
-
-    private fun sequenceResidualRefractoryMs(): Long {
-        val strideMs = calibration.windowPoints * 250L / sampleRateHz
-        return max(refractoryMs, ceil(strideMs * 1.25).toLong())
-    }
-
-    private fun priority(classId: Int): Int = when (classId) {
-        BITE_CLASS -> 3
-        LEFT_RIGHT_CLASS, RIGHT_LEFT_CLASS -> 2
-        else -> 1
-    }
-
     companion object {
         const val REST_CLASS = 0
         const val LEFT_CLASS = 1
@@ -270,17 +160,8 @@ class SixActionDetector(
         private val MOTION_CLASSES = intArrayOf(LEFT_CLASS, RIGHT_CLASS, LEFT_RIGHT_CLASS, RIGHT_LEFT_CLASS)
         private val SEQUENCE_CLASSES = setOf(LEFT_RIGHT_CLASS, RIGHT_LEFT_CLASS)
         private const val TEMPLATE_MIN_CORRELATION = 0.55f
-        private const val TEMPLATE_MIN_MARGIN = 0.05f
         private const val TEMPLATE_MAX_SHIFT_FRACTION = 0.25f
-        private const val FUSION_WEIGHT = 0.5f
         private const val STRONG_BITE_PROBABILITY = 0.50f
-        private const val BITE_ENTER_THRESHOLD = 0.75f
-        private const val MOTION_ENTER_THRESHOLD = 0.60f
-        private const val EXIT_THRESHOLD = 0.30f
-        private const val REST_RELEASE_THRESHOLD = 0.70f
-        private const val CONFIRMATION_WINDOWS = 3
-        private const val REQUIRED_HITS = 2
-        private const val RELEASE_WINDOWS = 1
         private const val DIRECTION_PHASE_SCORE = 0.50f
 
         fun gateMotion(
@@ -300,28 +181,17 @@ class SixActionDetector(
             val scores = MOTION_CLASSES.associateWith { classId ->
                 maxShiftedCorrelation(normalized, requireNotNull(calibration.motionTemplates[classId]))
             }
-            var ranked = MOTION_CLASSES.sortedByDescending { scores.getValue(it) }
-            if (ranked.first() in SEQUENCE_CLASSES && span < calibration.sequenceMinSpanUv) {
-                ranked = listOf(LEFT_CLASS, RIGHT_CLASS).sortedByDescending { scores.getValue(it) }
-            }
-            val winner = ranked.first()
-            val winnerScore = scores.getValue(winner)
-            val runnerUpScore = ranked.getOrNull(1)?.let(scores::getValue) ?: Float.NEGATIVE_INFINITY
+            val winner = MOTION_CLASSES.maxByOrNull { probabilities[it] } ?: LEFT_CLASS
             val amplitudeThreshold = if (winner in SEQUENCE_CLASSES) {
                 calibration.sequenceMinStdUv
             } else {
                 calibration.directionMinStdUv
             }
             val allowed = winner.takeIf {
-                activity >= amplitudeThreshold && winnerScore >= TEMPLATE_MIN_CORRELATION &&
-                    winnerScore - runnerUpScore >= TEMPLATE_MIN_MARGIN
+                activity >= amplitudeThreshold &&
+                    (winner !in SEQUENCE_CLASSES || span >= calibration.sequenceMinSpanUv)
             }
-            val control = probabilities.copyOf()
-            MOTION_CLASSES.forEach { control[it] = 0f }
-            val fused = allowed?.let { classId ->
-                FUSION_WEIGHT * probabilities[classId] + FUSION_WEIGHT * max(0f, scores.getValue(classId))
-            } ?: 0f
-            if (allowed != null) control[allowed] = fused
+            val fused = allowed?.let { classId -> probabilities[classId] } ?: 0f
             val directionScore = directionScore(difference, activity)
             val phase = when {
                 activity < calibration.directionMinStdUv -> null
@@ -329,7 +199,7 @@ class SixActionDetector(
                 directionScore >= DIRECTION_PHASE_SCORE -> RIGHT_CLASS
                 else -> null
             }
-            return control to SixMotionFeatures(
+            return probabilities.copyOf() to SixMotionFeatures(
                 activityStdUv = activity,
                 robustSpanUv = span,
                 directionScore = directionScore,

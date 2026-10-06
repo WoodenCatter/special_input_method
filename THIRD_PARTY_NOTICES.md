@@ -83,6 +83,44 @@ not copied. The prediction-only schema generates its small context dictionary
 from this app's existing `pinyin_map.txt`, so no additional general pinyin
 dictionary or large raw corpus is packaged.
 
+## Streamed demonstration music
+
+The application does not bundle these recordings. It streams them from their
+Wikimedia Commons original-file URLs and displays the performer/creator and
+license next to each playlist item.
+
+- Antonio Vivaldi, *The Four Seasons — Spring, Movement 1*; John Harrison
+  (violin), Robert Turizziani (conductor), Wichita State University Chamber
+  Players. Source: https://commons.wikimedia.org/wiki/File:Vivaldi_-_Four_Seasons_1_Spring_mvt_1_Allegro_-_John_Harrison_violin.oga
+  License selected for this use: CC BY-SA 4.0.
+- Ludwig van Beethoven, *Moonlight Sonata, Movement 2*; recording by Bernd
+  Krueger. Source: https://commons.wikimedia.org/wiki/File:Beethoven_Moonlight_2nd_movement.ogg
+  License: CC BY-SA 2.0 Germany.
+- Johann Strauss II, *An der schönen, blauen Donau*; performed by the United
+  States Marine Band. Source: https://commons.wikimedia.org/wiki/File:%22An_der_sch%C3%B6nen,_blauen_Donau%22,_performed_by_the_US_Marine_Band.mp3
+  Status: public domain (composition and U.S. federal-government performance).
+
+## External television source
+
+The television page lists CCTV-1 through CCTV-5 from
+https://tv.cctv.com/live/ and resolves a fresh HTML5 HLS address from the CCTV
+player endpoint when the user selects a channel. No television recording or
+fixed CDN stream URL is bundled with the application.
+
+## OkHttp and fallback DNS over HTTPS
+
+- Project: OkHttp / okhttp-dnsoverhttps
+- Source: https://github.com/square/okhttp
+- Version: 5.3.0
+- License: Apache License 2.0
+- Usage: Media3 HTTP transport and a fallback resolver for entertainment media.
+
+Android's system DNS remains the first choice. Only after it throws
+`UnknownHostException`, the app sends the requested media hostname to the
+AliDNS public DNS-over-HTTPS endpoint at `https://dns.alidns.com/dns-query`.
+The fixed bootstrap addresses `223.5.5.5` and `223.6.6.6` allow this fallback
+to start even when the active router's DNS service is unavailable.
+
 ## Chinese Chess AI
 
 - Project: Chinese Chess AI by shibing624
@@ -94,18 +132,23 @@ dictionary or large raw corpus is packaged.
   legal self-check filtering, facing-generals enforcement, check/checkmate/stalemate
   handling, move validation, repetition/long-check protection, and lower-latency
   local AI defaults.
-- License text: `chinese-chess-ai/chinese-chess-ai-main/LICENSE`
 
 ## Dou Dizhu Online
 
 - Project: Dou Dizhu Online by Jiacheng Wang
-- Source: the upstream GitHub project archived in `doudizhu-online.zip`
 - Files adapted: HTML, CSS, JavaScript rules engine, AI, audio, and UI
 - Packaged location: `app/src/main/assets/doudizhu/`
 - License: MIT
 - Changes: fixed the game to classic three-player local practice with two AI
-  opponents, disabled all optional room rules, removed runtime networking and
+  opponents, disabled optional room rules, removed runtime networking and
   language/help controls, combined music and sound effects into one setting,
-  added an Android host exit bridge, and added touch-compatible EEG scanning
-  controls with optional action confirmation.
+  and added touch-compatible EEG scanning controls with optional confirmation.
 - License text: `LICENSES/DOUDIZHU-ONLINE-MIT.txt`
+
+## Godot Engine
+
+- Project: Godot Engine
+- Source: https://github.com/godotengine/godot
+- Version: 4.7.1 stable Android runtime
+- Usage: hosts the embedded `wizard_game.pck` rehabilitation game.
+- License: MIT

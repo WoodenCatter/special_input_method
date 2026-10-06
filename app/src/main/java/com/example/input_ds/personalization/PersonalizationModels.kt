@@ -14,10 +14,12 @@ enum class ClassificationProtocol(
     SIX_ACTION("six_action", listOf("rest", "look_left", "look_right", "jaw", "look_left_right", "look_right_left"));
 
     val classCount: Int get() = labelNames.size
+    val serverWireName: String
+        get() = if (this == SIX_ACTION) "six_class" else wireName
 
     companion object {
         fun fromWireName(value: String?): ClassificationProtocol? =
-            entries.firstOrNull { it.wireName == value }
+            if (value == "six_class") SIX_ACTION else entries.firstOrNull { it.wireName == value }
 
         fun inferLegacy(labelNames: List<String>): ClassificationProtocol? =
             entries.firstOrNull { it.labelNames == labelNames }
@@ -25,43 +27,18 @@ enum class ClassificationProtocol(
 }
 
 enum class PreprocessingPreset(val wireName: String, val displayName: String) {
-    RAW("raw", "原始信号"),
-    EEGNET("eegnet-original", "EEGNet · 1–45 Hz"),
-    CSANET("csanet-original", "CSANet · 0.1–40 Hz + Z-score"),
-    BANDPASS_0_1_40_ONLY("advanced-bandpass-0.1-40", "高级 · 仅 0.1–40 Hz"),
-    ZSCORE_ONLY("advanced-zscore", "高级 · 仅 Z-score"),
-    EEGNET_ZSCORE("advanced-bandpass-1-45-zscore", "高级 · 1–45 Hz + Z-score");
+    UNIFIED_1_45("unified-bandpass-1-45", "统一 · 1–45 Hz 带通");
 
     fun contract(windowPoints: Int): JSONObject = JSONObject().apply {
         put("version", "1")
         put("window_points", windowPoints)
         put("stream_steps", JSONArray())
         put("window_steps", JSONArray().apply {
-            when (this@PreprocessingPreset) {
-                RAW -> Unit
-                EEGNET -> put(bandpass(1.0, 45.0, 2))
-                CSANET -> {
-                    put(bandpass(0.1, 40.0, 4))
-                    put(zscore())
-                }
-                BANDPASS_0_1_40_ONLY -> put(bandpass(0.1, 40.0, 4))
-                ZSCORE_ONLY -> put(zscore())
-                EEGNET_ZSCORE -> {
-                    put(bandpass(1.0, 45.0, 2))
-                    put(zscore())
-                }
-            }
+            put(bandpass(1.0, 45.0, 2))
         })
     }
 
-    fun displaySteps(): Set<EegPreprocessStep> = when (this) {
-        RAW -> emptySet()
-        EEGNET -> setOf(EegPreprocessStep.BANDPASS_1_45_HZ)
-        CSANET -> setOf(EegPreprocessStep.BANDPASS_0_1_40_HZ, EegPreprocessStep.Z_SCORE)
-        BANDPASS_0_1_40_ONLY -> setOf(EegPreprocessStep.BANDPASS_0_1_40_HZ)
-        ZSCORE_ONLY -> setOf(EegPreprocessStep.Z_SCORE)
-        EEGNET_ZSCORE -> setOf(EegPreprocessStep.BANDPASS_1_45_HZ, EegPreprocessStep.Z_SCORE)
-    }
+    fun displaySteps(): Set<EegPreprocessStep> = EegPreprocessStep.DEFAULT
 
     companion object {
         private fun bandpass(lowHz: Double, highHz: Double, order: Int) = JSONObject().apply {
@@ -72,14 +49,10 @@ enum class PreprocessingPreset(val wireName: String, val displayName: String) {
             put("order", order)
         }
 
-        private fun zscore() = JSONObject().apply {
-            put("operation", "zscore")
-            put("implementation", "per_channel_time")
-            put("epsilon", 0.000001)
-        }
+        /** Old preset names deliberately migrate to the one supported contract. */
+        fun fromPersisted(@Suppress("UNUSED_PARAMETER") wireName: String?): PreprocessingPreset =
+            UNIFIED_1_45
 
-        fun forModel(modelKey: String): PreprocessingPreset =
-            if (modelKey == "csanet") CSANET else EEGNET
     }
 }
 
@@ -128,19 +101,15 @@ data class CollectionSettings(
     val rounds: Int = 20,
     val trainingEpochs: Int = 50,
     val actionSeconds: Float = 1f,
-    val preparationSeconds: Float = 1f,
-    val restSeconds: Float = 1f,
     val protocol: ClassificationProtocol = ClassificationProtocol.FOUR_CLASS,
-    val selectedModels: Set<String> = setOf("csanet"),
-    val presetByModel: Map<String, PreprocessingPreset> = selectedModels.associateWith {
-        PreprocessingPreset.EEGNET
-    }
+    val selectedModels: Set<String> = setOf("csanet")
 ) {
     val windowPoints: Int get() = (actionSeconds * SAMPLE_RATE_HZ).roundToInt()
+    val phaseDurationMs: Long get() = (actionSeconds * 1000).toLong()
     val labels: List<String> get() = protocol.labelNames
 
     init {
-        require(rounds in 1..100)
+        require(rounds in 4..100)
         require(trainingEpochs in 1..50)
         require(actionSeconds in 0.8f..5f)
         require(selectedModels.isNotEmpty())
@@ -184,6 +153,87 @@ data class SessionMarker(
     }
 }
 
+data class SampleInterval(
+    val startSample: Int,
+    val endSample: Int
+) {
+    init {
+        require(startSample >= 0)
+        require(endSample > startSample)
+    }
+
+    fun toJson() = JSONObject().apply {
+        put("start_sample", startSample)
+        put("end_sample", endSample)
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject) = SampleInterval(
+            startSample = json.getInt("start_sample"),
+            endSample = json.getInt("end_sample")
+        )
+    }
+}
+
+/** One complete asynchronous trial on the compact, aligned session timeline. */
+data class AsyncTrialAnnotation(
+    val trialId: Int,
+    val taskLabel: String,
+    val trialStartSample: Int,
+    val taskStartSample: Int,
+    val taskEndSample: Int,
+    val trialEndSample: Int,
+    val ignoreIntervals: List<SampleInterval>,
+    val preRestSeconds: Float,
+    val postRestSeconds: Float,
+    val alignmentQuality: Float
+) {
+    init {
+        require(trialId > 0)
+        require(trialStartSample >= 0)
+        require(trialStartSample <= taskStartSample)
+        require(taskStartSample < taskEndSample)
+        require(taskEndSample <= trialEndSample)
+        require(preRestSeconds >= 0f && postRestSeconds >= 0f)
+        require(alignmentQuality in 0f..1f)
+        require(ignoreIntervals.all {
+            it.startSample >= trialStartSample && it.endSample <= trialEndSample
+        })
+    }
+
+    fun toJson() = JSONObject().apply {
+        put("trial_id", trialId)
+        put("task_label", taskLabel)
+        put("trial_start_sample", trialStartSample)
+        put("task_start_sample", taskStartSample)
+        put("task_end_sample", taskEndSample)
+        put("trial_end_sample", trialEndSample)
+        put("ignore_intervals", JSONArray().apply {
+            ignoreIntervals.forEach { put(it.toJson()) }
+        })
+        put("pre_rest_seconds", preRestSeconds.toDouble())
+        put("post_rest_seconds", postRestSeconds.toDouble())
+        put("alignment_quality", alignmentQuality.toDouble())
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject) = AsyncTrialAnnotation(
+            trialId = json.getInt("trial_id"),
+            taskLabel = json.getString("task_label"),
+            trialStartSample = json.getInt("trial_start_sample"),
+            taskStartSample = json.getInt("task_start_sample"),
+            taskEndSample = json.getInt("task_end_sample"),
+            trialEndSample = json.getInt("trial_end_sample"),
+            ignoreIntervals = json.optJSONArray("ignore_intervals")?.let { intervals ->
+                List(intervals.length()) { SampleInterval.fromJson(intervals.getJSONObject(it)) }
+            }.orEmpty(),
+            preRestSeconds = json.optDouble("pre_rest_seconds", 0.0).toFloat(),
+            postRestSeconds = json.optDouble("post_rest_seconds", 0.0).toFloat(),
+            alignmentQuality = json.optDouble("alignment_quality", 1.0).toFloat()
+        )
+    }
+}
+
 enum class WorkflowStatus {
     COLLECTING, PACKAGED, UPLOADING, TRAINING, DOWNLOADING, SUCCEEDED, PARTIAL, FAILED
 }
@@ -220,9 +270,7 @@ data class ModelRun(
     companion object {
         fun fromJson(json: JSONObject) = ModelRun(
             modelKey = json.getString("model_key"),
-            preset = PreprocessingPreset.entries.firstOrNull {
-                it.wireName == json.optString("preset")
-            } ?: PreprocessingPreset.forModel(json.getString("model_key")),
+            preset = PreprocessingPreset.fromPersisted(json.optString("preset")),
             datasetId = json.optNullableString("dataset_id"),
             datasetVersion = json.optInt("dataset_version").takeIf { it > 0 },
             preprocessingSha256 = json.optNullableString("preprocessing_sha256"),
@@ -250,6 +298,7 @@ data class TrainingSession(
     val trainingEpochs: Int = 20,
     val sampleCount: Int,
     val markers: List<SessionMarker>,
+    val asyncTrials: List<AsyncTrialAnnotation> = emptyList(),
     val npzFile: String,
     val protocol: ClassificationProtocol = ClassificationProtocol.FOUR_CLASS,
     val labelNames: List<String> = protocol.labelNames,
@@ -261,6 +310,12 @@ data class TrainingSession(
     init {
         require(labelNames == protocol.labelNames) { "Session protocol and label order do not match" }
         require(markers.all { it.label in labelNames }) { "Session marker contains a label outside its protocol" }
+        require(asyncTrials.all { it.taskLabel in labelNames && it.taskLabel != "rest" }) {
+            "Async trial contains an invalid task label"
+        }
+        require(asyncTrials.zipWithNext().all { (first, second) ->
+            first.trialEndSample <= second.trialStartSample
+        }) { "Async trials overlap or are out of order" }
     }
 
     fun toJson() = JSONObject().apply {
@@ -275,6 +330,7 @@ data class TrainingSession(
         put("training_epochs", trainingEpochs)
         put("sample_count", sampleCount)
         put("markers", JSONArray().apply { markers.forEach { put(it.toJson()) } })
+        put("async_trials", JSONArray().apply { asyncTrials.forEach { put(it.toJson()) } })
         put("npz_file", npzFile)
         put("protocol", protocol.wireName)
         put("label_names", JSONArray(labelNames))
@@ -306,6 +362,9 @@ data class TrainingSession(
                 trainingEpochs = json.optInt("training_epochs", 20).takeIf { it > 0 } ?: 20,
                 sampleCount = json.getInt("sample_count"),
                 markers = json.getJSONArray("markers").toObjectList(SessionMarker::fromJson),
+                asyncTrials = json.optJSONArray("async_trials")?.let { trials ->
+                    List(trials.length()) { AsyncTrialAnnotation.fromJson(trials.getJSONObject(it)) }
+                }.orEmpty(),
                 npzFile = json.getString("npz_file"),
                 protocol = protocol,
                 labelNames = labelNames,

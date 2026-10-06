@@ -9,106 +9,93 @@ class FourClassActionDetectorTest {
     private val calibration = AsyncCalibration(500, 20f, 35f, "test")
 
     @Test
-    fun strideIsAlwaysQuarterOfWindow() {
-        assertEquals(125, AsyncWindowPolicy.stridePoints(500))
-        assertEquals(188, AsyncWindowPolicy.stridePoints(750))
-        assertEquals(250, AsyncWindowPolicy.stridePoints(1_000))
+    fun strideIsFixedAtOneHundredMilliseconds() {
+        assertEquals(50, AsyncWindowPolicy.stridePoints(500))
+        assertEquals(50, AsyncWindowPolicy.stridePoints(750))
+        assertEquals(50, AsyncWindowPolicy.stridePoints(1_000))
+        assertEquals(334, AsyncWindowPolicy.taskOverlapPoints(500))
+        assertEquals(667, AsyncWindowPolicy.taskOverlapPoints(1_000))
     }
 
     @Test
     fun differentSessionAmplitudesProduceDifferentThresholds() {
-        val lowAmplitude = AsyncCalibrationManager.calculateThresholds(10f, 50f, 40f, 500)
-        val highAmplitude = AsyncCalibrationManager.calculateThresholds(30f, 140f, 100f, 500)
-
-        assertTrue(highAmplitude.first > lowAmplitude.first)
-        assertTrue(highAmplitude.second > lowAmplitude.second)
+        val low = AsyncCalibrationManager.calculateThresholds(10f, 50f, 40f, 500)
+        val high = AsyncCalibrationManager.calculateThresholds(30f, 140f, 100f, 500)
+        assertTrue(high.first > low.first)
+        assertTrue(high.second > low.second)
     }
 
     @Test
-    fun lowActivityDriftCannotTriggerDirection() {
+    fun lowActivityCannotTriggerDirection() {
         val detector = FourClassActionDetector(calibration)
-        val low = FloatArray(500) { if (it < 200) 2f else -2f }
-
-        val result = detector.update(probabilities(left = 0.98f), low, FloatArray(500), 0L)
-
-        assertNull(result.eventClass)
-        assertNull(result.features.allowedDirectionClass)
+        val quiet = FloatArray(500) { if (it < 200) 2f else -2f }
+        repeat(5) { index ->
+            assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), index * 100L).eventClass)
+        }
     }
 
     @Test
-    fun polarityAllowsOnlyMatchingDirection() {
-        val leftWave = directionWave(leftDirection = true)
-        val leftFeatures = FourClassActionDetector.calculateFeatures(leftWave, FloatArray(500), 20f)
-        val rightWave = directionWave(leftDirection = false)
-        val rightFeatures = FourClassActionDetector.calculateFeatures(rightWave, FloatArray(500), 20f)
-
-        assertEquals(FourClassActionDetector.LEFT_CLASS, leftFeatures.allowedDirectionClass)
-        assertEquals(FourClassActionDetector.RIGHT_CLASS, rightFeatures.allowedDirectionClass)
-    }
-
-    @Test
-    fun strongDirectionEmitsImmediatelyAndOnlyOnceWhileHeld() {
+    fun polarityIsDiagnosticButModelOwnsDirectionClass() {
         val detector = FourClassActionDetector(calibration)
-        val wave = directionWave(leftDirection = true)
+        val oppositePolarity = directionWave(leftDirection = true)
+        val features = FourClassActionDetector.calculateFeatures(oppositePolarity, FloatArray(500), 20f)
+        assertEquals(FourClassActionDetector.LEFT_CLASS, features.allowedDirectionClass)
 
-        val first = detector.update(probabilities(left = 0.97f), wave, FloatArray(500), 0L)
-        val held = detector.update(probabilities(left = 0.97f), wave, FloatArray(500), 250L)
-
-        assertEquals(FourClassActionDetector.LEFT_CLASS, first.eventClass)
-        assertNull(held.eventClass)
+        val events = (0 until 5).mapNotNull { index ->
+            detector.update(
+                probabilities(right = 0.99f), oppositePolarity, FloatArray(500), index * 100L
+            ).eventClass
+        }
+        assertEquals(listOf(FourClassActionDetector.RIGHT_CLASS), events)
     }
 
     @Test
-    fun basicDirectionNeedsTwoWindows() {
+    fun physicalBiteGateRequiresThreeSupportedWindows() {
         val detector = FourClassActionDetector(calibration)
-        val wave = directionWave(leftDirection = true, moderateScore = true)
-
-        val first = detector.update(probabilities(left = 0.92f), wave, FloatArray(500), 0L)
-        val second = detector.update(probabilities(left = 0.92f), wave, FloatArray(500), 250L)
-
-        assertNull(first.eventClass)
-        assertEquals(FourClassActionDetector.LEFT_CLASS, second.eventClass)
-    }
-
-    @Test
-    fun strongBiteOverridesStrongDirectionInSameWindow() {
-        val detector = FourClassActionDetector(calibration)
-        val wave = directionWave(leftDirection = true)
-
-        val result = detector.update(
-            floatArrayOf(0.01f, 0.51f, 0.97f, 0.01f),
-            wave,
-            FloatArray(500),
-            0L
-        )
-
-        assertTrue(result.strongBite)
-        assertTrue(result.strongDirection)
-        assertEquals(FourClassActionDetector.BITE_CLASS, result.eventClass)
-    }
-
-    @Test
-    fun normalBiteNeedsTwoHits() {
-        val detector = FourClassActionDetector(calibration.copy(biteMinStdUv = 200f))
-        val quiet = FloatArray(500)
-
-        assertNull(detector.update(probabilities(bite = 0.80f), quiet, quiet, 0L).eventClass)
+        val active = biteWave(80f)
+        assertNull(detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 0L).eventClass)
+        assertNull(detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 100L).eventClass)
         assertEquals(
             FourClassActionDetector.BITE_CLASS,
-            detector.update(probabilities(bite = 0.80f), quiet, quiet, 250L).eventClass
+            detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 200L).eventClass
         )
     }
 
     @Test
-    fun resetClearsPendingCandidate() {
-        val detector = FourClassActionDetector(calibration.copy(biteMinStdUv = 200f))
+    fun onePhasePoorWindowDoesNotPoisonDirectionProbabilityEvidence() {
+        val detector = FourClassActionDetector(calibration)
+        val active = directionWave(leftDirection = true)
         val quiet = FloatArray(500)
-        detector.update(probabilities(bite = 0.80f), quiet, quiet, 0L)
+        assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 0L).eventClass)
+        assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), 100L).eventClass)
+        assertEquals(
+            FourClassActionDetector.LEFT_CLASS,
+            detector.update(probabilities(left = 0.99f), active, FloatArray(500), 200L).eventClass
+        )
+    }
 
+    @Test
+    fun lockedActionRearmsOnlyAfterSustainedRestEvidence() {
+        val detector = FourClassActionDetector(calibration)
+        val active = directionWave(leftDirection = true)
+        repeat(3) { detector.update(probabilities(left = 0.99f), active, FloatArray(500), it * 100L) }
+        repeat(7) { index ->
+            detector.update(
+                probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 300L + index * 100L
+            )
+        }
+        assertEquals(FourClassActionDetector.State.REST, detector.update(
+            probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 1_100L
+        ).state)
+    }
+
+    @Test
+    fun resetClearsTemporalEvidence() {
+        val detector = FourClassActionDetector(calibration)
+        val active = directionWave(leftDirection = true)
+        repeat(2) { detector.update(probabilities(left = 0.99f), active, FloatArray(500), it * 100L) }
         detector.reset()
-        val afterReset = detector.update(probabilities(bite = 0.80f), quiet, quiet, 250L)
-
-        assertNull(afterReset.eventClass)
+        assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 300L).eventClass)
     }
 
     private fun probabilities(
@@ -118,15 +105,17 @@ class FourClassActionDetectorTest {
         right: Float = 0.01f
     ) = floatArrayOf(rest, bite, left, right)
 
-    private fun directionWave(leftDirection: Boolean, moderateScore: Boolean = false): FloatArray {
+    private fun directionWave(leftDirection: Boolean): FloatArray {
         val sign = if (leftDirection) 1f else -1f
-        val middle = if (moderateScore) -35f else -100f
         return FloatArray(500) { index ->
             sign * when (index) {
                 in 25 until 150 -> 100f
-                in 200 until 350 -> middle
+                in 200 until 350 -> -100f
                 else -> 0f
             }
         }
     }
+
+    private fun biteWave(amplitude: Float): FloatArray =
+        FloatArray(500) { index -> if (index % 2 == 0) amplitude else -amplitude }
 }

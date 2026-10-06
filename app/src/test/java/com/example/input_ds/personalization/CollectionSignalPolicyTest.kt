@@ -38,4 +38,13 @@ class CollectionSignalPolicyTest {
         assertTrue(CollectionSignalPolicy.hasValidActionWindow(1_000, 1_500, 500, 7L, 7L))
         assertFalse(CollectionSignalPolicy.hasValidActionWindow(1_000, 1_500, 500, 7L, 8L))
     }
+
+    @Test
+    fun actionWindowTimeout_includesExpectedDurationAndGrace() {
+        assertEquals(6_000L, CollectionSignalPolicy.actionWindowTimeoutMs(1_500, 500))
+        assertEquals(
+            CollectionSignalPolicy.ACTION_WINDOW_GRACE_MS,
+            CollectionSignalPolicy.actionWindowTimeoutMs(0, 500)
+        )
+    }
 }

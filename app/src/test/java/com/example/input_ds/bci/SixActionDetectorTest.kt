@@ -16,10 +16,9 @@ class SixActionDetectorTest {
     private val rightLeftWave = wave(5)
 
     @Test
-    fun sixThresholds_scaleWithSessionAmplitudeAndSpan() {
+    fun sixThresholdsScaleWithSessionAmplitudeAndSpan() {
         val low = AsyncCalibrationManager.calculateSixThresholds(10f, 50f, 40f, 45f, 100f, 180f, 500)
         val high = AsyncCalibrationManager.calculateSixThresholds(30f, 150f, 120f, 130f, 300f, 520f, 500)
-
         assertTrue(high.directionMinStdUv > low.directionMinStdUv)
         assertTrue(high.sequenceMinStdUv > low.sequenceMinStdUv)
         assertTrue(high.biteMinStdUv > low.biteMinStdUv)
@@ -31,115 +30,50 @@ class SixActionDetectorTest {
         val template = normalize(FloatArray(64) { if (it in 12..25) 1f else -0.2f })
         val shifted = FloatArray(64)
         for (index in 0 until 52) shifted[index + 12] = template[index]
-
         assertTrue(SixActionDetector.maxShiftedCorrelation(normalize(shifted), template) > 0.95f)
     }
 
     @Test
-    fun sequenceTemplateWithInsufficientSpanFallsBackToDirectionRanking() {
-        val leftTemplate = normalizeTemplate(leftRightWave).mapIndexed { index, value ->
-            value + normalizeTemplate(leftWave)[index] * 0.12f
-        }.toFloatArray().let(::normalize)
-        val calibration = calibration(
-            spanThreshold = 10_000f,
-            templates = templates() + mapOf(
-                SixActionDetector.LEFT_CLASS to leftTemplate,
-                SixActionDetector.RIGHT_CLASS to FloatArray(leftTemplate.size) { -leftTemplate[it] }
-            )
-        )
+    fun modelCandidateMustPassItsOwnPhysicalTemplate() {
         val result = SixActionDetector.gateMotion(
-            probabilities(sequenceLeftRight = 0.9f, left = 0.8f),
-            leftRightWave,
-            FloatArray(500),
-            calibration
+            probabilities(sequenceLeftRight = 0.99f), leftRightWave, FloatArray(500), calibration()
         )
-
-        assertEquals(SixActionDetector.LEFT_CLASS, result.second.motionAllowedClass)
-        assertEquals(0f, result.first[SixActionDetector.LEFT_RIGHT_CLASS], 0f)
+        assertEquals(SixActionDetector.LEFT_RIGHT_CLASS, result.second.motionAllowedClass)
+        assertEquals(0.99f, result.first[SixActionDetector.LEFT_RIGHT_CLASS], 0f)
     }
 
     @Test
-    fun strongBiteOverridesImmediateMotion() {
-        val detector = SixActionDetector(calibration())
-
-        val result = detector.update(
-            probabilities(left = 0.95f, bite = 0.51f),
-            leftWave,
-            FloatArray(500),
-            0L
-        )
-
-        assertTrue(result.strongBite)
-        assertEquals(setOf(SixActionDetector.BITE_CLASS), result.singleWindowClasses)
-        assertEquals(SixActionDetector.BITE_CLASS, result.eventClass)
-    }
-
-    @Test
-    fun oneOrdinaryProbabilitySpikeDoesNotEmit() {
-        val detector = SixActionDetector(calibration().copy(biteMinStdUv = 10_000f))
-
-        val result = detector.update(probabilities(bite = 0.80f), FloatArray(500), FloatArray(500), 0L)
-
-        assertNull(result.eventClass)
-        assertEquals(SixActionDetector.State.POSSIBLE_ACTION, result.snapshot.state)
-    }
-
-    @Test
-    fun lowActivityCannotTriggerMotionEvenWithRepeatedHighModelProbability() {
+    fun lowActivityCannotTriggerMotion() {
         val detector = SixActionDetector(calibration(directionThreshold = 50f))
         val quiet = FloatArray(500) { if (it % 2 == 0) 1f else -1f }
-
-        assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), 0L).eventClass)
-        assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), 250L).eventClass)
+        repeat(5) { index ->
+            assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), index * 100L).eventClass)
+        }
     }
 
     @Test
-    fun sequenceLocksHalfActionsAndReleasesOnlyAfterOrderedEndpointReturn() {
+    fun sequenceUsesSharedThreeWindowAccumulatorAndLocksOnce() {
         val detector = SixActionDetector(calibration())
-        val emitted = mutableListOf<Int>()
-
-        detector.update(probabilities(sequenceLeftRight = 0.9f), leftRightWave, FloatArray(500), 0L)
-            .eventClass?.let(emitted::add)
-        detector.update(probabilities(right = 0.9f), rightWave, FloatArray(500), 250L)
-            .eventClass?.let(emitted::add)
-        val released = detector.update(probabilities(left = 0.9f), leftWave, FloatArray(500), 500L)
-        released.eventClass?.let(emitted::add)
-
-        assertEquals(listOf(SixActionDetector.LEFT_RIGHT_CLASS), emitted)
-        assertEquals(SixActionDetector.State.REFRACTORY, released.snapshot.state)
+        val events = (0 until 5).mapNotNull { index ->
+            detector.update(
+                probabilities(sequenceLeftRight = 0.99f), leftRightWave, FloatArray(500), index * 100L
+            ).eventClass
+        }
+        assertEquals(listOf(SixActionDetector.LEFT_RIGHT_CLASS), events)
+        assertEquals(SixActionDetector.State.IN_ACTION, detector.snapshot().state)
     }
 
     @Test
-    fun sequenceWrongReleaseOrderStaysLockedButTrueRestReleases() {
+    fun resetClearsTemporalEvidence() {
         val detector = SixActionDetector(calibration())
-        detector.update(probabilities(sequenceLeftRight = 0.9f), leftRightWave, FloatArray(500), 0L)
-        val wrongOrder = detector.update(probabilities(left = 0.9f), leftWave, FloatArray(500), 250L)
-        val rest = detector.update(probabilities(rest = 0.9f), FloatArray(500), FloatArray(500), 500L)
-
-        assertEquals(SixActionDetector.State.IN_ACTION, wrongOrder.snapshot.state)
-        assertEquals(SixActionDetector.State.REFRACTORY, rest.snapshot.state)
-    }
-
-    @Test
-    fun resetClearsStateAndSameActionRateLimit() {
-        val detector = SixActionDetector(calibration())
-        assertEquals(
-            SixActionDetector.LEFT_CLASS,
-            detector.update(probabilities(left = 0.9f), leftWave, FloatArray(500), 0L).eventClass
-        )
-
+        repeat(2) { detector.update(probabilities(left = 0.99f), leftWave, FloatArray(500), it * 100L) }
         detector.reset()
-
-        assertEquals(
-            SixActionDetector.LEFT_CLASS,
-            detector.update(probabilities(left = 0.9f), leftWave, FloatArray(500), 100L).eventClass
-        )
+        assertNull(detector.update(probabilities(left = 0.99f), leftWave, FloatArray(500), 300L).eventClass)
     }
 
     private fun calibration(
-        spanThreshold: Float = 20f,
         directionThreshold: Float = 1f,
-        templates: Map<Int, FloatArray> = templates()
+        spanThreshold: Float = 20f
     ) = AsyncCalibration(
         windowPoints = 500,
         directionMinStdUv = directionThreshold,
@@ -149,14 +83,12 @@ class SixActionDetectorTest {
         protocol = ClassificationProtocol.SIX_ACTION,
         sequenceMinStdUv = 1f,
         sequenceMinSpanUv = spanThreshold,
-        motionTemplates = templates
-    )
-
-    private fun templates() = mapOf(
-        SixActionDetector.LEFT_CLASS to normalizeTemplate(leftWave),
-        SixActionDetector.RIGHT_CLASS to normalizeTemplate(rightWave),
-        SixActionDetector.LEFT_RIGHT_CLASS to normalizeTemplate(leftRightWave),
-        SixActionDetector.RIGHT_LEFT_CLASS to normalizeTemplate(rightLeftWave)
+        motionTemplates = mapOf(
+            SixActionDetector.LEFT_CLASS to normalizeTemplate(leftWave),
+            SixActionDetector.RIGHT_CLASS to normalizeTemplate(rightWave),
+            SixActionDetector.LEFT_RIGHT_CLASS to normalizeTemplate(leftRightWave),
+            SixActionDetector.RIGHT_LEFT_CLASS to normalizeTemplate(rightLeftWave)
+        )
     )
 
     private fun probabilities(

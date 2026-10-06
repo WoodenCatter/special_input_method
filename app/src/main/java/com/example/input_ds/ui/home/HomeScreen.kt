@@ -43,18 +43,18 @@ import com.example.input_ds.ui.theme.AuroraVioletBright
 import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.SectionHeader
 import com.example.input_ds.ui.theme.SelectableGlassPanel
+import kotlinx.coroutines.delay
 
 private const val REQUIRED_DEVICE_NAME = "Naoyun Pods BLE"
 
 @Composable
 fun HomeScreen(
     selection: HomeSelectionState,
+    scanIntervalMs: Long,
     bleManager: NaoyunBleManager,
     onRequestPermissions: () -> Unit,
     onSelect: (HomeModule) -> Unit,
-    onMoveLeft: () -> Unit,
-    onMoveRight: () -> Unit,
-    onConfirm: () -> Unit
+    onAdvance: () -> Unit
 ) {
     val bleState by bleManager.state.collectAsState()
     val scanResults by bleManager.scanResults.collectAsState()
@@ -73,6 +73,11 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(selection.selectedIndex, selection.scanDirection, scanIntervalMs) {
+        delay(scanIntervalMs.coerceAtLeast(200L))
+        onAdvance()
+    }
+
     AuroraBackground {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -80,7 +85,18 @@ fun HomeScreen(
                 .padding(horizontal = 22.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("主页面", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("主页面", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "光标自动轮转 ${if (selection.scanDirection < 0) "←" else "→"}  ·  " +
+                        "左看/右看改变方向 · 咬牙选择",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             GlassPanel(Modifier.weight(1f).fillMaxWidth()) {
                 ModuleStrip(selection, onSelect)
                 DeviceStatusLine(bleState, telemetry)
@@ -106,7 +122,11 @@ private fun DeviceStatusLine(
     state: NaoyunBleManager.State,
     telemetry: NaoyunBleManager.DeviceTelemetry?
 ) {
-    val connected = state == NaoyunBleManager.State.READY
+    val connected = state in setOf(
+        NaoyunBleManager.State.READY,
+        NaoyunBleManager.State.STREAM_STALLED,
+        NaoyunBleManager.State.RECOVERING
+    )
     Text(
         text = buildString {
             append("ᛒ  ")
@@ -158,15 +178,8 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
 private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val symbol = when (module) {
         HomeModule.REALTIME_COMMUNICATION -> "◌"
-        HomeModule.MAZE -> "▦"
-        HomeModule.SNAKE_CLIMB -> "蛇"
-        HomeModule.WIZARD_GAME -> "✦"
-        HomeModule.CHINESE_CHESS -> "楚"
-        HomeModule.DOUDIZHU -> "斗"
-        HomeModule.MAHJONG -> "麻"
-        HomeModule.TELEVISION -> "视"
-        HomeModule.MUSIC -> "♪"
         HomeModule.SETTINGS -> "⚙"
+        HomeModule.ENTERTAINMENT -> "◈"
     }
     SelectableGlassPanel(
         selected = selected,
@@ -267,7 +280,12 @@ private fun DeviceRow(name: String, selected: Boolean, onClick: () -> Unit) {
 private fun SignalPanel(modifier: Modifier, bleManager: NaoyunBleManager, state: NaoyunBleManager.State) {
     GlassPanel(modifier) {
         Text("实时信号", style = MaterialTheme.typography.titleMedium)
-        if (state == NaoyunBleManager.State.READY) {
+        if (state in setOf(
+                NaoyunBleManager.State.READY,
+                NaoyunBleManager.State.STREAM_STALLED,
+                NaoyunBleManager.State.RECOVERING
+            )
+        ) {
             AndroidView(
                 factory = { EegStereoView(it, bleManager) },
                 modifier = Modifier.weight(1f).fillMaxWidth()

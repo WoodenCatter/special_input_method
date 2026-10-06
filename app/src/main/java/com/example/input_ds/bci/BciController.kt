@@ -11,13 +11,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
+import java.util.concurrent.Executors
 
 internal data class BciWindowEpoch(
     val commandEpoch: Long,
@@ -65,7 +67,10 @@ class BciController(
     private val onSignal: (ControlSignal) -> Unit
 ) {
     private var job: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val inferenceDispatcher = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "bci-inference").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
+    private val scope = CoroutineScope(inferenceDispatcher + SupervisorJob())
 
     private val _prediction = MutableStateFlow("等待启动…")
     val prediction: StateFlow<String> = _prediction
@@ -77,7 +82,6 @@ class BciController(
     val status: StateFlow<String> = _status
 
     private var modelInference: ModelInference? = null
-    private var loadedModelContract: JSONObject? = null
     private var calibration: AsyncCalibration? = null
     private var asyncDetector: FourClassActionDetector? = null
     private var sixActionDetector: SixActionDetector? = null
@@ -112,7 +116,6 @@ class BciController(
         modelInference = ModelInference(context)
         val loaded = modelInference!!.loadModel()
         val usesActiveModel = loaded && modelInference!!.loadedFromActiveModel
-        loadedModelContract = if (usesActiveModel) UserModelManager.activePreprocessingContract(context) else null
         calibration = if (!loaded) null else runCatching {
             val resolvedCalibration = if (usesActiveModel) {
                 AsyncCalibrationManager.loadForActiveModel(context, modelInference!!.inputPoints)
@@ -128,7 +131,6 @@ class BciController(
             _status.value = "校准加载失败：${error.message ?: "未知错误"}"
             modelInference?.close()
             modelInference = null
-            loadedModelContract = null
             Log.e(TAG, "calibration load failed", error)
             return false
         }
@@ -165,7 +167,7 @@ class BciController(
         _classId.value = -1
         _confidence.value = 0f
         _prediction.value = "异步监听中…"
-        _status.value = "异步控制已启动：75%重叠滑窗；${calibration?.source}"
+        _status.value = "异步控制已启动：100ms步长 · 5窗证据；${calibration?.source}"
         Log.d(TAG, "异步控制已启动 modelPoints=${modelInference?.inputPoints} calibration=$calibration")
         startAsynchronousLoop()
     }
@@ -173,8 +175,7 @@ class BciController(
     private fun startAsynchronousLoop() {
         val modelPoints = modelInference?.inputPoints ?: return
         val stridePoints = AsyncWindowPolicy.stridePoints(modelPoints)
-        val selectedPreprocessing = bleManager.preprocessing.value
-        val modelContract = loadedModelContract
+        val selectedPreprocessing = EegPreprocessStep.DEFAULT
         val fourDetector = asyncDetector
         val sixDetector = sixActionDetector
         if (fourDetector == null && sixDetector == null) {
@@ -189,7 +190,7 @@ class BciController(
             modelPoints,
             stridePoints,
             calibration ?: return,
-            modelContract.describePreprocessing(selectedPreprocessing),
+            EegPreprocessStep.describe(selectedPreprocessing),
             modelInference?.loadedModelDescription ?: "未知模型",
             protocol = protocol,
             classOrder = modelInference?.labelNames ?: protocol.labelNames
@@ -197,8 +198,10 @@ class BciController(
         job?.cancel()
         job = scope.launch {
             var activeEpoch: BciWindowEpoch? = null
-            var epochStartSample = bleManager.buffer.synchronizedCount()
-            var lastProcessedEnd = epochStartSample
+            var epochStartTimeUs = SystemClock.elapsedRealtimeNanos() / 1_000L
+            var nextWindowEndUs: Long? = null
+            val windowDurationUs = (modelPoints - 1L) * SAMPLE_PERIOD_US
+            val strideDurationUs = stridePoints * SAMPLE_PERIOD_US
             while (isActive && controlActive) {
                 val acquisitionEpoch = bleManager.synchronizedDataEpoch.value
                 val windowEpoch = commandGate.snapshot(acquisitionEpoch)
@@ -208,45 +211,75 @@ class BciController(
                     continue
                 }
 
-                val available = bleManager.buffer.synchronizedCount()
                 if (windowEpoch != activeEpoch) {
                     fourDetector?.reset()
                     sixDetector?.reset()
                     activeEpoch = windowEpoch
-                    epochStartSample = available
-                    lastProcessedEnd = available
+                    epochStartTimeUs = SystemClock.elapsedRealtimeNanos() / 1_000L
+                    nextWindowEndUs = null
                     Log.d(
                         TAG,
                         "new inference epoch command=${windowEpoch.commandEpoch} " +
-                            "acquisition=${windowEpoch.acquisitionEpoch} start=$available"
+                            "acquisition=${windowEpoch.acquisitionEpoch} startUs=$epochStartTimeUs"
                     )
                 }
 
-                if (available - epochStartSample < modelPoints ||
-                    available - lastProcessedEnd < stridePoints
-                ) {
+                val commonEndUs = bleManager.commonAlignedTimeUs()
+                if (commonEndUs == null) {
                     delay(ASYNC_POLL_INTERVAL_MS)
                     continue
                 }
-                // Always evaluate the newest complete window to avoid control lag.
-                val endSample = available
-                lastProcessedEnd = endSample
-                val rawStart = endSample - modelPoints
-                val rawLeft = bleManager.buffer.getLeftRange(rawStart, endSample)
-                val rawRight = bleManager.buffer.getRightRange(rawStart, endSample)
+                if (nextWindowEndUs == null) {
+                    val latest = bleManager.latestAlignedWindow(modelPoints)
+                    if (
+                        latest == null ||
+                        latest.endTimeUs < epochStartTimeUs + windowDurationUs
+                    ) {
+                        delay(ASYNC_POLL_INTERVAL_MS)
+                        continue
+                    }
+                    nextWindowEndUs = latest.endTimeUs
+                }
+                var scheduledEndUs = nextWindowEndUs ?: continue
+                if (commonEndUs < scheduledEndUs) {
+                    delay(ASYNC_POLL_INTERVAL_MS)
+                    continue
+                }
+                val pendingSteps = ((commonEndUs - scheduledEndUs) / strideDurationUs).toInt()
+                if (pendingSteps >= MAX_CATCH_UP_WINDOWS) {
+                    val skippedSteps = pendingSteps - (MAX_CATCH_UP_WINDOWS - 1)
+                    scheduledEndUs += skippedSteps * strideDurationUs
+                    nextWindowEndUs = scheduledEndUs
+                    fourDetector?.reset()
+                    sixDetector?.reset()
+                    Log.w(TAG, "推理积压，跳过 $skippedSteps 个步长并清空时序证据")
+                }
+                val rawStereo = bleManager.alignedWindow(
+                    scheduledEndUs - windowDurationUs,
+                    scheduledEndUs,
+                    modelPoints
+                )
+                if (rawStereo == null) {
+                    nextWindowEndUs = scheduledEndUs + strideDurationUs
+                    fourDetector?.reset()
+                    sixDetector?.reset()
+                    Log.w(TAG, "固定步长窗口不可用，清空时序证据 endUs=$scheduledEndUs")
+                    continue
+                }
+                nextWindowEndUs = scheduledEndUs + strideDurationUs
+                val rawLeft = rawStereo.left
+                val rawRight = rawStereo.right
                 if (rawLeft.size != modelPoints || rawRight.size != modelPoints) {
                     _status.value = "异步窗口点数不足，已跳过"
                     continue
                 }
-                val historyStart = (endSample - MAX_FILTER_HISTORY_POINTS).coerceAtLeast(0)
-                val left = bleManager.buffer.getLeftRange(historyStart, endSample)
-                val right = bleManager.buffer.getRightRange(historyStart, endSample)
                 val inferenceStarted = SystemClock.elapsedRealtime()
-                val processed = if (modelContract != null) {
-                    EegPreprocessor.preprocess(left, right, modelContract)
-                } else {
-                    EegPreprocessor.preprocess(left, right, modelPoints, selectedPreprocessing)
-                }
+                val processed = EegPreprocessor.preprocess(
+                    rawLeft,
+                    rawRight,
+                    modelPoints,
+                    selectedPreprocessing
+                )
                 if (processed == null) {
                     _status.value = "异步窗口预处理失败，已跳过"
                     continue
@@ -258,14 +291,12 @@ class BciController(
                 }
                 val currentAcquisitionEpoch = bleManager.synchronizedDataEpoch.value
                 if (!commandGate.isCurrent(windowEpoch, currentAcquisitionEpoch)) {
-                    Log.d(TAG, "inference epoch changed; discard end=$endSample")
+                    Log.d(TAG, "inference epoch changed; discard endUs=${rawStereo.endTimeUs}")
                     continue
                 }
-                if (bleManager.buffer.synchronizedCount() - endSample >= stridePoints) {
-                    Log.d(TAG, "异步结果已落后一个步长，丢弃 end=$endSample")
-                    continue
-                }
-                val timestampMs = endSample * 1000L / SAMPLE_RATE_HZ
+                val timestampMs = rawStereo.endTimeUs / 1_000L
+                val endSample = (rawStereo.endTimeUs / SAMPLE_PERIOD_US)
+                    .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                 val fourDecision = fourDetector?.update(
                     result.probabilities,
                     rawLeft,
@@ -347,7 +378,6 @@ class BciController(
         job = null
         modelInference?.close()
         modelInference = null
-        loadedModelContract = null
         asyncDetector?.reset()
         asyncDetector = null
         sixActionDetector?.reset()
@@ -355,36 +385,15 @@ class BciController(
         asyncLogger?.close()
         asyncLogger = null
         calibration = null
+        scope.cancel()
+        inferenceDispatcher.close()
         _status.value = "已停止"
     }
 
-    private fun JSONObject?.describePreprocessing(fallback: Set<EegPreprocessStep>): String {
-        val steps = this?.optJSONArray("window_steps")
-            ?: return EegPreprocessStep.describe(fallback)
-        if (steps.length() == 0) return "原始信号"
-        return buildList {
-            for (index in 0 until steps.length()) {
-                val step = steps.optJSONObject(index) ?: continue
-                add(
-                    when (step.optString("operation")) {
-                        "bandpass" -> "${step.optDouble("low_hz").compact()}–${step.optDouble("high_hz").compact()}Hz 带通"
-                        "zscore" -> "Z-score"
-                        "scale" -> "缩放"
-                        "clip" -> "截幅"
-                        else -> step.optString("operation", "未知预处理")
-                    }
-                )
-            }
-        }.joinToString(" + ").ifBlank { "原始信号" }
-    }
-
-    private fun Double.compact(): String =
-        if (this % 1.0 == 0.0) toInt().toString() else toString()
-
     private companion object {
         const val TAG = "BciController"
-        const val SAMPLE_RATE_HZ = 500L
-        const val MAX_FILTER_HISTORY_POINTS = 15_000
+        const val SAMPLE_PERIOD_US = 2_000L
         const val ASYNC_POLL_INTERVAL_MS = 20L
+        const val MAX_CATCH_UP_WINDOWS = 5
     }
 }

@@ -161,6 +161,18 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
         startPinyinScanning()
     }
 
+    /** Handles the Return and Initials cells shown beside pinyin combinations. */
+    fun selectPinyinNavigationByTouch(index: Int) {
+        val state = _state.value
+        if (state.phase != InputPhase.LEVEL_2_LETTER_SELECT) return
+        when (index) {
+            0 -> returnToLevel1()
+            state.pinyinCombinations.size + 1 -> {
+                if (state.hasInitialPredictionOption) enterInitialPrediction()
+            }
+        }
+    }
+
     /** Commits a visible character candidate directly. */
     fun selectCharacterByTouch(character: String) {
         val state = _state.value
@@ -169,6 +181,17 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
         val newOutput = state.outputText + character
         UserDictionary.record(takeLastCodePoints(newOutput, 4))
         requestPredictions(state, newOutput, character)
+    }
+
+    /** Commits a common phrase directly from the level-one preview grid. */
+    fun selectCommonPhraseByTouch(phrase: String) {
+        val state = _state.value
+        if (state.phase != InputPhase.LEVEL_1_SCANNING || phrase !in CharacterDictionary.COMMON_PHRASES) return
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        CommonPhraseUsage.record(phrase)
+        val newOutput = state.outputText + phrase
+        UserDictionary.record(takeLastCodePoints(newOutput, 4))
+        requestPredictions(state, newOutput, takeLastCodePoints(phrase, 1))
     }
 
     private fun switchToLeftSide() {

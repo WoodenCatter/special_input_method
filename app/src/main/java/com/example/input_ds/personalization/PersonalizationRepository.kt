@@ -65,6 +65,30 @@ class PersonalizationRepository(context: Context) {
 
     fun findUser(localUserId: String): LocalUser? = listUsers().firstOrNull { it.localId == localUserId }
 
+    /** Rebuilds the local identity index from a profile that already exists on the server. */
+    @Synchronized
+    fun restoreRemoteProfile(
+        profileId: String,
+        clientProfileId: String,
+        displayName: String,
+        enabled: Boolean
+    ): LocalUser {
+        requireProfileIdentifier(profileId)
+        requireProfileIdentifier(clientProfileId)
+        val cleanName = displayName.trim().ifEmpty { "服务器用户" }
+        val (users, restored) = mergeRecoveredProfile(
+            users = readUsers(),
+            profileId = profileId,
+            clientProfileId = clientProfileId,
+            displayName = cleanName,
+            enabled = enabled
+        )
+        writeUsers(users)
+        userDirectory(restored.localId).mkdirs()
+        if (activeUserId() == null) setActiveUser(restored.localId)
+        return restored
+    }
+
     @Synchronized
     fun saveRemoteProfile(
         localUserId: String,
@@ -213,6 +237,21 @@ class PersonalizationRepository(context: Context) {
         listSessions(user.localId).filter { it.status !in TERMINAL_STATUSES }
     }
 
+    /** Reopens historical uploads that failed before zero-based legacy markers were normalized. */
+    fun requeueRepairableFailures(): List<TrainingSession> = listUsers().flatMap { user ->
+        listSessions(user.localId).mapNotNull { session ->
+            if (session.status != WorkflowStatus.FAILED ||
+                !isLegacyMarkerRoundValidationError(session.error)
+            ) {
+                return@mapNotNull null
+            }
+            session.copy(
+                status = WorkflowStatus.PACKAGED,
+                error = "已兼容旧采集标记并重新加入同步队列"
+            ).also(::saveSession)
+        }
+    }
+
     /**
      * Removes the collected files for [modelKey] and removes that
      * model run from the local session record. Other downloaded models from
@@ -315,4 +354,44 @@ class PersonalizationRepository(context: Context) {
         private val PROFILE_ID_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
         val TERMINAL_STATUSES = setOf(WorkflowStatus.SUCCEEDED, WorkflowStatus.PARTIAL, WorkflowStatus.FAILED)
     }
+}
+
+internal fun mergeRecoveredProfile(
+    users: List<LocalUser>,
+    profileId: String,
+    clientProfileId: String,
+    displayName: String,
+    enabled: Boolean
+): Pair<List<LocalUser>, LocalUser> {
+    val merged = users.toMutableList()
+    val index = merged.indexOfFirst {
+        it.profileId == profileId || it.clientProfileId == clientProfileId
+    }
+    val restored = if (index >= 0) {
+        merged[index].copy(
+            displayName = displayName,
+            clientProfileId = clientProfileId,
+            profileId = profileId,
+            profileEnabled = enabled,
+            profileSyncError = null,
+            serverUserId = null
+        ).also { merged[index] = it }
+    } else {
+        LocalUser(
+            localId = clientProfileId,
+            displayName = displayName,
+            clientProfileId = clientProfileId,
+            profileId = profileId,
+            profileEnabled = enabled
+        ).also { merged += it }
+    }
+    return merged to restored
+}
+
+internal fun isLegacyMarkerRoundValidationError(message: String?): Boolean {
+    val value = message?.lowercase().orEmpty()
+    return value.contains("markers") &&
+        value.contains("round") &&
+        value.contains("greater than or equal to 1") &&
+        (value.contains("\"input\":0") || value.contains("input: 0"))
 }

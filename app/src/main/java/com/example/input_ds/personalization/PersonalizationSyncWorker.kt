@@ -12,12 +12,18 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class PersonalizationSyncWorker(
     appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = SYNC_MUTEX.withLock {
+        runSerializedWork()
+    }
+
+    private fun runSerializedWork(): Result {
         val localUserId = inputData.getString(KEY_LOCAL_USER_ID) ?: return Result.failure()
         val sessionId = inputData.getString(KEY_SESSION_ID) ?: return Result.failure()
         val repository = PersonalizationRepository(applicationContext)
@@ -66,29 +72,46 @@ class PersonalizationSyncWorker(
         val modelManager = UserModelManager(applicationContext)
         val sessionDirectory = repository.createSessionDirectory(localUserId, sessionId)
         val npz = File(sessionDirectory, session.npzFile)
-        if (!npz.isFile) {
+        val streamingStore = StreamingUploadStore(sessionDirectory)
+        if (!npz.isFile && streamingStore.load() == null) {
             repository.saveSession(session.copy(status = WorkflowStatus.FAILED, error = "本地连续 NPZ 已丢失"))
             return Result.failure()
         }
 
         try {
-            for (index in session.modelRuns.indices) {
-                var run = session.modelRuns[index]
-                if (run.status == "failed" || run.modelFile != null) continue
-                try {
-                    if (run.datasetId == null) {
-                        session = updateSession(repository, session, index, run, WorkflowStatus.UPLOADING)
-                        val uploaded = client.uploadContinuousDataset(session, run, npz)
-                        run = run.copy(
+            val existingDataset = session.modelRuns.firstOrNull {
+                it.datasetId != null && it.datasetVersion != null
+            }
+            val uploaded = if (existingDataset != null) {
+                BrainApiClient.UploadResult(
+                    requireNotNull(existingDataset.datasetId),
+                    requireNotNull(existingDataset.datasetVersion),
+                    existingDataset.preprocessingSha256
+                )
+            } else {
+                session = session.copy(status = WorkflowStatus.UPLOADING, error = null)
+                    .also(repository::saveSession)
+                uploadDataset(client, session, npz, streamingStore)
+            }
+            if (session.modelRuns.any { it.datasetId == null }) {
+                session = session.copy(
+                    status = WorkflowStatus.UPLOADING,
+                    modelRuns = session.modelRuns.map { run ->
+                        if (run.datasetId != null) run else run.copy(
                             datasetId = uploaded.datasetId,
                             datasetVersion = uploaded.version,
                             preprocessingSha256 = uploaded.preprocessingSha256,
                             status = "uploaded",
                             updatedAtEpochMs = System.currentTimeMillis()
                         )
-                        session = updateSession(repository, session, index, run, WorkflowStatus.UPLOADING)
                     }
+                ).also(repository::saveSession)
+            }
 
+            for (index in session.modelRuns.indices) {
+                var run = session.modelRuns[index]
+                if (run.status == "failed" || run.modelFile != null) continue
+                try {
                     if (run.jobId == null) {
                         val created = client.findTrainingJob(session, run)
                             ?: client.createTrainingJob(session, run)
@@ -175,8 +198,38 @@ class PersonalizationSyncWorker(
             repository.saveSession(session)
             return Result.success()
         } catch (error: BrainApiClient.ApiException) {
-            repository.saveSession(session.copy(error = "网络暂不可用：${error.message}"))
-            return Result.retry()
+            return if (error.isTransient) {
+                repository.saveSession(session.copy(error = "网络暂不可用：${error.message}"))
+                Result.retry()
+            } else {
+                repository.saveSession(session.copy(status = WorkflowStatus.FAILED, error = error.message))
+                Result.failure()
+            }
+        }
+    }
+
+    private fun uploadDataset(
+        client: BrainApiClient,
+        session: TrainingSession,
+        npz: File,
+        streamingStore: StreamingUploadStore
+    ): BrainApiClient.UploadResult {
+        val manifest = streamingStore.load()
+        streamingStore.finalizedResult()?.let { return it }
+        if (manifest != null && !manifest.unsupported && manifest.chunks.isNotEmpty()) {
+            try {
+                return client.finalizeStreamingDataset(session, streamingStore).also {
+                    streamingStore.deleteChunks()
+                }
+            } catch (error: BrainApiClient.ApiException) {
+                if (!error.isStreamingUnsupported) throw error
+                streamingStore.markUnsupported(error.message.orEmpty())
+            }
+        }
+        require(npz.isFile && npz.length() > 0) { "本地连续 NPZ 已丢失" }
+        require(session.modelRuns.isNotEmpty()) { "Session 没有待训练模型" }
+        return client.uploadContinuousDataset(session, npz).also {
+            streamingStore.deleteChunks()
         }
     }
 
@@ -201,6 +254,8 @@ class PersonalizationSyncWorker(
     }
 
     companion object {
+        private val SYNC_MUTEX = Mutex()
+
         const val KEY_LOCAL_USER_ID = "local_user_id"
         const val KEY_SESSION_ID = "session_id"
     }
@@ -227,6 +282,7 @@ object TrainingWorkScheduler {
 
     fun resumeIncomplete(context: Context) {
         val repository = PersonalizationRepository(context)
+        repository.requeueRepairableFailures()
         repository.listIncompleteSessions().forEach { session ->
             if (session.status != WorkflowStatus.COLLECTING) enqueue(context, session)
         }

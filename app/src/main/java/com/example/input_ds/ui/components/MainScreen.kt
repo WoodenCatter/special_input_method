@@ -55,7 +55,9 @@ fun MainScreen(
     state: InputState,
     onBlockClick: (Int) -> Unit,
     onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
     onCharacterClick: (String) -> Unit,
+    onCommonPhraseClick: (String) -> Unit,
     onPredictionClick: (Int) -> Unit,
     onInitialPredictionClick: (Int) -> Unit
 ) {
@@ -105,6 +107,7 @@ fun MainScreen(
                 Region1(
                     state = state,
                     onPinyinClick = onPinyinClick,
+                    onPinyinNavigationClick = onPinyinNavigationClick,
                     modifier = Modifier.weight(1f)
                 )
 
@@ -112,7 +115,9 @@ fun MainScreen(
                 Region2(
                     state = state,
                     onPinyinClick = onPinyinClick,
+                    onPinyinNavigationClick = onPinyinNavigationClick,
                     onCharacterClick = onCharacterClick,
+                    onCommonPhraseClick = onCommonPhraseClick,
                     onPredictionClick = onPredictionClick,
                     onInitialPredictionClick = onInitialPredictionClick,
                     modifier = Modifier.weight(1.5f)
@@ -246,6 +251,7 @@ fun GridCharBox(
 fun Region1(
     state: InputState,
     onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -314,6 +320,7 @@ fun Region1(
                         val returnHighlighted = state.highlightedPinyinIndex == 0
                         Text(
                             text = "返回",
+                            modifier = Modifier.clickable { onPinyinNavigationClick(0) },
                             fontSize = if (returnHighlighted) 30.sp else 22.sp,
                             fontWeight = if (returnHighlighted) FontWeight.Bold else FontWeight.Normal,
                             color = if (returnHighlighted) HighlightYellow else HighlightOrange
@@ -333,6 +340,9 @@ fun Region1(
                                 state.pinyinCombinations.size + 1
                             Text(
                                 text = "首字母",
+                                modifier = Modifier.clickable {
+                                    onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                },
                                 fontSize = if (isHighlighted) 30.sp else 22.sp,
                                 fontWeight = if (isHighlighted) FontWeight.Bold else FontWeight.Normal,
                                 color = if (isHighlighted) HighlightYellow else HighlightOrange
@@ -441,7 +451,9 @@ fun Region1(
 fun Region2(
     state: InputState,
     onPinyinClick: (String) -> Unit,
+    onPinyinNavigationClick: (Int) -> Unit,
     onCharacterClick: (String) -> Unit,
+    onCommonPhraseClick: (String) -> Unit,
     onPredictionClick: (Int) -> Unit,
     onInitialPredictionClick: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -457,7 +469,7 @@ fun Region2(
         when (state.phase) {
             InputPhase.LEVEL_1_SCANNING -> {
                 Column {
-                    // 上半部分：拼音候选（全量显示，与咬定后一致）
+                    // 上半部分：有完整拼音时维持原显示；否则回显已选字母块，避免空白。
                     if (state.pinyinCandidates.isNotEmpty()) {
                         Text(
                             text = "拼音:",
@@ -479,6 +491,21 @@ fun Region2(
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    } else if (state.selectedBlocks.isNotEmpty()) {
+                        Text(
+                            text = "已选字母块:",
+                            fontSize = 11.sp,
+                            color = TextGray
+                        )
+                        Text(
+                            text = state.selectedBlocks.mapNotNull { block ->
+                                LetterBlockMapping.DIGIT_LABELS[block]
+                            }.joinToString(" · "),
+                            fontSize = 15.sp,
+                            color = PrimaryBlue,
+                            lineHeight = 20.sp
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
                     }
 
@@ -535,7 +562,14 @@ fun Region2(
                                     for (col in 0..4) {
                                         val idx = row * 5 + col
                                         if (idx < commonPhrases.size) {
-                                            GridCharBox(false, commonPhrases[idx], 18.sp, 16.sp, modifier = Modifier.weight(1f))
+                                            GridCharBox(
+                                                false,
+                                                commonPhrases[idx],
+                                                18.sp,
+                                                16.sp,
+                                                onClick = { onCommonPhraseClick(commonPhrases[idx]) },
+                                                modifier = Modifier.weight(1f)
+                                            )
                                         } else {
                                             Spacer(modifier = Modifier.weight(1f))
                                         }
@@ -563,6 +597,7 @@ fun Region2(
                                     18.sp,
                                     15.sp,
                                     isNav = true,
+                                    onClick = { onPinyinNavigationClick(0) },
                                     modifier = Modifier
                                 )
                                 state.pinyinCombinations.forEachIndexed { index, pinyin ->
@@ -584,6 +619,9 @@ fun Region2(
                                         18.sp,
                                         15.sp,
                                         isNav = true,
+                                        onClick = {
+                                            onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                        },
                                         modifier = Modifier
                                     )
                                 }
@@ -649,7 +687,15 @@ fun Region2(
                                 color = TextGray
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                GridCharBox(false, "返回", 18.sp, 15.sp, isNav = true, modifier = Modifier)
+                                GridCharBox(
+                                    false,
+                                    "返回",
+                                    18.sp,
+                                    15.sp,
+                                    isNav = true,
+                                    onClick = { onPinyinNavigationClick(0) },
+                                    modifier = Modifier
+                                )
                                 state.pinyinCombinations.forEachIndexed { index, pinyin ->
                                     val isHighlighted = index + 1 == state.highlightedPinyinIndex
                                     Text(
@@ -667,6 +713,9 @@ fun Region2(
                                         18.sp,
                                         15.sp,
                                         isNav = true,
+                                        onClick = {
+                                            onPinyinNavigationClick(state.pinyinCombinations.size + 1)
+                                        },
                                         modifier = Modifier
                                     )
                                 }

@@ -75,7 +75,7 @@ class UserModelManager(context: Context) {
                 require(parseStringArray(metadata["input_adapters"]).contains("numpy-npz")) {
                     "ONNX 未记录 numpy-npz 输入适配器"
                 }
-                validateContract(metadata["inference_preprocessing"], expectedPoints, run.preset)
+                validateContract(metadata["inference_preprocessing"], expectedPoints)
 
                 val output = ortSession.outputInfo.entries.firstOrNull() ?: error("ONNX 没有输出张量")
                 val outputInfo = output.value.info as? TensorInfo ?: error("ONNX 输出不是张量")
@@ -210,28 +210,25 @@ class UserModelManager(context: Context) {
         atomicWrite(pointerFile, pointer.toString(2))
     }
 
-    private fun validateContract(raw: String?, expectedPoints: Int, preset: PreprocessingPreset) {
+    private fun validateContract(raw: String?, expectedPoints: Int) {
         val actual = runCatching { JSONObject(requireNotNull(raw)) }
             .getOrElse { error("ONNX 缺少有效 inference_preprocessing") }
         require(actual.optInt("window_points") == expectedPoints) { "ONNX 预处理窗口长度不一致" }
         val actualSteps = actual.optJSONArray("window_steps") ?: JSONArray()
-        val expectedSteps = preset.contract(expectedPoints).getJSONArray("window_steps")
+        val expectedSteps = PreprocessingPreset.UNIFIED_1_45.contract(expectedPoints)
+            .getJSONArray("window_steps")
         require(actualSteps.length() == expectedSteps.length()) { "ONNX 预处理步骤数量不一致" }
         for (index in 0 until expectedSteps.length()) {
             val expected = expectedSteps.getJSONObject(index)
             val received = actualSteps.getJSONObject(index)
             require(received.optString("operation") == expected.optString("operation")) { "ONNX 第 ${index + 1} 个预处理操作不一致" }
             require(received.optString("implementation") == expected.optString("implementation")) { "ONNX 第 ${index + 1} 个预处理实现不一致" }
-            when (expected.optString("operation")) {
-                "bandpass" -> require(
-                    received.optDouble("low_hz") == expected.optDouble("low_hz") &&
-                        received.optDouble("high_hz") == expected.optDouble("high_hz") &&
-                        received.optInt("order") == expected.optInt("order")
-                ) { "ONNX 带通参数不一致" }
-                "zscore" -> require(received.optDouble("epsilon") == expected.optDouble("epsilon")) {
-                    "ONNX Z-score 参数不一致"
-                }
-            }
+            require(received.optString("operation") == "bandpass") { "ONNX 只能使用统一带通预处理" }
+            require(
+                received.optDouble("low_hz") == expected.optDouble("low_hz") &&
+                    received.optDouble("high_hz") == expected.optDouble("high_hz") &&
+                    received.optInt("order") == expected.optInt("order")
+            ) { "ONNX 带通参数不一致" }
         }
     }
 
@@ -323,24 +320,13 @@ class UserModelManager(context: Context) {
                 ?: ClassificationProtocol.FOUR_CLASS
         }
 
-        fun activePreprocessingContract(context: Context): JSONObject? {
-            val repository = PersonalizationRepository(context)
-            val localUserId = repository.activeUserId() ?: return null
-            return runCatching {
-                JSONObject(File(repository.modelDirectory(localUserId), ACTIVE_POINTER).readText(Charsets.UTF_8))
-                    .getJSONObject("inference_preprocessing")
-            }.getOrNull()
-        }
-
         fun activePreset(context: Context): PreprocessingPreset? {
             val repository = PersonalizationRepository(context)
             val localUserId = repository.activeUserId() ?: return null
             val pointer = runCatching {
                 JSONObject(File(repository.modelDirectory(localUserId), ACTIVE_POINTER).readText(Charsets.UTF_8))
             }.getOrNull() ?: return null
-            return PreprocessingPreset.entries.firstOrNull {
-                it.wireName == pointer.optString("preset")
-            }
+            return PreprocessingPreset.fromPersisted(pointer.optString("preset"))
         }
 
         fun activeTrainingSession(context: Context): TrainingSession? {

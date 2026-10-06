@@ -515,6 +515,7 @@ button { font: inherit; }
 }
 
 .settings-option.return { background: #287653; }
+.settings-option.sound { background: #356d93; }
 .settings-option.restart { background: #a36b1f; }
 .settings-option.exit { background: #9c3933; }
 

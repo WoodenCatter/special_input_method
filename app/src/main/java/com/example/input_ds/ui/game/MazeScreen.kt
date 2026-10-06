@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.game
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,23 +11,31 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.input_ds.game.MazeAction
+import com.example.input_ds.game.MazeExitChoice
 import com.example.input_ds.game.MazeGame
 import com.example.input_ds.game.MazeProtocol
 import com.example.input_ds.game.MazeState
@@ -45,6 +55,7 @@ fun MazeScreen(
     controlStatus: String,
     onBack: () -> Unit,
     onAction: (MazeAction) -> Unit,
+    onExitDecision: (MazeExitChoice) -> Unit,
     onReset: () -> Unit
 ) {
     LaunchedEffect(state.completed) {
@@ -77,6 +88,43 @@ fun MazeScreen(
             MazeBoard(state, Modifier.weight(1f).fillMaxWidth())
         }
     }
+
+    if (state.exitDialogVisible) {
+        ExitConfirmationDialog(
+            selection = state.exitSelection,
+            onDecision = onExitDecision
+        )
+    }
+}
+
+@Composable
+private fun ExitConfirmationDialog(
+    selection: MazeExitChoice,
+    onDecision: (MazeExitChoice) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { onDecision(MazeExitChoice.CANCEL) },
+        title = { Text("确认退出迷宫？") },
+        text = {
+            Text("左看选择取消，右看选择确认退出，咬牙确认。")
+        },
+        dismissButton = {
+            TextButton(onClick = { onDecision(MazeExitChoice.CANCEL) }) {
+                Text(
+                    text = if (selection == MazeExitChoice.CANCEL) "● 取消" else "取消",
+                    fontWeight = if (selection == MazeExitChoice.CANCEL) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onDecision(MazeExitChoice.CONFIRM) }) {
+                Text(
+                    text = if (selection == MazeExitChoice.CONFIRM) "● 确认退出" else "确认退出",
+                    fontWeight = if (selection == MazeExitChoice.CONFIRM) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+        }
+    )
 }
 
 @Composable
@@ -86,8 +134,18 @@ private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
     val gridColor = MaterialTheme.colorScheme.outline
     val playerColor = MaterialTheme.colorScheme.onSurface
     val playerBorder = MaterialTheme.colorScheme.background
+    val exitColor = MaterialTheme.colorScheme.tertiaryContainer
+    val exitTextColor = MaterialTheme.colorScheme.onTertiaryContainer.toArgb()
+    val exitTextPaint = remember(exitTextColor) {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = exitTextColor
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+    }
     val description = "${state.columns}\u5217${state.rows}\u884c\u8ff7\u5bab\uff0c\u73a9\u5bb6\u7b2c${state.player.column + 1}\u5217" +
-        "\u7b2c${state.player.row + 1}\u884c\uff0c\u7ec8\u70b9\u7b2c${state.finish.column + 1}\u5217\u7b2c${state.finish.row + 1}\u884c"
+        "\u7b2c${state.player.row + 1}\u884c\uff0c\u7ec8\u70b9\u7b2c${state.finish.column + 1}\u5217\u7b2c${state.finish.row + 1}\u884c" +
+        state.exitPoint?.let { "，退出点第${it.column + 1}列第${it.row + 1}行" }.orEmpty()
     Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.background, RoundedCornerShape(16.dp))
@@ -119,6 +177,26 @@ private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
             )
             drawCircle(AuroraOk, radius = cell * .28f, center = center(state.start), style = Stroke(cell * .08f))
             drawCircle(AuroraViolet, radius = cell * .3f, center = center(state.finish))
+            state.exitPoint?.let { exit ->
+                val topLeft = Offset(
+                    origin.x + exit.column * cell + cell * .1f,
+                    origin.y + exit.row * cell + cell * .18f
+                )
+                drawRoundRect(
+                    color = exitColor,
+                    topLeft = topLeft,
+                    size = Size(cell * .8f, cell * .64f),
+                    cornerRadius = CornerRadius(cell * .12f)
+                )
+                exitTextPaint.textSize = cell * .25f
+                val metrics = exitTextPaint.fontMetrics
+                drawContext.canvas.nativeCanvas.drawText(
+                    "退出",
+                    center(exit).x,
+                    center(exit).y - (metrics.ascent + metrics.descent) / 2f,
+                    exitTextPaint
+                )
+            }
             state.barriers.forEach { (position, action) ->
                 val topLeft = Offset(
                     origin.x + position.column * cell + cell * .18f,

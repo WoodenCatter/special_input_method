@@ -200,7 +200,7 @@ function bciRender() {
 
   if (cursor.phase === 'settle') {
     wrap.innerHTML = '<span class="status">结算选项正在轮转</span>';
-    const ids = { again: '#btn-again' };
+    const ids = { again: '#btn-again', exit: '#btn-settle-exit' };
     if (current) $(ids[current.kind])?.classList.add('bci-focus');
     return;
   }
@@ -349,6 +349,7 @@ function bciStartFollow(v, prev) {
 function bciStartSettle() {
   bciSetPhase('settle', [
     { kind: 'again', label: '再来一次' },
+    { kind: 'exit', label: '退出游戏' },
   ], 'horizontal', false);
 }
 
@@ -1146,7 +1147,7 @@ function statusHTML(v) {
   return `<span class="status">${t('thinking', esc(nm))}</span>`;
 }
 
-/* Sound effects are driven by diffing consecutive views, so they fire
+/* Speech is driven by diffing consecutive views, so it fires
    identically for local play, host and guest. */
 function sndSig(v) {
   return {
@@ -1158,8 +1159,7 @@ function sndSig(v) {
       if (!lp) return '';
       return lp.pass ? 'P' : lp.cards.map(c => c.id).join('-');
     }),
-    bids: v.players.map(p => (p.bid === null || p.bid === undefined) ? '' : String(p.bid)).join(','),
-    dbls: v.players.map(p => (p.dbl === null || p.dbl === undefined) ? '' : (p.dbl ? '1' : '0')).join(','),
+    bids: v.players.map(p => (p.bid === null || p.bid === undefined) ? '' : String(p.bid)),
   };
 }
 
@@ -1168,26 +1168,29 @@ function playSounds(v) {
   const cur = sndSig(v);
   App._snd = cur;
   if (!prev || prev.round !== cur.round) {
-    if (v.state === 'bidding') Snd.deal();
+    Snd.stopAll();
+    if (v.state === 'bidding') {
+      Snd.system('game_start');
+      Snd.system('start_bidding');
+    }
     return;
   }
   for (let i = 0; i < v.players.length; i++) {
     if (cur.plays[i] === prev.plays[i] || cur.plays[i] === '') continue;
-    if (cur.plays[i] === 'P') { Snd.pass(); continue; }
+    if (cur.plays[i] === 'P') { Snd.pass(i); continue; }
     const c = v.players[i].lastPlay.combo;
-    if (c && c.type === 'rocket') Snd.rocket();
-    else if (c && c.type === 'bomb') Snd.bomb();
-    else Snd.play();
+    Snd.playMove(i, c);
+    Snd.warning(i, v.players[i].cardCount);
   }
-  if (cur.bids !== prev.bids) Snd.bid();
-  if (cur.dbls !== prev.dbls) Snd.dbl();
+  for (let i = 0; i < cur.bids.length; i++) {
+    if (cur.bids[i] !== prev.bids[i] && cur.bids[i] !== '') Snd.bid(i, Number(cur.bids[i]));
+  }
   if (v.state === 'settle' && prev.state !== 'settle' && v.result) {
     const r = v.result;
     const iWon = r.landlordWon ? v.mySeat === v.landlord : v.mySeat !== v.landlord;
-    if (iWon) Snd.win(); else Snd.lose();
+    Snd.result(iWon);
     return;
   }
-  if (v.state === 'playing' && cur.actor === v.mySeat && prev.actor !== v.mySeat) Snd.turn();
 }
 
 function renderGame() {
@@ -1238,7 +1241,7 @@ function renderGame() {
 /* Landlord reveal: banner + the kitty cards flying into the landlord's
    hand (or seat panel). Purely cosmetic overlay clones. */
 function animateLandlord(v) {
-  Snd.landlord();
+  Snd.landlord(v.mySeat === v.landlord);
   const banner = document.createElement('div');
   banner.className = 'lord-banner';
   banner.textContent = '👑 ' + t('lord_banner', v.players[v.landlord].name);
@@ -1296,7 +1299,6 @@ function bindHandDrag() {
   };
   const applySel = (id, on) => {
     if (on) App.selected.add(id); else App.selected.delete(id);
-    Snd.tick();
     renderGame();
   };
   handEl.addEventListener('pointerdown', e => {
@@ -1352,7 +1354,6 @@ function doHint() {
 
 function showBubble(seat, text) {
   if (!text) return;
-  Snd.chat();
   if (App.bubbles[seat]) clearTimeout(App.bubbles[seat].timer);
   App.bubbles[seat] = { text, timer: setTimeout(() => { delete App.bubbles[seat]; renderBubbles(); }, 3200) };
   renderBubbles();
@@ -1409,9 +1410,11 @@ function renderSettle(v) {
     <div class="settle-rows">${rows}</div>
     <div class="settle-actions-single">
       <button id="btn-again" class="bci-choice settle-again">再来一次</button>
+      <button id="btn-settle-exit" class="bci-choice settle-exit">退出游戏</button>
     </div></div>`;
   $('#settle-overlay').classList.remove('hidden');
   $('#btn-again').onclick = () => act('again');
+  $('#btn-settle-exit').onclick = () => bciRequest({ kind: 'exit' });
 }
 
 function requestAppExit() {
@@ -1426,6 +1429,10 @@ function requestAppExit() {
 function setCombinedSound(enabled) {
   if (Snd.enabled !== enabled) Snd.toggle();
   if (Bgm.enabled !== enabled) Bgm.toggle();
+  if (enabled) {
+    Snd.unlock();
+    Bgm.poke();
+  }
   $('#settings-sound-label').textContent = `声音：${enabled ? '开' : '关'}`;
   $('#btn-sound-toggle').classList.toggle('off', !enabled);
 }

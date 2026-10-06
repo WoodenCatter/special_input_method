@@ -1,67 +1,111 @@
 'use strict';
-/* sound.js — synthesized sound effects (WebAudio, no audio assets).
-   All sounds are short oscillator/noise envelopes; muting persists. */
+/* sound.js — local speech pack for all three seats and the narrator. */
 
 const Snd = (() => {
-  let ctx = null;
+  const SEAT_VOICES = [
+    'voice_01_youth_male',
+    'voice_02_dubbed_male',
+    'voice_03_entertainment_female',
+  ];
+  const NARRATOR_VOICE = 'narrator_female';
+  const RANK_FILES = {
+    3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: '10',
+    11: 'j', 12: 'q', 13: 'k', 14: 'a', 15: '2',
+  };
+  const COMBO_FILES = {
+    trio_single: 'combo_trio_single.wav',
+    trio_pair: 'combo_trio_pair.wav',
+    straight: 'combo_straight.wav',
+    pair_straight: 'combo_pair_straight.wav',
+    plane: 'combo_plane.wav',
+    plane_single: 'combo_plane_single.wav',
+    plane_pair: 'combo_plane_pair.wav',
+    four_two: 'combo_four_two.wav',
+    four_two_pairs: 'combo_four_two_pairs.wav',
+    bomb: 'combo_bomb.wav',
+    rocket: 'combo_rocket.wav',
+  };
+  const SYSTEM_FILES = {
+    game_start: 'system_game_start.wav',
+    start_bidding: 'system_start_bidding.wav',
+    role_landlord: 'system_role_landlord.wav',
+    role_farmer: 'system_role_farmer.wav',
+    your_turn: 'system_your_turn.wav',
+    win: 'result_win.wav',
+    lose: 'result_lose.wav',
+  };
+
   let enabled = true;
+  let current = null;
+  let queue = [];
+  let generation = 0;
   try { enabled = localStorage.getItem('ddz_snd') !== '0'; } catch (e) { }
 
-  function ac() {
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return null;
-    if (!ctx) ctx = new AC();
-    if (ctx.state !== 'running') ctx.resume().catch(() => { });
-    return ctx;
+  function playerPath(seat, filename) {
+    const voice = SEAT_VOICES[seat] || SEAT_VOICES[0];
+    return `audio/${voice}/${filename}`;
   }
 
-  function env(g, t0, attack, dur, peak) {
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(peak, t0 + attack);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + dur);
+  function narratorPath(filename) {
+    return `audio/${NARRATOR_VOICE}/${filename}`;
   }
 
-  function tone(freq, o) {
-    o = o || {};
-    if (!enabled) return;
-    const c = ac();
-    if (!c) return;
-    const t0 = c.currentTime + (o.delay || 0);
-    const osc = c.createOscillator(), g = c.createGain();
-    osc.type = o.type || 'sine';
-    osc.frequency.setValueAtTime(freq, t0);
-    if (o.slide) osc.frequency.exponentialRampToValueAtTime(Math.max(30, freq + o.slide), t0 + (o.dur || 0.15));
-    env(g, t0, 0.012, o.dur || 0.15, o.gain || 0.2);
-    osc.connect(g).connect(c.destination);
-    osc.start(t0);
-    osc.stop(t0 + (o.dur || 0.15) + 0.1);
+  function stopAll() {
+    generation += 1;
+    queue = [];
+    if (!current) return;
+    const audio = current;
+    current = null;
+    audio.pause();
+    try { audio.currentTime = 0; } catch (e) { }
+    audio.removeAttribute('src');
   }
 
-  function noise(o) {
-    o = o || {};
-    if (!enabled) return;
-    const c = ac();
-    if (!c) return;
-    const t0 = c.currentTime + (o.delay || 0);
-    const dur = o.dur || 0.15;
-    const len = Math.max(1, Math.floor(c.sampleRate * dur));
-    const buf = c.createBuffer(1, len, c.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    const g = c.createGain();
-    env(g, t0, 0.005, dur, o.gain || 0.2);
-    let node = src;
-    if (o.low) {
-      const f = c.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.value = 420;
-      src.connect(f);
-      node = f;
-    }
-    node.connect(g).connect(c.destination);
-    src.start(t0);
+  function pump() {
+    if (!enabled || current || !queue.length) return;
+    const myGeneration = generation;
+    const audio = new Audio(queue.shift());
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (current === audio) current = null;
+      if (myGeneration === generation) pump();
+    };
+    current = audio;
+    audio.preload = 'auto';
+    audio.volume = 1;
+    audio.addEventListener('ended', finish, { once: true });
+    audio.addEventListener('error', finish, { once: true });
+    const result = audio.play();
+    if (result && typeof result.catch === 'function') result.catch(finish);
+  }
+
+  function enqueue(path) {
+    if (!enabled || !path) return;
+    queue.push(path);
+    pump();
+  }
+
+  function enqueuePlayer(seat, filename) {
+    if (filename) enqueue(playerPath(seat, filename));
+  }
+
+  function rankFilename(prefix, rank) {
+    if (rank === 16 && prefix === 'rank') return 'joker_small.wav';
+    if (rank === 17 && prefix === 'rank') return 'joker_big.wav';
+    const key = RANK_FILES[rank];
+    return key ? `${prefix}_${key}.wav` : null;
+  }
+
+  function playMove(seat, combo) {
+    if (!combo) return;
+    let filename = null;
+    if (combo.type === 'single') filename = rankFilename('rank', combo.rank);
+    else if (combo.type === 'pair') filename = rankFilename('pair', combo.rank);
+    else if (combo.type === 'trio') filename = rankFilename('trio', combo.rank);
+    else filename = COMBO_FILES[combo.type] || null;
+    enqueuePlayer(seat, filename);
   }
 
   return {
@@ -69,29 +113,25 @@ const Snd = (() => {
     toggle() {
       enabled = !enabled;
       try { localStorage.setItem('ddz_snd', enabled ? '1' : '0'); } catch (e) { }
-      if (enabled) ac();
+      if (!enabled) stopAll();
       return enabled;
     },
-    /* Browsers require a user gesture before audio can start. */
-    unlock() { if (enabled) ac(); },
-    tick() { tone(1400, { type: 'square', dur: 0.03, gain: 0.05 }); },
-    deal() { for (let i = 0; i < 6; i++) noise({ dur: 0.05, gain: 0.1, delay: i * 0.055 }); },
-    play() { noise({ dur: 0.07, gain: 0.16 }); tone(900, { type: 'triangle', dur: 0.06, gain: 0.1 }); },
-    pass() { tone(320, { dur: 0.12, gain: 0.1, slide: -140 }); },
-    bomb() { noise({ dur: 0.5, gain: 0.45, low: true }); tone(85, { type: 'sawtooth', dur: 0.45, gain: 0.35, slide: -45 }); },
-    rocket() {
-      tone(200, { type: 'sawtooth', dur: 0.45, gain: 0.25, slide: 950 });
-      noise({ dur: 0.4, gain: 0.35, delay: 0.32, low: true });
+    stopAll,
+    unlock() { pump(); },
+    playMove,
+    pass(seat) { enqueuePlayer(seat, 'pass.wav'); },
+    bid(seat, value) { enqueuePlayer(seat, `bid_${value}.wav`); },
+    warning(seat, count) {
+      if (count === 2) enqueuePlayer(seat, 'warning_two_cards.wav');
+      else if (count === 1) enqueuePlayer(seat, 'warning_one_card.wav');
     },
-    bid() { tone(660, { dur: 0.09, gain: 0.16 }); tone(880, { dur: 0.12, gain: 0.16, delay: 0.08 }); },
-    dbl() { tone(523, { dur: 0.09, gain: 0.16 }); tone(784, { dur: 0.12, gain: 0.16, delay: 0.07 }); },
-    turn() { tone(988, { dur: 0.08, gain: 0.14 }); tone(1319, { dur: 0.13, gain: 0.14, delay: 0.09 }); },
-    landlord() {
-      [523, 659, 784].forEach((f, i) => tone(f, { dur: 0.12, gain: 0.18, delay: i * 0.09 }));
-      tone(1047, { dur: 0.3, gain: 0.2, delay: 0.27 });
+    system(kind) {
+      const filename = SYSTEM_FILES[kind];
+      if (filename) enqueue(narratorPath(filename));
     },
-    win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, { dur: 0.18, gain: 0.2, delay: i * 0.12 })); },
-    lose() { [392, 330, 262].forEach((f, i) => tone(f, { type: 'triangle', dur: 0.24, gain: 0.16, delay: i * 0.15 })); },
-    chat() { tone(1200, { dur: 0.06, gain: 0.1 }); tone(1500, { dur: 0.08, gain: 0.08, delay: 0.05 }); },
+    result(won) { enqueue(narratorPath(won ? SYSTEM_FILES.win : SYSTEM_FILES.lose)); },
+    landlord(playerIsLandlord) {
+      enqueue(narratorPath(playerIsLandlord ? SYSTEM_FILES.role_landlord : SYSTEM_FILES.role_farmer));
+    },
   };
 })();

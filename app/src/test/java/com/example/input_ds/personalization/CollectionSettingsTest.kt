@@ -20,6 +20,13 @@ class CollectionSettingsTest {
         assertEquals(50, CollectionSettings(trainingEpochs = 50).trainingEpochs)
     }
 
+    @Test
+    fun preparationAndRestDuration_followConfiguredActionDuration() {
+        assertEquals(800L, CollectionSettings(actionSeconds = 0.8f).phaseDurationMs)
+        assertEquals(1_000L, CollectionSettings(actionSeconds = 1f).phaseDurationMs)
+        assertEquals(5_000L, CollectionSettings(actionSeconds = 5f).phaseDurationMs)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun trainingEpochs_rejectsValuesAboveServerLimit() {
         CollectionSettings(trainingEpochs = 51)
@@ -50,5 +57,17 @@ class CollectionSettingsTest {
                 listOf("rest", "look_left", "look_right", "jaw", "look_left_right", "look_right_left")
             )
         )
+    }
+
+    @Test
+    fun allLegacyPresetNamesMigrateToUnifiedOneToFortyFiveHertz() {
+        listOf(
+            "csanet-original",
+            "advanced-bandpass-0.1-40",
+            "advanced-zscore",
+            "eegnet-original"
+        ).forEach { legacy ->
+            assertEquals(PreprocessingPreset.UNIFIED_1_45, PreprocessingPreset.fromPersisted(legacy))
+        }
     }
 }

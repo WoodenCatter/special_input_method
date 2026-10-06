@@ -75,7 +75,7 @@ fun MahjongScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                     setBackgroundColor(Color.rgb(8, 116, 62))
                     settings.apply {
                         javaScriptEnabled = true
-                        domStorageEnabled = false
+                        domStorageEnabled = true
                         allowFileAccess = false
                         allowContentAccess = false
                         javaScriptCanOpenWindowsAutomatically = false
@@ -83,7 +83,7 @@ fun MahjongScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                         setSupportZoom(false)
                         builtInZoomControls = false
                         displayZoomControls = false
-                        mediaPlaybackRequiresUserGesture = true
+                        mediaPlaybackRequiresUserGesture = false
                         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                         cacheMode = WebSettings.LOAD_NO_CACHE
                     }
@@ -140,7 +140,7 @@ private class OfflineMahjongWebViewClient(
                     "Cache-Control" to "no-store",
                     "Content-Security-Policy" to
                         "default-src 'self'; script-src 'self'; style-src 'self'; " +
-                        "img-src 'self' data:; media-src 'none'; connect-src 'none'"
+                        "img-src 'self' data:; media-src 'self'; connect-src 'none'"
                 ),
                 assets.open(assetPath)
             )
@@ -218,6 +218,8 @@ private fun mimeTypeFor(path: String): String = when {
     path.endsWith(".js") -> "application/javascript"
     path.endsWith(".svg") -> "image/svg+xml"
     path.endsWith(".png") -> "image/png"
+    path.endsWith(".wav") -> "audio/wav"
+    path.endsWith(".mp3") -> "audio/mpeg"
     else -> "application/octet-stream"
 }
 

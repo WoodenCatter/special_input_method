@@ -284,8 +284,10 @@ button.off { opacity: .38; text-decoration: line-through; }
 .personal { font-size: 16px; }
 .settle-box.won .personal { color: #ffd67e; }
 .settle-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-.settle-actions-single { display: flex; justify-content: center; }
-.settle-actions-single .settle-again { min-width: 150px; min-height: 42px; font-size: 15px; }
+.settle-actions-single { display: flex; justify-content: center; gap: 12px; }
+.settle-actions-single .settle-again,
+.settle-actions-single .settle-exit { min-width: 150px; min-height: 42px; font-size: 15px; }
+.settle-actions-single .settle-exit { background: #8d3c36; }
 .settle-rows { display: flex; flex-direction: column; gap: 6px; }
 .settle-row {
   display: flex; justify-content: space-between; gap: 8px; background: rgba(255,255,255,.06);

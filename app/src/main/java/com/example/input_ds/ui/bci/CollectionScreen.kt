@@ -53,8 +53,8 @@ import com.example.input_ds.personalization.ContinuousSessionCollector
 import com.example.input_ds.personalization.LocalUser
 import com.example.input_ds.personalization.ModelRun
 import com.example.input_ds.personalization.PersonalizationRepository
-import com.example.input_ds.personalization.PreprocessingPreset
 import com.example.input_ds.personalization.ProfileSyncManager
+import com.example.input_ds.personalization.ServerDataRecoveryManager
 import com.example.input_ds.personalization.TrainingSession
 import com.example.input_ds.personalization.TrainingWorkScheduler
 import com.example.input_ds.personalization.UserModelManager
@@ -179,6 +179,63 @@ fun CollectionScreen(
         runCatching {
             withContext(Dispatchers.IO) { BrainApiClient("", "").listModels() }
         }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { models = it }
+    }
+
+    LaunchedEffect(deviceBinding) {
+        if (deviceBinding == null) return@LaunchedEffect
+        status = "正在恢复服务器用户与历史数据…"
+        runCatching {
+            val previousLocalIds = repository.listUsers().mapTo(mutableSetOf()) { it.localId }
+            val serverUsers = withContext(Dispatchers.IO) {
+                ProfileSyncManager(context).restoreServerProfiles()
+            }
+            val restoredUsers = serverUsers.filter { it.localId !in previousLocalIds }
+            val recovery = withContext(Dispatchers.IO) {
+                ServerDataRecoveryManager(context).recover(serverUsers)
+            }
+            val localUsers = repository.listUsers()
+            val historical = withContext(Dispatchers.IO) {
+                runCatching {
+                    ProfileSyncManager(context).listUnassociatedLegacyProfiles()
+                }.getOrDefault(emptyList())
+            }
+            if (historical.isNotEmpty() && localUsers.any { it.profileId == null }) {
+                legacyProfiles = historical
+                refreshUsers(selectedUserId)
+                status = "发现未关联的历史数据，请先为对应本地用户选择关联"
+            } else {
+                val synced = withContext(Dispatchers.IO) {
+                    localUsers.count { localUser ->
+                        runCatching {
+                            ProfileSyncManager(context).synchronize(localUser.localId)
+                        }.isSuccess
+                    }
+                }
+                refreshUsers(selectedUserId)
+                repository.requeueRepairableFailures()
+                repository.listIncompleteSessions()
+                    .forEach { TrainingWorkScheduler.enqueue(context, it) }
+                val recoveryText = if (
+                    restoredUsers.isEmpty() &&
+                    recovery.restoredSessions == 0 &&
+                    recovery.restoredModels == 0
+                ) {
+                    ""
+                } else {
+                    "，从服务器恢复 ${restoredUsers.size} 个用户、" +
+                        "${recovery.restoredSessions} 条记录、" +
+                        "${recovery.restoredModels} 个模型"
+                }
+                val failureText = recovery.failures.takeIf { it.isNotEmpty() }
+                    ?.joinToString(prefix = "；部分恢复失败：")
+                    .orEmpty()
+                status = "设备账号已绑定，已同步 $synced/${localUsers.size} 个用户" +
+                    recoveryText + failureText
+            }
+        }.onFailure { error ->
+            refreshUsers(selectedUserId)
+            status = "账号已绑定，但服务器数据恢复失败：${error.message}"
+        }
     }
 
     LaunchedEffect(selectedProtocol, models) {
@@ -530,34 +587,9 @@ fun CollectionScreen(
                                         }.onSuccess {
                                             apiKey = ""
                                             serverUserId = ""
-                                            binding = false
-                                            deviceBinding = repository.deviceServerBinding()
-                                            status = "设备账号已绑定，正在同步本地用户…"
-                                            coroutineScope.launch {
-                                                val localUsers = repository.listUsers()
-                                                val historical = withContext(Dispatchers.IO) {
-                                                    runCatching {
-                                                        ProfileSyncManager(context).listUnassociatedLegacyProfiles()
-                                                    }.getOrDefault(emptyList())
-                                                }
-                                                if (historical.isNotEmpty() && localUsers.any { it.profileId == null }) {
-                                                    legacyProfiles = historical
-                                                    refreshUsers(selectedUserId)
-                                                    status = "发现未关联的历史数据，请先为对应本地用户选择关联"
-                                                } else {
-                                                    val synced = withContext(Dispatchers.IO) {
-                                                        localUsers.count { localUser ->
-                                                            runCatching {
-                                                                ProfileSyncManager(context).synchronize(localUser.localId)
-                                                            }.isSuccess
-                                                        }
-                                                    }
-                                                    refreshUsers(selectedUserId)
-                                                    repository.listIncompleteSessions()
-                                                        .forEach { TrainingWorkScheduler.enqueue(context, it) }
-                                                    status = "设备账号绑定成功，已同步 $synced/${localUsers.size} 个用户"
-                                                }
-                                            }
+                                             binding = false
+                                             deviceBinding = repository.deviceServerBinding()
+                                             status = "设备账号已绑定，准备恢复服务器数据…"
                                         }.onFailure {
                                             binding = false
                                             status = "绑定失败：${it.message}"
@@ -623,7 +655,7 @@ fun CollectionScreen(
                                         actionSecondsText = candidate
                                     }
                                 },
-                                label = "动作时间（s）",
+                                label = "动作/模型窗（s）",
                                 modifier = Modifier.weight(1f),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 supportingText = "0.8–5.0"
@@ -656,8 +688,8 @@ fun CollectionScreen(
                                     return@startCollection
                                 }
                                 val rounds = roundsText.toIntOrNull()
-                                if (rounds == null || rounds !in 1..100) {
-                                    status = "轮次必须在 1–100 之间"
+                                if (rounds == null || rounds !in 4..100) {
+                                    status = "异步 Trial 轮次必须在 4–100 之间"
                                     return@startCollection
                                 }
                                 val trainingEpochs = trainingEpochsText.toIntOrNull()
@@ -676,10 +708,7 @@ fun CollectionScreen(
                                         trainingEpochs = trainingEpochs,
                                         actionSeconds = actionSeconds,
                                         protocol = selectedProtocol,
-                                        selectedModels = selectedModels,
-                                        presetByModel = selectedModels.associateWith {
-                                            PreprocessingPreset.EEGNET
-                                        }
+                                        selectedModels = selectedModels
                                     )
                                 }.getOrElse {
                                     status = it.message ?: "采集参数无效"
@@ -789,8 +818,11 @@ private fun FocusedCollectionScreen(
     BackHandler(onBack = onStop)
     val prompt = when (progress?.phase) {
         "准备" -> "准备 · ${CollectionSettings.LABEL_DISPLAY[progress.label] ?: progress.label}"
+        "前静息" -> "保持自然静息"
+        "提示" -> "准备 · ${CollectionSettings.LABEL_DISPLAY[progress.label] ?: progress.label}"
         "执行" -> "执行 · ${CollectionSettings.LABEL_DISPLAY[progress.label] ?: progress.label}"
         "休息" -> "休息"
+        "后静息" -> "恢复自然静息"
         "检测" -> "检测双耳数据流"
         "重采" -> "本次无效 · 即将重采"
         else -> "即将开始"
