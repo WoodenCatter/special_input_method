@@ -12,15 +12,21 @@ enum class AppDestination {
     MAHJONG,
     TV,
     MUSIC,
+    APP_SETTINGS,
     SETTINGS,
     DEVICE_STATUS,
     COLLECTION
 }
 
-enum class HomeModule(val destination: AppDestination, val displayName: String) {
-    SETTINGS(AppDestination.SETTINGS, "设置"),
+enum class HomeModule(
+    val destination: AppDestination,
+    val displayName: String,
+    val scanEnabled: Boolean = true
+) {
+    APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
     REALTIME_COMMUNICATION(AppDestination.INPUT_METHOD, "实时沟通"),
-    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐")
+    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
+    HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false)
 }
 
 data class HomeSelectionState(
@@ -30,11 +36,16 @@ data class HomeSelectionState(
     val selectedModule: HomeModule
         get() = HomeModule.entries[selectedIndex.coerceIn(HomeModule.entries.indices)]
 
-    fun moveLeft(): HomeSelectionState =
-        copy(selectedIndex = (selectedIndex - 1 + HomeModule.entries.size) % HomeModule.entries.size)
+    private fun move(offset: Int): HomeSelectionState {
+        val candidates = HomeModule.entries.indices.filter { HomeModule.entries[it].scanEnabled }
+        val position = candidates.indexOf(selectedIndex).takeIf { it >= 0 } ?: 0
+        val nextPosition = (position + offset + candidates.size) % candidates.size
+        return copy(selectedIndex = candidates[nextPosition])
+    }
 
-    fun moveRight(): HomeSelectionState =
-        copy(selectedIndex = (selectedIndex + 1) % HomeModule.entries.size)
+    fun moveLeft(): HomeSelectionState = move(-1)
+
+    fun moveRight(): HomeSelectionState = move(1)
 
     fun advance(): HomeSelectionState = if (scanDirection < 0) moveLeft() else moveRight()
 

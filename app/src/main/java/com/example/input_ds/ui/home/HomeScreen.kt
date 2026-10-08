@@ -152,7 +152,12 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
         if (wide) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeModule.entries.forEachIndexed { index, module ->
-                    ModuleCard(module, index == selection.selectedIndex, { onSelect(module) }, Modifier.weight(1f))
+                    ModuleCard(
+                        module,
+                        module.scanEnabled && index == selection.selectedIndex,
+                        { onSelect(module) },
+                        Modifier.weight(1f)
+                    )
                 }
             }
         } else {
@@ -162,7 +167,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
                         modules.forEach { module ->
                             ModuleCard(
                                 module,
-                                HomeModule.entries.indexOf(module) == selection.selectedIndex,
+                                module.scanEnabled && HomeModule.entries.indexOf(module) == selection.selectedIndex,
                                 { onSelect(module) },
                                 Modifier.weight(1f)
                             )
@@ -177,9 +182,10 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
 @Composable
 private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val symbol = when (module) {
+        HomeModule.APP_SETTINGS -> "⚙"
         HomeModule.REALTIME_COMMUNICATION -> "◌"
-        HomeModule.SETTINGS -> "⚙"
         HomeModule.ENTERTAINMENT -> "◈"
+        HomeModule.HEADSET_SETTINGS -> "⌁"
     }
     SelectableGlassPanel(
         selected = selected,
@@ -198,6 +204,14 @@ private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Uni
             )
             Spacer(Modifier.height(10.dp))
             Text(module.displayName, style = MaterialTheme.typography.titleMedium)
+            if (!module.scanEnabled) {
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    "仅限触摸 · 自动扫描跳过",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
     }
 }

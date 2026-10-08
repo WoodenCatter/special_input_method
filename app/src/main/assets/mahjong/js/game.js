@@ -697,9 +697,9 @@
     setScanInterval(value) {
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) return;
+      const firstDwellActive = this.scan.firstDwellUntil > Date.now();
       this.scan.intervalMs = Math.max(1100, Math.min(3000, Math.round(parsed)));
-      const remainingFirstDwell = Math.max(0, this.scan.firstDwellUntil - Date.now());
-      this.restartScanTimer(remainingFirstDwell > this.scan.intervalMs ? remainingFirstDwell : undefined);
+      this.restartScanTimer(firstDwellActive ? this.scan.intervalMs * 2 : undefined);
     }
 
     setScanPhase(phase, candidates, direction, startIndex, initialDelayMs) {
@@ -800,8 +800,15 @@
         candidates.push({ kind: "tile", tileId: tile.id, tileType: tile.type, label: Core.tileName(tile.type) });
       });
       // The newly drawn tile is the first highlighted card. Keep it visible for
-      // three seconds before the normal scan interval resumes.
-      this.setScanPhase("discard", candidates, -1, candidates.length - 1, 3000);
+      // two configured scan periods before normal scanning resumes, so this
+      // accessibility pause follows the APP-wide scan-speed setting as well.
+      this.setScanPhase(
+        "discard",
+        candidates,
+        -1,
+        candidates.length - 1,
+        this.scan.intervalMs * 2
+      );
     }
 
     startGameOverScan() {

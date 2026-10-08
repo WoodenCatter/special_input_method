@@ -1,6 +1,7 @@
 package com.example.input_ds.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class AppNavigationTest {
@@ -8,11 +9,11 @@ class AppNavigationTest {
     fun homeSelectionWrapsInBothDirections() {
         val initial = HomeSelectionState()
 
-        assertEquals(HomeModule.SETTINGS, initial.selectedModule)
+        assertEquals(HomeModule.APP_SETTINGS, initial.selectedModule)
         assertEquals(HomeModule.ENTERTAINMENT, initial.moveLeft().selectedModule)
         assertEquals(HomeModule.REALTIME_COMMUNICATION, initial.moveRight().selectedModule)
         assertEquals(
-            HomeModule.SETTINGS,
+            HomeModule.APP_SETTINGS,
             initial.moveRight().moveRight().moveRight().selectedModule
         )
     }
@@ -26,5 +27,15 @@ class AppNavigationTest {
             HomeModule.ENTERTAINMENT,
             initial.changeDirection(-1).advance().selectedModule
         )
+    }
+
+    @Test
+    fun automaticScanAlwaysSkipsHeadsetSettings() {
+        var state = HomeSelectionState()
+
+        repeat(12) {
+            assertNotEquals(HomeModule.HEADSET_SETTINGS, state.selectedModule)
+            state = state.advance()
+        }
     }
 }

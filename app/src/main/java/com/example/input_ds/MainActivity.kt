@@ -40,12 +40,14 @@ import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
 import com.example.input_ds.mahjong.MahjongInputBus
 import com.example.input_ds.model.AppDestination
+import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.EntertainmentHubModule
 import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.HomeModule
 import com.example.input_ds.model.HomeSelectionState
 import com.example.input_ds.music.MusicInputBus
+import com.example.input_ds.settings.AppSettingsInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.PersonalizationRepository
 import com.example.input_ds.personalization.TrainingWorkScheduler
@@ -63,6 +65,7 @@ import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
 import com.example.input_ds.ui.mahjong.MahjongScreen
 import com.example.input_ds.ui.music.MusicScreen
+import com.example.input_ds.ui.settings.AppSettingsScreen
 import com.example.input_ds.ui.tv.TvScreen
 import com.example.input_ds.ui.theme.InputDSTheme
 import com.example.input_ds.ui.theme.AuroraBackground
@@ -87,6 +90,8 @@ class MainActivity : ComponentActivity() {
     private val snakeState = mutableStateOf(SnakeClimbGame.create())
     private val bciActive = mutableStateOf(false)
     private val bciStatus = mutableStateOf("耳机未连接")
+    private val floatingBallVisible = mutableStateOf(true)
+    private val headsetControlEnabled = mutableStateOf(false)
 
     private val bluetoothPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -112,6 +117,10 @@ class MainActivity : ComponentActivity() {
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
+        floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
+        window.attributes = window.attributes.apply {
+            screenBrightness = AppUiSettings.readScreenBrightness(applicationContext)
+        }
 
         setContent {
             InputDSTheme {
@@ -120,6 +129,9 @@ class MainActivity : ComponentActivity() {
                 val bleState by bleManager.state.collectAsState()
 
                 LaunchedEffect(bleState) {
+                    if (bleState != NaoyunBleManager.State.READY && headsetControlEnabled.value) {
+                        setHeadsetControlEnabled(false)
+                    }
                     if (bleState == NaoyunBleManager.State.READY) {
                         UserModelManager.activePreset(applicationContext)?.let { preset ->
                             bleManager.setPreprocessing(preset.displaySteps())
@@ -145,7 +157,7 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize()) {
                     AppContent(vm = vm, bleState = bleState)
                     FloatingControlBall(
-                        visible = true,
+                        visible = floatingBallVisible.value,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
                         onRightLook = { routeSignal(ControlSignal.RIGHT_LOOK) },
                         onBite = { routeSignal(ControlSignal.BITE) }
@@ -184,9 +196,11 @@ class MainActivity : ComponentActivity() {
                 bleManager = bleManager,
                 onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
-                    homeSelection.value = homeSelection.value.copy(
-                        selectedIndex = HomeModule.entries.indexOf(module)
-                    )
+                    if (module.scanEnabled) {
+                        homeSelection.value = homeSelection.value.copy(
+                            selectedIndex = HomeModule.entries.indexOf(module)
+                        )
+                    }
                     enterModule(module)
                 },
                 onAdvance = { homeSelection.value = homeSelection.value.advance() }
@@ -255,6 +269,18 @@ class MainActivity : ComponentActivity() {
                 onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
+            AppDestination.APP_SETTINGS -> AppSettingsScreen(
+                scanIntervalMs = vm.state.value.scanIntervalMs,
+                floatingBallVisible = floatingBallVisible.value,
+                headsetControlEnabled = headsetControlEnabled.value,
+                onFloatingBallVisibleChange = { visible ->
+                    floatingBallVisible.value = visible
+                    AppUiSettings.writeFloatingBallVisible(applicationContext, visible)
+                },
+                onHeadsetControlEnabledChange = ::setHeadsetControlEnabled,
+                onBack = { navigateTo(AppDestination.HOME) }
+            )
+
             AppDestination.SETTINGS -> CollectionScreen(
                 bleManager = bleManager,
                 scanIntervalMs = vm.state.value.scanIntervalMs,
@@ -302,9 +328,10 @@ class MainActivity : ComponentActivity() {
 
     private fun enterModule(module: HomeModule) {
         when (module) {
+            HomeModule.APP_SETTINGS -> navigateTo(AppDestination.APP_SETTINGS)
             HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.INPUT_METHOD)
             HomeModule.ENTERTAINMENT -> navigateTo(AppDestination.ENTERTAINMENT)
-            HomeModule.SETTINGS -> navigateTo(AppDestination.SETTINGS)
+            HomeModule.HEADSET_SETTINGS -> navigateTo(AppDestination.SETTINGS)
         }
     }
 
@@ -334,9 +361,34 @@ class MainActivity : ComponentActivity() {
 
     private fun navigateTo(target: AppDestination) {
         destination.value = target
-        val commandsEnabled = target != AppDestination.DEVICE_STATUS &&
-            target != AppDestination.COLLECTION && target != AppDestination.SETTINGS
-        bciController?.setCommandDeliveryEnabled(commandsEnabled)
+        updateBciCommandDelivery()
+    }
+
+    private fun setHeadsetControlEnabled(enabled: Boolean) {
+        headsetControlEnabled.value = enabled
+        updateBciCommandDelivery()
+        if (enabled && bciActive.value) {
+            bciStatus.value = if (bciController?.loadedProtocol == ClassificationProtocol.SIX_ACTION) {
+                "六分类异步控制运行中"
+            } else {
+                "四分类异步控制运行中"
+            }
+        } else if (!enabled && bleManager.state.value == NaoyunBleManager.State.READY) {
+            bciStatus.value = "耳机已连接 · 控制已停用"
+        }
+    }
+
+    private fun updateBciCommandDelivery() {
+        val targetAcceptsCommands = destination.value != AppDestination.DEVICE_STATUS &&
+            destination.value != AppDestination.COLLECTION &&
+            destination.value != AppDestination.SETTINGS
+        bciController?.setCommandDeliveryEnabled(
+            headsetControlEnabled.value && targetAcceptsCommands
+        )
+    }
+
+    private fun routeHeadsetSignal(signal: ControlSignal) {
+        if (headsetControlEnabled.value) routeSignal(signal)
     }
 
     private fun routeSignal(signal: ControlSignal) {
@@ -394,6 +446,9 @@ class MainActivity : ComponentActivity() {
             AppDestination.MUSIC -> {
                 MusicInputBus.dispatch(signal)
             }
+            AppDestination.APP_SETTINGS -> {
+                AppSettingsInputBus.dispatch(signal)
+            }
             AppDestination.SETTINGS -> Unit
             AppDestination.DEVICE_STATUS, AppDestination.COLLECTION -> Unit
         }
@@ -408,23 +463,23 @@ class MainActivity : ComponentActivity() {
     private fun startBciController() {
         stopBciController()
         attemptedModelIdentity = activeModelIdentity()
-        val controller = BciController(applicationContext, bleManager, ::routeSignal)
+        val controller = BciController(applicationContext, bleManager, ::routeHeadsetSignal)
         bciController = controller
-        val commandsEnabled = destination.value != AppDestination.DEVICE_STATUS &&
-            destination.value != AppDestination.COLLECTION &&
-            destination.value != AppDestination.SETTINGS
-        controller.setCommandDeliveryEnabled(commandsEnabled)
+        updateBciCommandDelivery()
         if (!controller.loadModel()) {
             bciStatus.value = "耳机已连接，控制模型不可用"
             controller.stop()
             bciController = null
             bciActive.value = false
+            headsetControlEnabled.value = false
             return
         }
         controller.start()
         bciActive.value = true
         val protocol = controller.loadedProtocol ?: ClassificationProtocol.FOUR_CLASS
-        bciStatus.value = if (protocol == ClassificationProtocol.SIX_ACTION) {
+        bciStatus.value = if (!headsetControlEnabled.value) {
+            "耳机已连接 · 等待手动启用控制"
+        } else if (protocol == ClassificationProtocol.SIX_ACTION) {
             "六分类异步控制运行中"
         } else {
             "四分类异步控制运行中"
@@ -486,7 +541,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deviceStatusText(state: NaoyunBleManager.State): String = when (state) {
-        NaoyunBleManager.State.READY -> if (bciActive.value) "耳机已连接 · 控制运行中" else "耳机已连接"
+        NaoyunBleManager.State.READY -> when {
+            bciActive.value && headsetControlEnabled.value -> "耳机已连接 · 控制已启用"
+            bciActive.value -> "耳机已连接 · 等待手动启用控制"
+            else -> "耳机已连接"
+        }
         NaoyunBleManager.State.SCANNING -> "正在扫描耳机"
         NaoyunBleManager.State.CONNECTING, NaoyunBleManager.State.INITIALIZING -> "正在连接耳机"
         NaoyunBleManager.State.STREAM_STALLED -> "耳机数据流中断"
