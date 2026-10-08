@@ -38,6 +38,7 @@ class GameController {
         this.selectedColumn = null;
         this.navigationLevel = ScanPhase.COLUMN;
         this.pendingConfirmedAction = null;
+        this.pendingActionReturnMode = 'menu';
         this.boardScanSnapshot = null;
         
         this.isAIThinking = false;
@@ -59,13 +60,15 @@ class GameController {
         this.renderer.onMoveClick = (x, y) => this.handleMoveClick(x, y);
         
         // 设置按钮事件
-        document.getElementById('newGameBtn').addEventListener('click', () => this.newGame());
+        document.getElementById('newGameBtn')
+            .addEventListener('click', () => this.startTouchConfirmScan('new_game'));
         document.getElementById('undoBtn').addEventListener('click', () => this.undoMove());
         document.getElementById('soundBtn').addEventListener('click', () => {
             this.toggleSound();
             this.startColumnScan();
         });
-        document.getElementById('exitBtn').addEventListener('click', () => this.requestExit());
+        document.getElementById('exitBtn')
+            .addEventListener('click', () => this.startTouchConfirmScan('exit'));
         document.getElementById('returnSelectionBtn').addEventListener('click', event => {
             if (this.canScan() && !event.currentTarget.disabled) this.returnToBoardSelection();
         });
@@ -110,10 +113,18 @@ class GameController {
             return;
         }
         
+        const legalMoves = this.chess.getLegalMoves(x, y);
+        // A piece can be unable to move while the player is in check or while
+        // it is pinned. Do not create a target phase containing only the menu.
+        if (legalMoves.length === 0) {
+            this.renderer.clearSelection();
+            this.startColumnScan();
+            return;
+        }
+
         // 触摸随时覆盖耳机扫描位置，直接进入该棋子的落点扫描。
         this.audioManager.playSelectSound();
         this.renderer.setSelectedPiece(x, y);
-        const legalMoves = this.chess.getLegalMoves(x, y);
         this.renderer.setLegalMoves(legalMoves);
         this.updateDisplay();
         this.startTargetScan(x, y);
@@ -350,7 +361,10 @@ class GameController {
         this.renderer.clearSelection();
         const columns = [];
         for (let x = 0; x < 9; x++) {
-            if (this.chess.board.some(row => row[x] && this.chess.isRed(row[x]))) {
+            const hasMovablePiece = this.chess.board.some((row, y) =>
+                row[x] && this.chess.isRed(row[x]) && this.chess.getLegalMoves(x, y).length > 0
+            );
+            if (hasMovablePiece) {
                 columns.push({kind: 'column', x});
             }
         }
@@ -372,7 +386,9 @@ class GameController {
         const pieces = [];
         for (let y = 0; y < 10; y++) {
             const piece = this.chess.getPiece(column, y);
-            if (piece && this.chess.isRed(piece)) pieces.push({kind: 'piece', x: column, y, piece});
+            if (piece && this.chess.isRed(piece) && this.chess.getLegalMoves(column, y).length > 0) {
+                pieces.push({kind: 'piece', x: column, y, piece});
+            }
         }
         if (pieces.length === 0) {
             this.startColumnScan();
@@ -392,7 +408,13 @@ class GameController {
         this.navigationLevel = ScanPhase.TARGET;
         this.boardScanSnapshot = null;
         this.hideActionConfirmModal();
-        const legalMoves = this.chess.getLegalMoves(x, y)
+        const availableMoves = this.chess.getLegalMoves(x, y);
+        if (availableMoves.length === 0) {
+            this.renderer.clearSelection();
+            this.startColumnScan();
+            return;
+        }
+        const legalMoves = availableMoves
             .slice()
             .sort((a, b) => a.y - b.y || a.x - b.x)
             .map(move => ({kind: 'move', x: move.x, y: move.y}));
@@ -419,8 +441,21 @@ class GameController {
         this.updateDisplay();
     }
 
-    startConfirmScan(action) {
+    startTouchConfirmScan(action) {
+        // Touching a game operation cancels the current board-selection depth.
+        // Whether the player was choosing a column, row or target, returning
+        // from this dialog starts again at column selection.
+        this.selectedColumn = null;
+        this.navigationLevel = ScanPhase.COLUMN;
+        this.boardScanSnapshot = null;
+        this.renderer.clearSelection();
+        this.startConfirmScan(action, 'column');
+        this.updateDisplay();
+    }
+
+    startConfirmScan(action, returnMode = 'menu') {
         this.pendingConfirmedAction = action;
+        this.pendingActionReturnMode = returnMode;
         this.showActionConfirmModal(action);
         this.scanCursor.setPhase(ScanPhase.CONFIRM, [
             {kind: 'cancel', label: '返回'},
@@ -550,18 +585,20 @@ class GameController {
         const choiceEl = document.getElementById('scanChoice');
         const directionEl = document.getElementById('scanDirection');
         const item = this.scanCursor.current();
-        if (!phaseEl || !choiceEl || !directionEl || !item) return;
+        if (!item) return;
 
-        directionEl.textContent = this.scanCursor.direction < 0 ? '向左轮转' : '向右轮转';
+        if (directionEl) {
+            directionEl.textContent = this.scanCursor.direction < 0 ? '向左轮转' : '向右轮转';
+        }
         const board = document.getElementById('chessboard');
 
         if (this.scanCursor.phase === ScanPhase.COLUMN) {
-            phaseEl.textContent = '选择路';
+            if (phaseEl) phaseEl.textContent = '选择路';
             if (item.kind === 'menu') {
-                choiceEl.textContent = '棋局操作';
+                if (choiceEl) choiceEl.textContent = '棋局操作';
                 document.querySelector('.control-row')?.classList.add('bci-group-focus');
             } else {
-                choiceEl.textContent = `第 ${9 - item.x} 路`;
+                if (choiceEl) choiceEl.textContent = `第 ${9 - item.x} 路`;
                 const arrow = document.createElement('div');
                 arrow.className = 'scan-board-arrow scan-column-arrow';
                 arrow.textContent = '↑';
@@ -573,12 +610,12 @@ class GameController {
         }
 
         if (this.scanCursor.phase === ScanPhase.ROW) {
-            phaseEl.textContent = '选择行与棋子';
+            if (phaseEl) phaseEl.textContent = '选择行与棋子';
             if (item.kind === 'menu') {
-                choiceEl.textContent = '棋局操作';
+                if (choiceEl) choiceEl.textContent = '棋局操作';
                 document.querySelector('.control-row')?.classList.add('bci-group-focus');
             } else {
-                choiceEl.textContent = `第 ${10 - item.y} 行 · ${this.pieceLabel(item.piece)}`;
+                if (choiceEl) choiceEl.textContent = `第 ${10 - item.y} 行 · ${this.pieceLabel(item.piece)}`;
                 document.querySelector(`.chess-piece[data-x="${item.x}"][data-y="${item.y}"]`)
                     ?.classList.add('bci-piece-focus');
                 const arrow = document.createElement('div');
@@ -592,12 +629,12 @@ class GameController {
         }
 
         if (this.scanCursor.phase === ScanPhase.TARGET) {
-            phaseEl.textContent = '选择落点';
+            if (phaseEl) phaseEl.textContent = '选择落点';
             if (item.kind === 'menu') {
-                choiceEl.textContent = '棋局操作';
+                if (choiceEl) choiceEl.textContent = '棋局操作';
                 document.querySelector('.control-row')?.classList.add('bci-group-focus');
             } else {
-                choiceEl.textContent = `落到第 ${9 - item.x} 路、第 ${10 - item.y} 行`;
+                if (choiceEl) choiceEl.textContent = `落到第 ${9 - item.x} 路、第 ${10 - item.y} 行`;
                 document.querySelector(`.move-hint[data-x="${item.x}"][data-y="${item.y}"]`)
                     ?.classList.add('bci-target-focus');
             }
@@ -605,8 +642,8 @@ class GameController {
         }
 
         if (this.scanCursor.phase === ScanPhase.MENU) {
-            phaseEl.textContent = '功能选择';
-            choiceEl.textContent = item.label;
+            if (phaseEl) phaseEl.textContent = '功能选择';
+            if (choiceEl) choiceEl.textContent = item.label;
             const idByKind = {
                 return_selection: 'returnSelectionBtn',
                 back_column: 'returnColumnBtn', back_row: 'returnRowBtn',
@@ -617,8 +654,8 @@ class GameController {
         }
 
         if (this.scanCursor.phase === ScanPhase.CONFIRM) {
-            phaseEl.textContent = '等待确认';
-            choiceEl.textContent = item.label;
+            if (phaseEl) phaseEl.textContent = '等待确认';
+            if (choiceEl) choiceEl.textContent = item.label;
             const buttonId = item.kind === 'confirm' ? 'confirmActionBtn' : 'cancelActionBtn';
             document.getElementById(buttonId)?.classList.add('bci-control-focus');
         }
@@ -650,15 +687,22 @@ class GameController {
     }
 
     cancelPendingAction() {
+        const returnMode = this.pendingActionReturnMode;
         this.pendingConfirmedAction = null;
+        this.pendingActionReturnMode = 'menu';
         this.hideActionConfirmModal();
-        this.startMenuScan();
+        if (returnMode === 'column') {
+            this.startColumnScan();
+        } else {
+            this.startMenuScan();
+        }
     }
 
     confirmPendingAction() {
         const action = this.pendingConfirmedAction;
         if (!action) return;
         this.pendingConfirmedAction = null;
+        this.pendingActionReturnMode = 'menu';
         this.hideActionConfirmModal();
         if (action === 'new_game') this.newGame();
         if (action === 'exit') this.requestExit();

@@ -204,14 +204,6 @@ private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Uni
             )
             Spacer(Modifier.height(10.dp))
             Text(module.displayName, style = MaterialTheme.typography.titleMedium)
-            if (!module.scanEnabled) {
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    "仅限触摸 · 自动扫描跳过",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
         }
     }
 }

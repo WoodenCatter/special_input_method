@@ -44,33 +44,6 @@
             <section class="board-card" aria-label="象棋棋盘">
                 <div id="chessboard" class="chess-board" role="grid" aria-label="中国象棋棋盘"></div>
             </section>
-
-            <aside class="info-column">
-                <section class="info-card guide-card">
-                    <h2>操作说明</h2>
-                    <ul class="control-guide">
-                        <li><strong>左看 / 右看：</strong>向对应方向轮转</li>
-                        <li><strong>咬牙：</strong>确认当前高亮项</li>
-                        <li><strong>触摸：</strong>直接选择棋子或落点</li>
-                    </ul>
-                    <div id="bciScanPanel" class="bci-scan-panel" aria-live="polite">
-                        <span id="scanPhase" class="scan-phase">选择路</span>
-                        <strong id="scanChoice" class="scan-choice">准备扫描</strong>
-                        <span id="scanDirection" class="scan-direction">向左轮转</span>
-                    </div>
-                </section>
-
-                <section class="info-card history-card">
-                    <h2>走法记录</h2>
-                    <div id="moveHistory" class="move-history" aria-live="polite">
-                        <p class="empty-history">尚未落子</p>
-                    </div>
-                    <div class="move-summary">
-                        <span>已走步数</span>
-                        <strong id="moveCount">0</strong>
-                    </div>
-                </section>
-            </aside>
         </main>
     </div>
 

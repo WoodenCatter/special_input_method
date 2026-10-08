@@ -35,13 +35,15 @@ export class BoardRenderer {
         this.padding = 20;
 
         // 横屏时同时受可用宽度和屏幕高度约束，保证十行棋盘完整显示。
-        const availableWidth = landscapeLayout ? screenWidth - 432 : screenWidth - 28;
+        // Keep equal side space around the centered board: the left side holds
+        // game operations and the right side is an equally wide visual spacer.
+        const availableWidth = landscapeLayout ? screenWidth - 450 : screenWidth - 28;
         const widthCell = (availableWidth - this.padding * 2) / 8;
         const heightCell = landscapeLayout
             // Reserve enough room below the bottom pieces for the column arrow.
-            ? (screenHeight - 136) / 9
-            : 56;
-        this.cellSize = Math.floor(Math.max(34, Math.min(64, widthCell, heightCell)));
+            ? (screenHeight - 112) / 9
+            : 64;
+        this.cellSize = Math.floor(Math.max(34, Math.min(76, widthCell, heightCell)));
         this.boardWidth = this.padding * 2 + this.cellSize * 8;
         this.boardHeight = this.padding * 2 + this.cellSize * 9;
         // Match the complete right column to the rendered board card. A fixed
@@ -306,14 +308,19 @@ export class BoardRenderer {
      * 渲染最后一步移动 - 增强视觉效果
      */
     renderLastMove(move) {
+        const ringSize = Math.max(40, this.cellSize * 0.98);
         const fromEl = document.createElement('div');
         fromEl.classList.add('last-move-from');
+        fromEl.style.width = ringSize + 'px';
+        fromEl.style.height = ringSize + 'px';
         fromEl.style.left = (this.padding + move.from.x * this.cellSize) + 'px';
         fromEl.style.top = (this.padding + move.from.y * this.cellSize) + 'px';
         this.container.appendChild(fromEl);
         
         const toEl = document.createElement('div');
         toEl.classList.add('last-move-to');
+        toEl.style.width = ringSize + 'px';
+        toEl.style.height = ringSize + 'px';
         toEl.style.left = (this.padding + move.to.x * this.cellSize) + 'px';
         toEl.style.top = (this.padding + move.to.y * this.cellSize) + 'px';
         this.container.appendChild(toEl);
@@ -390,6 +397,7 @@ export class GameInfoDisplay {
      * 添加走法历史
      */
     addMoveToHistory(moveNumber, moveText, isRed) {
+        if (!this.moveHistoryEl) return;
         this.moveHistoryEl.querySelector('.empty-history')?.remove();
         const moveItem = document.createElement('div');
         moveItem.classList.add('move-item');
@@ -413,6 +421,7 @@ export class GameInfoDisplay {
      * 清空走法历史
      */
     clearMoveHistory() {
+        if (!this.moveHistoryEl) return;
         this.moveHistoryEl.innerHTML = '<p class="empty-history">尚未落子</p>';
     }
 

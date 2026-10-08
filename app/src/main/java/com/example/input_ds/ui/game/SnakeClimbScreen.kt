@@ -401,12 +401,6 @@ private fun GameInstructions(modifier: Modifier = Modifier) {
 private fun ExitConfirmation(state: SnakeClimbState, onAction: (SnakeAction) -> Unit) {
     PromptOverlay(onOutsideClick = { onAction(SnakeAction.CANCEL_EXIT) }) {
         Text("确定要退出向上贪吃蛇吗？", style = MaterialTheme.typography.headlineSmall)
-        Text("两个选项会自动轮流高亮，咬牙确认当前选项。也可以直接用手点击。")
-        Text(
-            if (state.exitSelected) "当前选择：退出游戏" else "当前选择：继续游戏",
-            color = AuroraVioletBright,
-            fontWeight = FontWeight.Bold
-        )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -423,7 +417,6 @@ private fun GameOverDialog(state: SnakeClimbState, onAction: (SnakeAction) -> Un
         Text("游戏结束", style = MaterialTheme.typography.headlineSmall)
         Text(state.message)
         Text("共吃到 ${state.applesEaten} 个苹果，向上前进 ${state.head.row} 行。")
-        Text("两个选项会自动轮流高亮，咬牙确认当前选项。也可以直接用手点击。")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly

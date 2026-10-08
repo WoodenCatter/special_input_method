@@ -229,14 +229,23 @@ button { font: inherit; }
 
 .last-move-from, .last-move-to {
     position: absolute;
-    z-index: 2;
-    width: 54px;
-    height: 54px;
-    border: 4px solid rgba(240, 163, 35, .95);
     border-radius: 50%;
-    box-shadow: 0 0 12px rgba(240, 163, 35, .62);
     pointer-events: none;
     transform: translate(-50%, -50%);
+}
+
+.last-move-from {
+    z-index: 2;
+    border: 4px dashed rgba(240, 163, 35, .95);
+    box-shadow: 0 0 12px rgba(240, 163, 35, .62);
+}
+
+.last-move-to {
+    z-index: 6;
+    border: 5px solid #18c96e;
+    box-shadow:
+        0 0 0 4px rgba(255, 245, 92, .9),
+        0 0 20px 7px rgba(24, 201, 110, .72);
 }
 
 .river-text {
@@ -499,7 +508,7 @@ button { font: inherit; }
     .bci-simulator-button { min-height: 42px; padding-inline: 5px; }
 }
 
-/* 平板横屏三栏布局：控制 / 棋盘 / 指引与记录 */
+/* 平板横屏布局：左侧操作，棋盘在整个屏幕中居中。 */
 html, body {
     width: 100%;
     height: auto;
@@ -517,12 +526,18 @@ html, body {
 
 .game-layout {
     display: grid;
-    grid-template-columns: minmax(126px, 156px) auto minmax(250px, 310px);
-    justify-content: center;
+    grid-template-columns: minmax(156px, 190px) minmax(0, 1fr) minmax(156px, 190px);
+    justify-content: stretch;
     align-items: center;
     gap: 14px;
     height: auto;
     min-height: 0;
+}
+
+.game-layout::after {
+    content: "";
+    grid-column: 3;
+    width: 100%;
 }
 
 /* Old Huawei WebView may freeze vh/% heights at 0 during its first measure.
@@ -541,6 +556,8 @@ html[style*="--chess-viewport-height"] body {
 }
 
 .board-card {
+    grid-column: 2;
+    justify-self: center;
     display: grid;
     place-items: center;
     min-width: 0;
@@ -549,16 +566,17 @@ html[style*="--chess-viewport-height"] body {
 }
 
 .left-controls {
+    grid-column: 1;
     display: grid;
     align-content: center;
     gap: 14px;
     min-width: 0;
-    transform: translateY(36px);
+    transform: translateX(18px);
 }
 
 .left-control-group,
 .info-card {
-    padding: 12px;
+    padding: 14px;
     border: 1px solid rgba(112, 76, 49, .18);
     border-radius: 15px;
     background: rgba(255, 253, 248, .94);
@@ -569,7 +587,7 @@ html[style*="--chess-viewport-height"] body {
 .info-card h2 {
     margin: 0 0 9px;
     color: #563b2c;
-    font-size: 16px;
+    font-size: 18px;
     text-align: center;
 }
 
@@ -577,16 +595,16 @@ html[style*="--chess-viewport-height"] body {
 .bci-simulator-buttons {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 6px;
+    gap: 8px;
     margin: 0;
 }
 
 .control-button,
 .bci-simulator-button {
     width: 100%;
-    min-height: 44px;
-    padding: 7px 5px;
-    font-size: 15px;
+    min-height: 52px;
+    padding: 9px 7px;
+    font-size: 17px;
 }
 
 .bci-simulator {
@@ -774,8 +792,10 @@ html[style*="--chess-viewport-height"] body {
         grid-template-columns: 1fr;
         height: auto;
     }
-    .board-card { grid-row: 1; }
+    .game-layout::after { display: none; }
+    .board-card { grid-column: 1; grid-row: 1; }
     .left-controls {
+        grid-column: 1;
         grid-row: 2;
         grid-template-columns: 1fr 1fr;
         transform: none;
