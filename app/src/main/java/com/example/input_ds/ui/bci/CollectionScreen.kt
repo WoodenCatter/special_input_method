@@ -400,7 +400,7 @@ fun CollectionScreen(
     Column(Modifier.fillMaxSize().auroraBackground().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("☰", style = MaterialTheme.typography.titleLarge)
-            Text("设置", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("耳机设置", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(40.dp))
         }
         Spacer(Modifier.height(8.dp))
@@ -423,7 +423,7 @@ fun CollectionScreen(
                 if (settingsSection == SettingsSection.SCANNING) {
                     SectionCard("扫描设置") {
                         Text(
-                            "设置实时沟通中每个扫描项的停留时间。",
+                            "设置实时沟通及自动页面导航的扫描停留时间；页面手动/自动模式在应用设置中切换。",
                             color = TextGray,
                             style = MaterialTheme.typography.bodyMedium
                         )

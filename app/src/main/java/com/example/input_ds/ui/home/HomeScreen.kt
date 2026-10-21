@@ -43,18 +43,21 @@ import com.example.input_ds.ui.theme.AuroraVioletBright
 import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.SectionHeader
 import com.example.input_ds.ui.theme.SelectableGlassPanel
+import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.ScanSettings
+import kotlinx.coroutines.delay
 
 private const val REQUIRED_DEVICE_NAME = "Naoyun Pods BLE"
 
 @Composable
 fun HomeScreen(
     selection: HomeSelectionState,
+    scanMode: ScanMode,
+    scanIntervalMs: Long,
     bleManager: NaoyunBleManager,
     onRequestPermissions: () -> Unit,
     onSelect: (HomeModule) -> Unit,
-    onMoveLeft: () -> Unit,
-    onMoveRight: () -> Unit,
-    onConfirm: () -> Unit
+    onAdvance: () -> Unit
 ) {
     val bleState by bleManager.state.collectAsState()
     val scanResults by bleManager.scanResults.collectAsState()
@@ -73,6 +76,13 @@ fun HomeScreen(
         }
     }
 
+    LaunchedEffect(scanMode, selection.selectedIndex, selection.scanDirection, scanIntervalMs) {
+        if (scanMode == ScanMode.AUTO) {
+            delay(scanIntervalMs.coerceIn(ScanSettings.MIN_INTERVAL_MS, ScanSettings.MAX_INTERVAL_MS))
+            onAdvance()
+        }
+    }
+
     AuroraBackground {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -80,7 +90,21 @@ fun HomeScreen(
                 .padding(horizontal = 22.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text("主页面", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("主页面", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    if (scanMode == ScanMode.AUTO) {
+                        "光标自动轮转 ${if (selection.scanDirection < 0) "←" else "→"} · 左看/右看改变方向 · 咬牙选择"
+                    } else {
+                        "手动扫描 · 左看/右看移动光标 · 咬牙选择"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             GlassPanel(Modifier.weight(1f).fillMaxWidth()) {
                 ModuleStrip(selection, onSelect)
                 DeviceStatusLine(bleState, telemetry)
@@ -136,7 +160,12 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
         if (wide) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeModule.entries.forEachIndexed { index, module ->
-                    ModuleCard(module, index == selection.selectedIndex, { onSelect(module) }, Modifier.weight(1f))
+                    ModuleCard(
+                        module,
+                        module.scanEnabled && index == selection.selectedIndex,
+                        { onSelect(module) },
+                        Modifier.weight(1f)
+                    )
                 }
             }
         } else {
@@ -146,7 +175,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
                         modules.forEach { module ->
                             ModuleCard(
                                 module,
-                                HomeModule.entries.indexOf(module) == selection.selectedIndex,
+                                module.scanEnabled && HomeModule.entries.indexOf(module) == selection.selectedIndex,
                                 { onSelect(module) },
                                 Modifier.weight(1f)
                             )
@@ -161,10 +190,10 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
 @Composable
 private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
     val symbol = when (module) {
+        HomeModule.APP_SETTINGS -> "⚙"
         HomeModule.REALTIME_COMMUNICATION -> "◌"
-        HomeModule.MAZE -> "▦"
-        HomeModule.ENTERTAINMENT -> "▷"
-        HomeModule.SETTINGS -> "⚙"
+        HomeModule.ENTERTAINMENT -> "◈"
+        HomeModule.HEADSET_SETTINGS -> "⌁"
     }
     SelectableGlassPanel(
         selected = selected,
