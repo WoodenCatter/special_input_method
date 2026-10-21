@@ -2,30 +2,84 @@ package com.example.input_ds.model
 
 enum class AppDestination {
     HOME,
+    ENTERTAINMENT,
     INPUT_METHOD,
     ASYNC_MAZE,
-    ENTERTAINMENT,
-    MUSIC,
     TV,
+    MUSIC,
+    APP_SETTINGS,
     SETTINGS,
     DEVICE_STATUS,
     COLLECTION
 }
 
-enum class HomeModule(val destination: AppDestination, val displayName: String) {
-    SETTINGS(AppDestination.SETTINGS, "设置"),
+enum class HomeModule(
+    val destination: AppDestination,
+    val displayName: String,
+    val scanEnabled: Boolean = true
+) {
+    APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
     REALTIME_COMMUNICATION(AppDestination.INPUT_METHOD, "实时沟通"),
-    MAZE(AppDestination.ASYNC_MAZE, "迷宫游戏"),
-    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐")
+    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
+    HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false)
 }
 
-data class HomeSelectionState(val selectedIndex: Int = 0) {
+data class HomeSelectionState(
+    val selectedIndex: Int = 0,
+    val scanDirection: Int = 1
+) {
     val selectedModule: HomeModule
         get() = HomeModule.entries[selectedIndex.coerceIn(HomeModule.entries.indices)]
 
-    fun moveLeft(): HomeSelectionState =
-        copy(selectedIndex = (selectedIndex - 1 + HomeModule.entries.size) % HomeModule.entries.size)
+    private fun move(offset: Int): HomeSelectionState {
+        val candidates = HomeModule.entries.indices.filter { HomeModule.entries[it].scanEnabled }
+        val position = candidates.indexOf(selectedIndex).takeIf { it >= 0 } ?: 0
+        val nextPosition = (position + offset + candidates.size) % candidates.size
+        return copy(selectedIndex = candidates[nextPosition])
+    }
 
-    fun moveRight(): HomeSelectionState =
-        copy(selectedIndex = (selectedIndex + 1) % HomeModule.entries.size)
+    fun moveLeft(): HomeSelectionState = move(-1)
+
+    fun moveRight(): HomeSelectionState = move(1)
+
+    fun advance(): HomeSelectionState = if (scanDirection < 0) moveLeft() else moveRight()
+
+    fun changeDirection(direction: Int): HomeSelectionState =
+        copy(scanDirection = if (direction < 0) -1 else 1)
+
+    fun onDirection(direction: Int, mode: ScanMode): HomeSelectionState = when (mode) {
+        ScanMode.MANUAL -> if (direction < 0) moveLeft() else moveRight()
+        ScanMode.AUTO -> changeDirection(direction)
+    }
+}
+
+enum class EntertainmentHubModule(val destination: AppDestination, val displayName: String, val symbol: String) {
+    MAZE(AppDestination.ASYNC_MAZE, "迷宫游戏", "▦"),
+    TELEVISION(AppDestination.TV, "看电视", "视"),
+    MUSIC(AppDestination.MUSIC, "音乐", "♪"),
+    BACK(AppDestination.HOME, "返回主页", "←")
+}
+
+data class EntertainmentHubSelectionState(
+    val selectedIndex: Int = 0,
+    val scanDirection: Int = 1
+) {
+    val selectedModule: EntertainmentHubModule
+        get() = EntertainmentHubModule.entries[selectedIndex.coerceIn(EntertainmentHubModule.entries.indices)]
+
+    fun moveLeft(): EntertainmentHubSelectionState =
+        copy(selectedIndex = (selectedIndex - 1 + EntertainmentHubModule.entries.size) % EntertainmentHubModule.entries.size)
+
+    fun moveRight(): EntertainmentHubSelectionState =
+        copy(selectedIndex = (selectedIndex + 1) % EntertainmentHubModule.entries.size)
+
+    fun advance(): EntertainmentHubSelectionState = if (scanDirection < 0) moveLeft() else moveRight()
+
+    fun changeDirection(direction: Int): EntertainmentHubSelectionState =
+        copy(scanDirection = if (direction < 0) -1 else 1)
+
+    fun onDirection(direction: Int, mode: ScanMode): EntertainmentHubSelectionState = when (mode) {
+        ScanMode.MANUAL -> if (direction < 0) moveLeft() else moveRight()
+        ScanMode.AUTO -> changeDirection(direction)
+    }
 }
