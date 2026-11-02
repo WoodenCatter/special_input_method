@@ -4,6 +4,7 @@ enum class AppDestination {
     HOME,
     ENTERTAINMENT,
     INPUT_METHOD,
+    COMMUNICATION,
     ASYNC_MAZE,
     TV,
     MUSIC,
@@ -19,7 +20,7 @@ enum class HomeModule(
     val scanEnabled: Boolean = true
 ) {
     APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
-    REALTIME_COMMUNICATION(AppDestination.INPUT_METHOD, "实时沟通"),
+    REALTIME_COMMUNICATION(AppDestination.COMMUNICATION, "实时沟通"),
     ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
     HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false)
 }

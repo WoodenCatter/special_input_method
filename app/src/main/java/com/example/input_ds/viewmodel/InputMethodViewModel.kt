@@ -8,6 +8,7 @@ import com.example.input_ds.data.CharacterDictionary
 import com.example.input_ds.data.CommonPhraseUsage
 import com.example.input_ds.data.LetterBlockMapping
 import com.example.input_ds.data.UserDictionary
+import com.example.input_ds.communication.ScanInputPolicy
 import com.example.input_ds.engine.CharacterLookupEngine
 import com.example.input_ds.engine.ConversationContext
 import com.example.input_ds.engine.InitialPhraseIndex
@@ -73,10 +74,51 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
     private var predictionDebugClearJob: Job? = null
     private var predictionRequestId = 0L
     private var predictionDebugEventId = 0L
+    private var chatAction: ((Int) -> Boolean)? = null
+    private var inputVisible = true
+
+    fun setChatAction(handler: ((Int) -> Boolean)?) {
+        chatAction = handler
+        inputVisible = handler != null
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        if (inputVisible) when (_state.value.phase) {
+            InputPhase.LEVEL_1_SCANNING -> startScanning()
+            InputPhase.LEVEL_2_LETTER_SELECT -> if (_state.value.isCharFocused) startCharScanning() else startPinyinScanning()
+            InputPhase.LEVEL_3_CHAR_SELECT -> startCharScanning()
+            InputPhase.PREDICTION, InputPhase.INITIAL_PREDICTION -> startPredScanning()
+        }
+    }
+
+    fun setStandaloneInputActive(active: Boolean) {
+        if (active) setChatAction(null).also { inputVisible = true; restartScanning() }
+        else setChatAction(null)
+    }
+
+    fun clearChatInput() {
+        cancelPredictionRequest(); cancelInitialPredictionRequest()
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
+        _state.value = InputState(scanIntervalMs = _state.value.scanIntervalMs)
+        startScanning()
+    }
+
+    fun deleteChatCodePoint() {
+        val s = _state.value
+        if (s.outputText.isNotEmpty()) _state.value = s.copy(outputText = removeLastCodePoint(s.outputText))
+    }
 
     init { startScanning() }
 
     fun handleSignal(signal: ControlSignal) {
+        if (chatAction != null && _state.value.phase != InputPhase.LEVEL_1_SCANNING &&
+            ScanInputPolicy.shouldSkip(signal, _state.value.charScanDirection)) {
+            when (_state.value.phase) {
+                InputPhase.LEVEL_2_LETTER_SELECT -> if (_state.value.isCharFocused) advanceCharHighlight() else advancePinyinHighlight()
+                InputPhase.LEVEL_3_CHAR_SELECT -> advanceCharHighlight()
+                InputPhase.PREDICTION, InputPhase.INITIAL_PREDICTION -> advancePredictionHighlight()
+                else -> Unit
+            }
+            return
+        }
         when (_state.value.phase) {
             InputPhase.LEVEL_1_SCANNING -> handleLevel1Signal(signal)
             InputPhase.LEVEL_2_LETTER_SELECT -> handleLevel2Signal(signal)
@@ -89,6 +131,16 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
     // ==================== Level 1 ====================
 
     private fun handleLevel1Signal(signal: ControlSignal) {
+        if (chatAction != null && _state.value.highlightedBlockIndex >= 4 && signal == ControlSignal.BITE) {
+            chatAction?.invoke(_state.value.highlightedBlockIndex - 4)
+            return
+        }
+        if (chatAction != null && _state.value.highlightedBlockIndex >= 4 &&
+            ((signal == ControlSignal.LEFT_LOOK && _state.value.scanSide == ScanSide.LEFT) ||
+                (signal == ControlSignal.RIGHT_LOOK && _state.value.scanSide == ScanSide.RIGHT))) {
+            chatAction?.invoke(_state.value.highlightedBlockIndex - 4)
+            return
+        }
         when (signal) {
             ControlSignal.LEFT_LOOK -> {
                 if (_state.value.scanSide == ScanSide.LEFT) selectHighlightedBlock()
@@ -374,7 +426,8 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun advanceCharHighlight() {
         val s = _state.value
-        if (s.phase != InputPhase.LEVEL_2_LETTER_SELECT || !s.isCharFocused) return
+        if (s.phase != InputPhase.LEVEL_2_LETTER_SELECT && s.phase != InputPhase.LEVEL_3_CHAR_SELECT) return
+        if (s.phase == InputPhase.LEVEL_2_LETTER_SELECT && !s.isCharFocused) return
         val items = SelectionPaging.characterItems(s.charCandidates, s.charPage)
         if (items.isEmpty()) return
         val next = (s.highlightedCharIndex + s.charScanDirection + items.size) % items.size
@@ -425,6 +478,7 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun startPredScanning() {
         predScanJob?.cancel()
+        if (!inputVisible) return
         predScanJob = viewModelScope.launch {
             while (isActive) { delay(_state.value.scanIntervalMs); advancePredictionHighlight() }
         }
@@ -966,9 +1020,10 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     // ==================== 扫描定时器 ====================
 
-    private fun startScanning() { scanJob?.cancel(); scanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceHighlight() } } }
+    private fun startScanning() { scanJob?.cancel(); if (!inputVisible) return; scanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceHighlight() } } }
     private fun stopScanning() { scanJob?.cancel(); scanJob = null }
     private fun startPinyinScanning() {
+        if (!inputVisible) return
         pinyinScanJob?.cancel()
         pinyinScanJob = viewModelScope.launch {
             while (isActive) {
@@ -981,14 +1036,15 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
         pinyinScanJob?.cancel()
         pinyinScanJob = null
     }
-    private fun startCharScanning() { charScanJob?.cancel(); charScanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceCharHighlight() } } }
+    private fun startCharScanning() { charScanJob?.cancel(); if (!inputVisible) return; charScanJob = viewModelScope.launch { while (isActive) { delay(_state.value.scanIntervalMs); advanceCharHighlight() } } }
     private fun stopCharScanning() { charScanJob?.cancel(); charScanJob = null }
 
     private fun advanceHighlight() {
         val s = _state.value
         if (s.phase != InputPhase.LEVEL_1_SCANNING) return
         val blocks = if (s.scanSide == ScanSide.LEFT) LetterBlockMapping.LEFT_BLOCKS else LetterBlockMapping.RIGHT_BLOCKS
-        _state.value = s.copy(highlightedBlockIndex = (s.highlightedBlockIndex + 1) % blocks.size)
+        _state.value = s.copy(highlightedBlockIndex = (s.highlightedBlockIndex + 1) %
+            (if (chatAction != null) blocks.size + 3 else blocks.size))
     }
 
     override fun onCleared() {

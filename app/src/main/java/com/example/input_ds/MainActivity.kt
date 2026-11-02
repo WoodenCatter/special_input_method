@@ -53,6 +53,8 @@ import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.components.MainScreen
+import com.example.input_ds.ui.communication.CommunicationScreen
+import com.example.input_ds.communication.CommunicationViewModel
 import com.example.input_ds.ui.game.MazeScreen
 import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
@@ -69,6 +71,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var bleManager: NaoyunBleManager
     private var bciController: BciController? = null
     private var inputViewModel: InputMethodViewModel? = null
+    private var communicationViewModel: CommunicationViewModel? = null
     private var attemptedModelIdentity: String? = null
 
     private val destination = mutableStateOf(AppDestination.HOME)
@@ -110,7 +113,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             InputDSTheme {
                 val vm: InputMethodViewModel = viewModel()
+                val chat: CommunicationViewModel = viewModel()
                 inputViewModel = vm
+                communicationViewModel = chat
+                LaunchedEffect(vm) { vm.setStandaloneInputActive(false) }
                 val bleState by bleManager.state.collectAsState()
 
                 LaunchedEffect(bleState) {
@@ -140,7 +146,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Box(Modifier.fillMaxSize()) {
-                    AppContent(vm = vm, bleState = bleState)
+                    AppContent(vm = vm, chat = chat, bleState = bleState)
                     FloatingControlBall(
                         visible = floatingBallVisible.value,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
@@ -153,11 +159,15 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun AppContent(vm: InputMethodViewModel, bleState: NaoyunBleManager.State) {
+    private fun AppContent(vm: InputMethodViewModel, chat: CommunicationViewModel, bleState: NaoyunBleManager.State) {
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
             BackHandler {
+                if (destination.value == AppDestination.COMMUNICATION) {
+                    if (!chat.back()) navigateTo(AppDestination.HOME)
+                    return@BackHandler
+                }
                 val parent = when (destination.value) {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
@@ -203,6 +213,22 @@ class MainActivity : ComponentActivity() {
             )
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
+            AppDestination.COMMUNICATION -> {
+                LaunchedEffect(Unit) {
+                    chat.open()
+                    try {
+                        val initialRepository = PersonalizationRepository(applicationContext)
+                        var identity = "${initialRepository.deviceServerBinding()?.serverUserId}:${initialRepository.activeUser()?.profileId}"
+                        while (true) {
+                            delay(1_000)
+                            val repository = PersonalizationRepository(applicationContext)
+                            val current = "${repository.deviceServerBinding()?.serverUserId}:${repository.activeUser()?.profileId}"
+                            if (current != identity) { identity = current; chat.open(); vm.clearChatInput() }
+                        }
+                    } finally { chat.close(); vm.setChatAction(null) }
+                }
+                CommunicationScreen(chat, vm) { chat.close(); navigateTo(AppDestination.HOME) }
+            }
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
@@ -289,7 +315,7 @@ class MainActivity : ComponentActivity() {
     private fun enterModule(module: HomeModule) {
         when (module) {
             HomeModule.APP_SETTINGS -> navigateTo(AppDestination.APP_SETTINGS)
-            HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.INPUT_METHOD)
+            HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.COMMUNICATION)
             HomeModule.ENTERTAINMENT -> navigateTo(AppDestination.ENTERTAINMENT)
             HomeModule.HEADSET_SETTINGS -> navigateTo(AppDestination.SETTINGS)
         }
@@ -310,6 +336,7 @@ class MainActivity : ComponentActivity() {
 
     private fun navigateTo(target: AppDestination) {
         destination.value = target
+        inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
         updateBciCommandDelivery()
     }
 
@@ -361,6 +388,14 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
+            AppDestination.COMMUNICATION -> {
+                val chat = communicationViewModel ?: return
+                if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
+                    signal == ControlSignal.BITE) inputViewModel?.handleSignal(signal)
+                else if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
+                    signal in setOf(ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK)) inputViewModel?.handleSignal(signal)
+                else if (!chat.onSignal(signal)) navigateTo(AppDestination.HOME)
+            }
             AppDestination.ASYNC_MAZE -> {
                 val action = when (signal) {
                     ControlSignal.LEFT_LOOK -> MazeAction.LOOK_LEFT
