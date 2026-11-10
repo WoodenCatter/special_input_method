@@ -2,7 +2,7 @@
 
 import { ChineseChess } from './chess.js';
 import { ChessAI } from './ai.js';
-import { BoardRenderer, GameInfoDisplay, GameOverModal } from './ui.js';
+import { BoardRenderer, GameInfoDisplay, GameStatusPanel } from './ui.js';
 import { AudioManager } from './audio.js';
 import {
     boardScanCandidates,
@@ -30,7 +30,7 @@ class GameController {
         this.ai = new ChessAI(this.chess);
         this.renderer = new BoardRenderer('chessboard');
         this.infoDisplay = new GameInfoDisplay();
-        this.gameOverModal = new GameOverModal();
+        this.gameStatusPanel = new GameStatusPanel();
         this.audioManager = new AudioManager();
         this.scanCursor = new ScanCursor();
         this.scanIntervalMs = 1500;
@@ -65,7 +65,8 @@ class GameController {
         document.getElementById('undoBtn').addEventListener('click', () => this.undoMove());
         document.getElementById('soundBtn').addEventListener('click', () => {
             this.toggleSound();
-            this.startColumnScan();
+            if (this.chess.gameOver) this.startResultScan();
+            else this.startColumnScan();
         });
         document.getElementById('exitBtn')
             .addEventListener('click', () => this.startTouchConfirmScan('exit'));
@@ -83,11 +84,10 @@ class GameController {
         document.getElementById('cancelActionBtn')
             .addEventListener('click', () => this.cancelPendingAction());
         
-        // 设置游戏结束弹窗
-        this.gameOverModal.onClose(() => {
-            this.gameOverModal.hide();
-            this.newGame();
-        });
+        // 右侧状态区在棋局结束后仍支持触摸操作。
+        this.gameStatusPanel.onNewGame(() => this.startConfirmScan('new_game', 'result'));
+        this.gameStatusPanel.onUndo(() => this.undoMove());
+        this.gameStatusPanel.onExit(() => this.startConfirmScan('exit', 'result'));
         
         // 初始渲染
         this.updateDisplay();
@@ -249,10 +249,17 @@ class GameController {
                     ? '困毙'
                     : this.chess.endReason === 'repetition' ? '重复和棋' : '游戏结束';
             this.infoDisplay.updateGameStatus(status);
+            this.gameStatusPanel.showResult(
+                this.chess.winner || 'draw',
+                this.chess.moveHistory.length > 0
+            );
         } else if (this.chess.isInCheck(this.chess.currentPlayer === 'red')) {
             this.infoDisplay.updateGameStatus('将军');
+            if (this.chess.currentPlayer === 'red') this.gameStatusPanel.showCheck();
+            else this.gameStatusPanel.hide();
         } else {
             this.infoDisplay.updateGameStatus('进行中');
+            this.gameStatusPanel.hide();
         }
         this.renderScanFocus();
     }
@@ -289,18 +296,22 @@ class GameController {
      */
     undoMove() {
         // 检查游戏状态
-        if (this.isAIThinking || this.chess.gameOver) {
+        if (this.isAIThinking) {
             console.log('无法悔棋：游戏状态不允许');
-            this.startColumnScan();
+            if (this.chess.gameOver) this.startResultScan();
+            else this.startColumnScan();
             return;
         }
+
+        const wasGameOver = this.chess.gameOver;
         
         // 调用 chess.js 中的 undoMove 方法（会撤销两步）
         const result = this.chess.undoMove();
         
         if (!result) {
             console.log('悔棋失败');
-            this.startColumnScan();
+            if (wasGameOver) this.startResultScan();
+            else this.startColumnScan();
             return;
         }
         
@@ -316,6 +327,7 @@ class GameController {
         
         // 更新显示
         this.updateDisplay();
+        if (wasGameOver) this.startTimer();
         this.startColumnScan();
         
         console.log('悔棋成功');
@@ -414,9 +426,21 @@ class GameController {
             this.startColumnScan();
             return;
         }
-        const legalMoves = availableMoves
-            .slice()
-            .sort((a, b) => a.y - b.y || a.x - b.x)
+        const byBoardPosition = (a, b) => a.y - b.y || a.x - b.x;
+        const captureMoves = availableMoves
+            .filter(move => this.chess.getPiece(move.x, move.y) !== null)
+            .sort(byBoardPosition);
+        const quietMoves = availableMoves
+            .filter(move => this.chess.getPiece(move.x, move.y) === null)
+            .sort(byBoardPosition);
+
+        // 吃子落点始终是进入落点阶段后的第一组；组内仍按当前轮转
+        // 方向沿棋盘顺序扫描。默认向左轮转时游标从数组末尾开始，
+        // 因此需要将吃子组放到末尾。
+        const orderedMoves = this.scanCursor.direction < 0
+            ? [...quietMoves, ...captureMoves]
+            : [...captureMoves, ...quietMoves];
+        const legalMoves = orderedMoves
             .map(move => ({kind: 'move', x: move.x, y: move.y}));
         this.scanCursor.setPhase(
             ScanPhase.TARGET,
@@ -444,12 +468,34 @@ class GameController {
     startTouchConfirmScan(action) {
         // Touching a game operation cancels the current board-selection depth.
         // Whether the player was choosing a column, row or target, returning
-        // from this dialog starts again at column selection.
+        // from this dialog starts again at column selection. When the game has
+        // ended, cancelling returns to the result actions instead.
+        const returnMode = this.chess.gameOver ? 'result' : 'column';
         this.selectedColumn = null;
         this.navigationLevel = ScanPhase.COLUMN;
         this.boardScanSnapshot = null;
         this.renderer.clearSelection();
-        this.startConfirmScan(action, 'column');
+        this.startConfirmScan(action, returnMode);
+        this.updateDisplay();
+    }
+
+    startResultScan() {
+        if (!this.chess.gameOver) return;
+        this.navigationLevel = ScanPhase.RESULT;
+        this.pendingConfirmedAction = null;
+        this.pendingActionReturnMode = 'result';
+        this.boardScanSnapshot = null;
+        this.hideActionConfirmModal();
+        this.renderer.clearSelection();
+
+        const actions = [{kind: 'new_game', label: '新游戏'}];
+        if (this.chess.moveHistory.length >= 2) {
+            actions.push({kind: 'undo', label: '悔棋'});
+        }
+        actions.push({kind: 'exit', label: '退出'});
+        this.scanCursor.setPhase(ScanPhase.RESULT, actions, 'new_game');
+        this.syncNavigationButtons();
+        this.restartScanTimer();
         this.updateDisplay();
     }
 
@@ -494,7 +540,10 @@ class GameController {
     restartScanTimer() {
         if (this.scanTimer) window.clearInterval(this.scanTimer);
         this.scanTimer = null;
-        if (!this.canScan() || this.scanCursor.phase === ScanPhase.PAUSED) return;
+        const gameOverScan = this.chess.gameOver && (
+            this.scanCursor.phase === ScanPhase.RESULT || this.scanCursor.phase === ScanPhase.CONFIRM
+        );
+        if ((!this.canScan() && !gameOverScan) || this.scanCursor.phase === ScanPhase.PAUSED) return;
         this.scanTimer = window.setInterval(() => {
             this.scanCursor.advance();
             this.renderScanFocus();
@@ -502,15 +551,10 @@ class GameController {
     }
 
     handleBciAction(action) {
-        // 棋局结束弹窗只有一个操作，咬牙直接等同于点击“开始新游戏”。
-        if (this.chess.gameOver) {
-            if (action === 'bite') {
-                this.gameOverModal.hide();
-                this.newGame();
-            }
-            return;
-        }
-        if (!this.canScan()) return;
+        const gameOverScan = this.chess.gameOver && (
+            this.scanCursor.phase === ScanPhase.RESULT || this.scanCursor.phase === ScanPhase.CONFIRM
+        );
+        if (!this.canScan() && !gameOverScan) return;
         if (action === 'look_left' || action === 'look_right') {
             this.scanCursor.setDirectionFromAction(action);
             this.restartScanTimer();
@@ -558,6 +602,13 @@ class GameController {
                 } else if (item.kind === 'sound') {
                     this.toggleSound();
                     this.startColumnScan();
+                }
+                break;
+            case ScanPhase.RESULT:
+                if (item.kind === 'new_game' || item.kind === 'exit') {
+                    this.startConfirmScan(item.kind, 'result');
+                } else if (item.kind === 'undo') {
+                    this.undoMove();
                 }
                 break;
             case ScanPhase.CONFIRM:
@@ -653,6 +704,16 @@ class GameController {
             return;
         }
 
+        if (this.scanCursor.phase === ScanPhase.RESULT) {
+            if (phaseEl) phaseEl.textContent = '棋局结束';
+            if (choiceEl) choiceEl.textContent = item.label;
+            const idByKind = {
+                new_game: 'resultNewGameBtn', undo: 'resultUndoBtn', exit: 'resultExitBtn'
+            };
+            document.getElementById(idByKind[item.kind])?.classList.add('bci-control-focus');
+            return;
+        }
+
         if (this.scanCursor.phase === ScanPhase.CONFIRM) {
             if (phaseEl) phaseEl.textContent = '等待确认';
             if (choiceEl) choiceEl.textContent = item.label;
@@ -691,7 +752,9 @@ class GameController {
         this.pendingConfirmedAction = null;
         this.pendingActionReturnMode = 'menu';
         this.hideActionConfirmModal();
-        if (returnMode === 'column') {
+        if (returnMode === 'result') {
+            this.startResultScan();
+        } else if (returnMode === 'column') {
             this.startColumnScan();
         } else {
             this.startMenuScan();
@@ -774,13 +837,7 @@ class GameController {
             this.audioManager.playDrawSound();
         }
         
-        if (this.chess.winner) {
-            this.gameOverModal.show(this.chess.winner, this.chess.endReason);
-        } else {
-            this.gameOverModal.show('draw', this.chess.endReason);
-        }
-        
-        this.updateDisplay();
+        this.startResultScan();
     }
 
     /**

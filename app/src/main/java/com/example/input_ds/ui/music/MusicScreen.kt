@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -498,15 +497,14 @@ fun MusicScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                VinylPanel(currentTrack, player.isPlaying, Modifier.weight(.30f).fillMaxHeight())
-                LyricsPanel(currentTrack, Modifier.weight(.38f).fillMaxHeight())
+                VinylPanel(currentTrack, player.isPlaying, Modifier.weight(.46f).fillMaxHeight())
                 PlaylistPanel(
                     tracks = tracks,
                     currentTrackId = player.currentTrackId,
                     focusIndex = playlistIndex,
                     focusActive = focusMode == MusicFocusMode.PLAYLIST,
                     onTrackClick = ::playTrackAt,
-                    modifier = Modifier.weight(.32f).fillMaxHeight()
+                    modifier = Modifier.weight(.54f).fillMaxHeight()
                 )
             }
             PlaybackProgress(
@@ -666,38 +664,6 @@ private fun VinylRecord(isPlaying: Boolean, label: String, modifier: Modifier = 
 }
 
 @Composable
-private fun LyricsPanel(track: MusicTrack?, modifier: Modifier = Modifier) {
-    GlassPanel(modifier, contentPadding = PaddingValues(18.dp)) {
-        Text("歌词", color = AuroraVioletBright, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.weight(.4f))
-        Text(
-            track?.title ?: "暂无歌曲",
-            Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            track?.artist.orEmpty(),
-            Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            color = AuroraInfo,
-            fontSize = 17.sp
-        )
-        Text(
-            "暂无歌词\n请欣赏音乐",
-            Modifier.fillMaxWidth().padding(top = 24.dp),
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 18.sp,
-            lineHeight = 30.sp
-        )
-        Spacer(Modifier.weight(1f))
-    }
-}
-
-@Composable
 private fun PlaylistPanel(
     tracks: List<MusicTrack>,
     currentTrackId: String?,
@@ -715,11 +681,6 @@ private fun PlaylistPanel(
             Text("播放列表", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text("${tracks.size} 首", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(
-            if (focusActive) "自动选择中 · 左看/右看改变方向 · 咬牙播放" else "点击列表按键后可用耳机选歌",
-            color = if (focusActive) AuroraOk else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp
-        )
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
             state = listState,
@@ -909,7 +870,6 @@ private fun VolumeOverlay(
 ) {
     MusicOverlay(widthFraction = .52f) {
         Text("音量调节", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text("调节音量不会暂停歌曲 · 左看/右看移动焦点 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("音量：$volume / $maxVolume", fontWeight = FontWeight.Bold)
         LinearProgressIndicator(
             progress = { volume.toFloat() / maxVolume },
@@ -935,7 +895,6 @@ private fun SettingsOverlay(
 ) {
     MusicOverlay(widthFraction = .52f) {
         Text("音乐设置", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text("进入设置不会暂停歌曲 · 光标自动跳转 · 左看/右看改变方向 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
         SETTINGS_LABELS.forEachIndexed { index, label ->
             val enabled = index != 1 || hasMusic
             FocusOptionButton(
@@ -964,7 +923,6 @@ private fun DeleteListOverlay(
     }
     MusicOverlay(widthFraction = .68f) {
         Text("删除音乐", style = MaterialTheme.typography.headlineMedium)
-        Text("光标自动跳转 · 左看/右看改变方向 · 咬牙选择后再次确认", color = MaterialTheme.colorScheme.onSurfaceVariant)
         FocusOptionButton(
             text = "返回设置",
             focused = selectedIndex == 0,

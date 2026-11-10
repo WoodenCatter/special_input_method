@@ -20,19 +20,28 @@ captures/
 # Signing files and local secrets
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.key
 keystore.properties
 signing.properties
 .env
 .env.*
 !.env.example
+.envrc
 
 # Python helper-script caches and virtual environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+
+# Local handoff notes and EEG collection exports
+/docs/rehab-handoff/
+*.npz
 
 # OS and local diagnostic files
 .DS_Store

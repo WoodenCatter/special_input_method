@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -46,6 +47,7 @@ import com.example.input_ds.model.EntertainmentHubModule
 import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.HomeModule
 import com.example.input_ds.model.HomeSelectionState
+import com.example.input_ds.model.KeyboardControlInput
 import com.example.input_ds.music.MusicInputBus
 import com.example.input_ds.settings.AppSettingsInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
@@ -57,6 +59,8 @@ import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
 import com.example.input_ds.ui.chess.ChineseChessScreen
 import com.example.input_ds.ui.components.FloatingControlBall
+import com.example.input_ds.ui.components.FloatingEegSignalSource
+import com.example.input_ds.ui.components.FloatingEegSignalWindow
 import com.example.input_ds.ui.components.MainScreen
 import com.example.input_ds.ui.doudizhu.DoudizhuScreen
 import com.example.input_ds.ui.game.MazeScreen
@@ -116,6 +120,7 @@ class MainActivity : ComponentActivity() {
         LanguageModel.init(applicationContext)
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
+        FloatingEegSignalSource.attach(bleManager)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
         floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
         window.attributes = window.attributes.apply {
@@ -156,6 +161,11 @@ class MainActivity : ComponentActivity() {
 
                 Box(Modifier.fillMaxSize()) {
                     AppContent(vm = vm, bleState = bleState)
+                    FloatingEegSignalWindow(
+                        bleManager = bleManager,
+                        visible = destination.value != AppDestination.HOME &&
+                            destination.value != AppDestination.WIZARD_GAME
+                    )
                     FloatingControlBall(
                         visible = floatingBallVisible.value,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
@@ -165,6 +175,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val configuringHeadset = destination.value == AppDestination.SETTINGS ||
+            destination.value == AppDestination.DEVICE_STATUS ||
+            destination.value == AppDestination.COLLECTION
+        if (!configuringHeadset && currentFocus?.onCheckIsTextEditor() != true &&
+            KeyboardControlInput.dispatch(event, ::routeSignal)
+        ) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     @Composable
@@ -555,6 +577,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        FloatingEegSignalSource.detach(bleManager)
         stopBciController()
         bleManager.disconnect()
         super.onDestroy()

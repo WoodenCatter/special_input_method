@@ -566,47 +566,40 @@ export class ChineseChess {
     }
 
     /**
-     * 撤销移动 - 悔棋功能（撤销两步：AI和玩家各一步）
+     * 撤销到红方上一次走棋之前。
+     *
+     * 正常回合结束后，历史最后一步是黑方，因此撤销“黑方 + 红方”两步；
+     * 如果红方刚刚将死或吃掉黑将，历史最后一步就是红方，此时只撤销
+     * 这一手。这样无论从普通棋局还是胜负状态悔棋，都会统一回到红方走棋。
      */
     undoMove() {
-        // 至少需要两步才能悔棋
-        if (this.moveHistory.length < 2) {
+        if (this.moveHistory.length === 0) {
             console.log('悔棋失败：棋步不足');
             return null;
         }
         
         console.log('开始悔棋，当前棋步数:', this.moveHistory.length);
         
-        // 撤销最后两步（AI的一步 + 玩家的一步）
         const moves = [];
-        
-        // 撤销第一步（最近的一步，通常是AI的）
-        const lastMove = this.moveHistory.pop();
-        if (lastMove) {
-            const {piece, captured, from, to} = lastMove;
+
+        while (this.moveHistory.length > 0) {
+            const move = this.moveHistory.pop();
+            const {piece, captured, from, to} = move;
             this.board[from.y][from.x] = piece;
             this.board[to.y][to.x] = captured || null;
-            this.positionHistory.length = lastMove.previousPositionHistoryLength;
-            moves.push(lastMove);
-            console.log('撤销第一步:', lastMove);
+            this.positionHistory.length = move.previousPositionHistoryLength;
+            moves.push(move);
+            console.log('撤销棋步:', move);
+
+            // 找到最近一手红方落子后即停止，回到该手落子之前。
+            if (move.currentPlayer === 'red') break;
         }
-        
-        // 撤销第二步（玩家的一步）
-        const secondLastMove = this.moveHistory.pop();
-        if (secondLastMove) {
-            const {piece, captured, from, to} = secondLastMove;
-            this.board[from.y][from.x] = piece;
-            this.board[to.y][to.x] = captured || null;
-            this.positionHistory.length = secondLastMove.previousPositionHistoryLength;
-            moves.push(secondLastMove);
-            console.log('撤销第二步:', secondLastMove);
-        }
-        
-        // 切换回红方（玩家）
-        this.currentPlayer = 'red';
-        this.gameOver = false;
-        this.winner = null;
-        this.endReason = null;
+
+        const redMove = moves[moves.length - 1];
+        this.currentPlayer = redMove.currentPlayer;
+        this.gameOver = redMove.previousGameOver;
+        this.winner = redMove.previousWinner;
+        this.endReason = redMove.previousEndReason;
         
         console.log('悔棋完成，当前玩家:', this.currentPlayer);
         console.log('剩余棋步数:', this.moveHistory.length);

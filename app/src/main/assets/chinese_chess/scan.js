@@ -4,6 +4,7 @@ export const ScanPhase = Object.freeze({
     TARGET: 'target',
     MENU: 'menu',
     CONFIRM: 'confirm',
+    RESULT: 'result',
     PAUSED: 'paused'
 });
 

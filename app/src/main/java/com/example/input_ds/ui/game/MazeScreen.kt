@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -39,6 +40,8 @@ import com.example.input_ds.game.MazeExitChoice
 import com.example.input_ds.game.MazeGame
 import com.example.input_ds.game.MazeProtocol
 import com.example.input_ds.game.MazeState
+import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.model.KeyboardControlInput
 import com.example.input_ds.ui.theme.AuroraBad
 import com.example.input_ds.ui.theme.AuroraOk
 import com.example.input_ds.ui.theme.AuroraPink
@@ -92,7 +95,8 @@ fun MazeScreen(
     if (state.exitDialogVisible) {
         ExitConfirmationDialog(
             selection = state.exitSelection,
-            onDecision = onExitDecision
+            onDecision = onExitDecision,
+            onAction = onAction
         )
     }
 }
@@ -100,9 +104,22 @@ fun MazeScreen(
 @Composable
 private fun ExitConfirmationDialog(
     selection: MazeExitChoice,
-    onDecision: (MazeExitChoice) -> Unit
+    onDecision: (MazeExitChoice) -> Unit,
+    onAction: (MazeAction) -> Unit
 ) {
     AlertDialog(
+        // This dialog owns a separate window, so Activity key dispatch cannot
+        // receive its keys. Forward them through the same simulation handler.
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            KeyboardControlInput.dispatch(event.nativeKeyEvent) { signal ->
+                when (signal) {
+                    ControlSignal.LEFT_LOOK -> onAction(MazeAction.LOOK_LEFT)
+                    ControlSignal.BITE -> onAction(MazeAction.BITE)
+                    ControlSignal.RIGHT_LOOK -> onAction(MazeAction.LOOK_RIGHT)
+                    ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+                }
+            }
+        },
         onDismissRequest = { onDecision(MazeExitChoice.CANCEL) },
         title = { Text("确认退出迷宫？") },
         text = {

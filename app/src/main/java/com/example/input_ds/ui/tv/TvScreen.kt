@@ -3,7 +3,13 @@ package com.example.input_ds.ui.tv
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -20,7 +26,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,7 +33,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -59,7 +64,6 @@ import androidx.compose.ui.zIndex
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.tv.TvInputBus
 import com.example.input_ds.tv.TvSignalSink
-import com.example.input_ds.ui.theme.AuroraInfo
 import com.example.input_ds.ui.theme.AuroraVioletBright
 import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.auroraBackground
@@ -68,39 +72,26 @@ import kotlinx.coroutines.delay
 private data class TvChannel(
     val id: String,
     val name: String,
-    val group: String,
-    val officialPages: List<String>,
-    val temporarilyUnavailable: Boolean = false
+    val officialPages: List<String>
 )
 
 private fun cctvChannel(
     id: String,
     name: String,
     vararg officialPages: String
-) = TvChannel(id, name, "央视", officialPages.toList())
-
-private fun unavailableCctvChannel(
-    id: String,
-    name: String,
-    officialPage: String
-) = TvChannel(id, name, "央视", listOf(officialPage), temporarilyUnavailable = true)
+) = TvChannel(id, name, officialPages.toList())
 
 private val TV_CHANNELS = listOf(
     cctvChannel("cctv1", "CCTV-1 综合", "https://tv.cctv.com/live/cctv1/"),
     cctvChannel("cctv2", "CCTV-2 财经", "https://tv.cctv.com/live/cctv2/"),
-    unavailableCctvChannel("cctv3", "CCTV-3 综艺", "https://tv.cctv.com/live/cctv3/"),
     cctvChannel("cctv4", "CCTV-4 中文国际", "https://tv.cctv.com/live/cctv4/"),
     cctvChannel("cctv5", "CCTV-5 体育", "https://tv.cctv.com/live/cctv5/"),
     cctvChannel("cctv5plus", "CCTV-5+ 体育赛事", "https://tv.cctv.com/live/cctv5plus/"),
-    unavailableCctvChannel("cctv6", "CCTV-6 电影", "https://tv.cctv.com/live/cctv6/"),
     cctvChannel("cctv7", "CCTV-7 国防军事", "https://tv.cctv.com/live/cctv7/"),
-    unavailableCctvChannel("cctv8", "CCTV-8 电视剧", "https://tv.cctv.com/live/cctv8/"),
-    unavailableCctvChannel("cctv9", "CCTV-9 纪录", "https://tv.cctv.com/live/cctv9/"),
     cctvChannel("cctv10", "CCTV-10 科教", "https://tv.cctv.com/live/cctv10/"),
     cctvChannel("cctv11", "CCTV-11 戏曲", "https://tv.cctv.com/live/cctv11/"),
     cctvChannel("cctv12", "CCTV-12 社会与法", "https://tv.cctv.com/live/cctv12/"),
     cctvChannel("cctv13", "CCTV-13 新闻", "https://tv.cctv.com/live/cctv13/"),
-    unavailableCctvChannel("cctv14", "CCTV-14 少儿", "https://tv.cctv.com/live/cctv14/"),
     cctvChannel("cctv15", "CCTV-15 音乐", "https://tv.cctv.com/live/cctv15/"),
     cctvChannel("cctv16", "CCTV-16 奥林匹克", "https://tv.cctv.com/live/cctv16/"),
     cctvChannel("cctv17", "CCTV-17 农业农村", "https://tv.cctv.com/live/cctv17/")
@@ -132,7 +123,7 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
         if (selectedIndex == currentIndex) return
         currentIndex = selectedIndex
         pageVariantIndex = 0
-        loading = !TV_CHANNELS[selectedIndex].temporarilyUnavailable
+        loading = true
         errorMessage = null
     }
 
@@ -187,6 +178,7 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 stopLoading()
                 loadUrl("about:blank")
                 clearHistory()
+                removeJavascriptInterface(TV_FULLSCREEN_BRIDGE_NAME)
                 removeAllViews()
                 destroy()
             }
@@ -233,36 +225,13 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 TextButton(onClick = currentOnBack) { Text("返回首页") }
             }
 
-            Row(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color.Black, RoundedCornerShape(18.dp))
+                    .border(2.dp, Color(0xFF364B5A), RoundedCornerShape(18.dp))
             ) {
-                GlassPanel(
-                    modifier = Modifier.width(248.dp).fillMaxHeight(),
-                    contentPadding = PaddingValues(10.dp)
-                ) {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        state = listState,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        itemsIndexed(TV_CHANNELS, key = { _, item -> item.id }) { index, item ->
-                            TvChannelButton(
-                                channel = item,
-                                selected = index == currentIndex,
-                                onClick = { selectChannel(index) }
-                            )
-                        }
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .background(Color.Black, RoundedCornerShape(18.dp))
-                        .border(2.dp, Color(0xFF364B5A), RoundedCornerShape(18.dp))
-                ) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize().padding(2.dp),
                         factory = { context ->
@@ -289,6 +258,10 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                                 }
                                 CookieManager.getInstance().setAcceptCookie(true)
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                addJavascriptInterface(
+                                    TvFullscreenTapBridge(this),
+                                    TV_FULLSCREEN_BRIDGE_NAME
+                                )
                                 webChromeClient = WebChromeClient()
                                 webViewClient = OfficialTvWebViewClient(
                                     onStarted = {
@@ -314,38 +287,12 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                             val request = "${channel.id}:$pageVariantIndex:$reloadGeneration"
                             if (webView.tag != request) {
                                 webView.tag = request
-                                if (channel.temporarilyUnavailable) {
-                                    webView.stopLoading()
-                                    webView.loadUrl("about:blank")
-                                } else {
-                                    webView.loadUrl(officialPage, CCTV_REQUEST_HEADERS)
-                                }
+                                webView.loadUrl(officialPage, CCTV_REQUEST_HEADERS)
                             }
                         }
                     )
 
-                    if (channel.temporarilyUnavailable) {
-                        Surface(
-                            modifier = Modifier.align(Alignment.Center),
-                            color = Color(0xEE202A31),
-                            shape = RoundedCornerShape(18.dp),
-                            border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF647783))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 34.dp, vertical = 28.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text("当前频道不可播放", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    "该频道将在后续版本继续处理",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    if (loading && !channel.temporarilyUnavailable) {
+                    if (loading) {
                         Surface(
                             modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
                             color = Color(0xD9223039),
@@ -368,7 +315,7 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                         }
                     }
 
-                    if (!channel.temporarilyUnavailable) errorMessage?.let { message ->
+                    errorMessage?.let { message ->
                         Column(
                             modifier = Modifier
                                 .align(Alignment.Center)
@@ -391,6 +338,24 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                             }
                         }
                     }
+            }
+
+            GlassPanel(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    state = listState,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(TV_CHANNELS, key = { _, item -> item.id }) { index, item ->
+                        TvChannelButton(
+                            channel = item,
+                            selected = index == currentIndex,
+                            onClick = { selectChannel(index) }
+                        )
+                    }
                 }
             }
         }
@@ -409,7 +374,7 @@ fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
 private fun TvChannelButton(channel: TvChannel, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.width(176.dp),
         color = if (selected) Color(0xFF384D68) else MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(12.dp),
         border = androidx.compose.foundation.BorderStroke(
@@ -417,10 +382,12 @@ private fun TvChannelButton(channel: TvChannel, selected: Boolean, onClick: () -
             if (selected) AuroraVioletBright else MaterialTheme.colorScheme.outline
         )
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-            Text(channel.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(channel.group, color = if (selected) Color(0xFFC8E6FF) else AuroraInfo, fontSize = 12.sp)
-        }
+        Text(
+            channel.name,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -449,7 +416,6 @@ private fun TvOperationOverlay(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("电视操作", style = MaterialTheme.typography.headlineSmall)
-            Text("选项会自动轮转，咬牙确认；也可以直接触摸。")
             TV_OPERATION_LABELS.forEachIndexed { index, label ->
                 Button(
                     onClick = { onSelect(index) },
@@ -506,6 +472,7 @@ private class OfficialTvWebViewClient(
             if (isCctvErrorPage == "true") {
                 reportPageError(url, "该央视入口暂时不可用")
             } else {
+                view.evaluateJavascript(TV_AUTO_FULLSCREEN_SCRIPT, null)
                 onFinished()
             }
         }
@@ -543,6 +510,127 @@ private class OfficialTvWebViewClient(
         onError(message)
     }
 }
+
+private const val TV_FULLSCREEN_BRIDGE_NAME = "InputDsTvFullscreen"
+
+/**
+ * A JavaScript click is not considered a user gesture by Chromium, so it cannot
+ * reliably activate HTML5 fullscreen. This bridge receives only the player
+ * rectangle and dispatches native touchscreen events into the WebView: first at
+ * the centre to reveal controls, then at the bottom-right fullscreen control.
+ */
+private class TvFullscreenTapBridge(private val webView: WebView) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @JavascriptInterface
+    fun open(
+        pageUrl: String,
+        left: Double,
+        top: Double,
+        right: Double,
+        bottom: Double,
+        viewportWidth: Double,
+        viewportHeight: Double
+    ) {
+        mainHandler.post {
+            if (webView.url != pageUrl || webView.width <= 0 || webView.height <= 0) return@post
+            if (!listOf(left, top, right, bottom, viewportWidth, viewportHeight).all { it.isFinite() }) {
+                return@post
+            }
+            if (viewportWidth <= 0.0 || viewportHeight <= 0.0 || right <= left || bottom <= top) {
+                return@post
+            }
+
+            val scaleX = webView.width / viewportWidth
+            val scaleY = webView.height / viewportHeight
+            val centreX = ((left + right) / 2.0 * scaleX).toFloat()
+            val centreY = ((top + bottom) / 2.0 * scaleY).toFloat()
+            val controlInsetX = minOf(34.0, (right - left) * 0.045)
+            val controlInsetY = minOf(30.0, (bottom - top) * 0.065)
+            val fullscreenX = ((right - controlInsetX) * scaleX).toFloat()
+            val fullscreenY = ((bottom - controlInsetY) * scaleY).toFloat()
+
+            dispatchTap(centreX, centreY)
+            mainHandler.postDelayed({
+                if (webView.url == pageUrl) dispatchTap(fullscreenX, fullscreenY)
+            }, 650L)
+        }
+    }
+
+    private fun dispatchTap(x: Float, y: Float) {
+        val safeX = x.coerceIn(1f, (webView.width - 2).coerceAtLeast(1).toFloat())
+        val safeY = y.coerceIn(1f, (webView.height - 2).coerceAtLeast(1).toFloat())
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, safeX, safeY, 0)
+        down.source = InputDevice.SOURCE_TOUCHSCREEN
+        webView.dispatchTouchEvent(down)
+        down.recycle()
+
+        mainHandler.postDelayed({
+            val upTime = SystemClock.uptimeMillis()
+            val up = MotionEvent.obtain(downTime, upTime, MotionEvent.ACTION_UP, safeX, safeY, 0)
+            up.source = InputDevice.SOURCE_TOUCHSCREEN
+            webView.dispatchTouchEvent(up)
+            up.recycle()
+        }, 80L)
+    }
+}
+
+/** Finds the visible CCTV player and asks the native bridge to tap its controls. */
+private const val TV_AUTO_FULLSCREEN_SCRIPT = """
+(function () {
+  if (window.__inputDsAutoFullscreenStarted) return;
+  window.__inputDsAutoFullscreenStarted = true;
+
+  function largestVisible(candidates) {
+    var best = null;
+    var bestArea = 0;
+    for (var i = 0; i < candidates.length; i += 1) {
+      var rect = candidates[i].getBoundingClientRect();
+      var visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+      var visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+      var area = visibleWidth * visibleHeight;
+      if (area > bestArea) {
+        best = candidates[i];
+        bestArea = area;
+      }
+    }
+    return best;
+  }
+
+  function findPlayer() {
+    var selectors = [
+      '#player', '#videoPlayer', '.video-player', '.video_player', '.player-container',
+      '.player_wrap', '.video-wrap', '[class*="player-wrap"]', '[class*="video-player"]',
+      'video', 'canvas', 'iframe[src*="player"]', 'iframe[src*="live"]'
+    ];
+    return largestVisible(Array.prototype.slice.call(document.querySelectorAll(selectors.join(','))));
+  }
+
+  var attempts = 0;
+  var timer = window.setInterval(function () {
+    attempts += 1;
+    var player = findPlayer();
+    if (player) {
+      var rect = player.getBoundingClientRect();
+      var minimumArea = window.innerWidth * window.innerHeight * 0.12;
+      if (rect.width * rect.height >= minimumArea) {
+        window.clearInterval(timer);
+        InputDsTvFullscreen.open(
+          window.location.href,
+          rect.left,
+          rect.top,
+          rect.right,
+          rect.bottom,
+          window.innerWidth,
+          window.innerHeight
+        );
+      }
+    }
+    if (attempts >= 60) window.clearInterval(timer);
+  }, 500);
+})();
+"""
 
 private fun Uri.isAllowedOfficialTvPage(): Boolean {
     if (scheme != "https") return false

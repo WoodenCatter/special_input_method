@@ -454,57 +454,59 @@ export class GameInfoDisplay {
     }
 }
 
-/**
- * 游戏结束弹窗
- */
-export class GameOverModal {
+/** Right-side check warning and game-result panel. */
+export class GameStatusPanel {
     constructor() {
-        this.modal = document.getElementById('gameOverModal');
-        this.icon = document.getElementById('gameOverIcon');
-        this.title = document.getElementById('gameOverTitle');
-        this.message = document.getElementById('gameOverMessage');
-        this.closeBtn = document.getElementById('closeModalBtn');
+        this.panel = document.getElementById('gameStatusPanel');
+        this.icon = document.getElementById('gameStatusIcon');
+        this.title = document.getElementById('gameStatusTitle');
+        this.actions = document.getElementById('gameResultActions');
+        this.newGameBtn = document.getElementById('resultNewGameBtn');
+        this.undoBtn = document.getElementById('resultUndoBtn');
+        this.exitBtn = document.getElementById('resultExitBtn');
     }
 
-    /**
-     * 显示弹窗
-     */
-    show(winner, reason = null) {
-        const reasonText = reason === 'checkmate'
-            ? '（将死）'
-            : reason === 'stalemate'
-                ? '（困毙）'
-                : reason === 'repetition' ? '（三次重复局面）' : '';
+    showCheck() {
+        this.panel.classList.remove('hidden', 'result');
+        this.panel.classList.add('check');
+        this.icon.textContent = '将';
+        this.title.textContent = '将军';
+        this.actions.classList.add('hidden');
+    }
+
+    showResult(winner, canUndo = true) {
         if (winner === 'red') {
-            this.icon.textContent = '🎉';
-            this.title.textContent = '恭喜获胜！';
-            this.message.textContent = `红方获得胜利${reasonText}`;
+            this.icon.textContent = '胜';
+            this.title.textContent = '你赢了';
         } else if (winner === 'black') {
-            this.icon.textContent = '😔';
-            this.title.textContent = '遗憾落败';
-            this.message.textContent = `黑方（AI）获得胜利${reasonText}`;
+            this.icon.textContent = '负';
+            this.title.textContent = '你输了';
         } else {
-            this.icon.textContent = '🤝';
+            this.icon.textContent = '和';
             this.title.textContent = '和棋';
-            this.message.textContent = '双方平局';
         }
-        
-        this.modal.classList.remove('hidden');
-        this.modal.classList.add('flex');
+
+        this.undoBtn.disabled = !canUndo;
+        this.panel.classList.remove('hidden', 'check');
+        this.panel.classList.add('result');
+        this.actions.classList.remove('hidden');
     }
 
-    /**
-     * 隐藏弹窗
-     */
     hide() {
-        this.modal.classList.add('hidden');
-        this.modal.classList.remove('flex');
+        this.panel.classList.add('hidden');
+        this.panel.classList.remove('check', 'result');
+        this.actions.classList.add('hidden');
     }
 
-    /**
-     * 设置关闭回调
-     */
-    onClose(callback) {
-        this.closeBtn.addEventListener('click', callback);
+    onNewGame(callback) {
+        this.newGameBtn.addEventListener('click', callback);
+    }
+
+    onUndo(callback) {
+        this.undoBtn.addEventListener('click', callback);
+    }
+
+    onExit(callback) {
+        this.exitBtn.addEventListener('click', callback);
     }
 }

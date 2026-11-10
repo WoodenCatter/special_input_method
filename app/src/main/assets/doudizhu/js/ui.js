@@ -1040,28 +1040,53 @@ function playAreaHTML(v, seat) {
   if (!lp) return '';
   if (lp.pass) return `<span class="say pass">${t('pass_txt')}</span>`;
   const cards = lp.cards.slice().sort((a, b) => b.r - a.r);
-  return `<div class="mini-cards">${cards.map(c => cardHTML(c, 'mini', v.laizi)).join('')}</div>` +
+  return `<div class="mini-cards played-cards">${cards.map(c => cardHTML(c, 'mini', v.laizi)).join('')}</div>` +
     `<span class="combo-tag">${comboName(lp.combo)}</span>`;
 }
 
 function seatBadge(v, p) {
-  if (p.landlord) return `<span class="badge lord">👑 ${t('g_landlord')}</span>`;
-  if (p.ally) return `<span class="badge ally">🤝 ${t('g_ally')}</span>`;
+  if (p.landlord) return `<span class="badge lord">${t('g_landlord')}</span>`;
+  if (p.ally) return `<span class="badge ally">${t('g_ally')}</span>`;
   return v.landlord != null ? `<span class="badge">${t('g_farmer')}</span>` : '';
 }
 
-function oppPanelHTML(v, seat) {
+function avatarRoleClass(v, p) {
+  if (v.landlord == null) return 'role-normal';
+  return p.landlord ? 'role-landlord' : 'role-farmer';
+}
+
+function avatarCharacterClass(seat) {
+  if (seat === 1) return 'avatar-mature-male';
+  if (seat === 2) return 'avatar-young-female';
+  return 'avatar-young-male';
+}
+
+function avatarHTML(v, seat) {
+  const p = v.players[seat];
+  return `<div class="avatar-frame ${avatarCharacterClass(seat)} ${avatarRoleClass(v, p)}" aria-hidden="true">
+    <div class="avatar-sprite"></div>
+  </div>`;
+}
+
+function playerMetaHTML(v, p) {
+  return `<div class="pmeta">
+    <strong class="score-value">${t('score_pts', p.score)}</strong>
+    <strong class="cards-value">${t('cards_left', p.cardCount)}</strong>
+  </div>`;
+}
+
+function oppPanelHTML(v, seat, side = 'left') {
   const p = v.players[seat];
   const isTurn = v.actor === seat && (v.state === 'bidding' || v.state === 'doubling' || v.state === 'playing');
   const badge = seatBadge(v, p);
   const settleHand = p.hand && v.state === 'settle'
     ? `<div class="mini-cards reveal">${p.hand.map(c => cardHTML(c, 'mini', v.laizi)).join('')}</div>` : '';
-  return `<div class="opp ${isTurn ? 'turn' : ''}" data-seat="${seat}">
+  return `<div class="opp opp-${side} ${isTurn ? 'turn' : ''}" data-seat="${seat}">
     <div class="opp-head">
-      <span class="avatar">${p.isAI ? '🤖' : '🧑'}</span>
+      ${avatarHTML(v, seat)}
       <div class="opp-names">
-        <div class="pname">${esc(p.name)}${p.isAI ? ` <span class="tag">${t('ai_tag')}</span>` : ''} ${badge}</div>
-        <div class="pmeta">${t('score_pts', p.score)} · ${t('cards_left', p.cardCount)}</div>
+        <div class="pname">${esc(p.name)} ${badge}</div>
+        ${playerMetaHTML(v, p)}
       </div>
     </div>
     <div class="opp-play">${playAreaHTML(v, seat)}</div>${settleHand}
@@ -1085,15 +1110,18 @@ function midHTML(v) {
   else bottom = [0, 1, 2].map(() => cardHTML(null, 'mini')).join('');
   let html = `<div class="bottom-cards"><span class="bc-label">${t('g_bottom')}</span>${bottom}</div>`;
   const sides = seatSides(v);
-  if (sides.top !== null) html += oppPanelHTML(v, sides.top);
+  if (sides.top !== null) html += oppPanelHTML(v, sides.top, 'top');
   return html;
 }
 
 function myInfoHTML(v) {
   const p = v.players[v.mySeat];
   const badge = seatBadge(v, p);
-  return `<span class="avatar">🧑</span><span class="pname">${esc(p.name)}</span> ${badge}
-    <span class="pmeta">${t('score_pts', p.score)}</span><div class="bubble-slot"></div>`;
+  return `${avatarHTML(v, v.mySeat)}
+    <div class="player-copy">
+      <div class="pname">${esc(p.name)} ${badge}</div>
+      ${playerMetaHTML(v, p)}
+    </div><div class="bubble-slot"></div>`;
 }
 
 function actionsHTML(v) {
@@ -1203,8 +1231,8 @@ function renderGame() {
 
   $('#center-info').innerHTML = centerHTML(v);
   const sides = seatSides(v);
-  $('#opp-left').innerHTML = sides.left !== null ? oppPanelHTML(v, sides.left) : '';
-  $('#opp-right').innerHTML = sides.right !== null ? oppPanelHTML(v, sides.right) : '';
+  $('#opp-left').innerHTML = sides.left !== null ? oppPanelHTML(v, sides.left, 'left') : '';
+  $('#opp-right').innerHTML = sides.right !== null ? oppPanelHTML(v, sides.right, 'right') : '';
   $('#table-mid').innerHTML = midHTML(v);
 
   // my last play
@@ -1212,7 +1240,7 @@ function renderGame() {
   let mpHtml = '';
   if (mp) {
     mpHtml = mp.pass ? `<span class="say pass">${t('pass_txt')}</span>`
-      : `<div class="mini-cards">${mp.cards.slice().sort((a, b) => b.r - a.r).map(c => cardHTML(c, 'mini', v.laizi)).join('')}</div>`;
+      : `<div class="mini-cards played-cards">${mp.cards.slice().sort((a, b) => b.r - a.r).map(c => cardHTML(c, 'mini', v.laizi)).join('')}</div>`;
   } else if (v.state === 'playing' && v.actor === v.mySeat && !prevFor(v)) {
     mpHtml = `<span class="say lead">${t('lead_any')}</span>`;
   }
@@ -1222,6 +1250,7 @@ function renderGame() {
   $('#my-hand').innerHTML = v.myHand.map(c =>
     cardHTML(c, App.selected.has(c.id) ? 'sel' : '', v.laizi)).join('');
   layoutHand();
+  layoutPlayedCards();
   $('#my-info').innerHTML = myInfoHTML(v);
   $('#btn-chat').style.display = App.role === 'local' ? 'none' : '';
 
@@ -1332,6 +1361,23 @@ function layoutHand() {
   let step = cw - (window.innerWidth <= 720 ? 22 : 30);
   if (cw + step * (n - 1) > avail) step = Math.max(11, (avail - cw) / (n - 1));
   for (let i = 1; i < n; i++) cards[i].style.marginLeft = (step - cw) + 'px';
+}
+
+/* Keep enlarged played cards visible even for long straights and planes. */
+function layoutPlayedCards() {
+  $$('.played-cards').forEach(run => {
+    const cards = run.children;
+    const n = cards.length;
+    if (!n) return;
+    const cw = cards[0].offsetWidth;
+    const available = Math.max(cw, run.parentElement.clientWidth);
+    let step = cw - 20;
+    if (cw + step * (n - 1) > available) {
+      step = Math.max(10, (available - cw) / Math.max(1, n - 1));
+    }
+    cards[0].style.marginLeft = '0px';
+    for (let i = 1; i < n; i++) cards[i].style.marginLeft = (step - cw) + 'px';
+  });
 }
 
 function doHint() {
@@ -1496,7 +1542,11 @@ function boot() {
   document.addEventListener('pointerdown', () => { Snd.unlock(); Bgm.poke(); });
 
   bindHandDrag();
-  window.addEventListener('resize', () => { if (App.view) layoutHand(); });
+  window.addEventListener('resize', () => {
+    if (!App.view) return;
+    layoutHand();
+    layoutPlayedCards();
+  });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { Snd.unlock(); Bgm.poke(); }
   });
