@@ -2,5 +2,5 @@
     xmlns:tools="http://schemas.android.com/tools">
     <application android:networkSecurityConfig="@xml/video_test_network"
         android:label="Earo video test"
-        tools:replace="android:label" />
+        tools:replace="android:label,android:networkSecurityConfig" />
 </manifest>

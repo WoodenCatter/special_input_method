@@ -262,30 +262,36 @@ Trial 区间、任务区间、Ignore 区间、marker 兼容锚点、采样率、
 Windows：
 
 ```powershell
-.\gradlew.bat assembleDebug
-.\gradlew.bat testDebugUnitTest
+.\gradlew.bat :app:assembleProductionDebug
+.\gradlew.bat :app:testProductionDebugUnitTest
 ```
 
 macOS / Linux：
 
 ```bash
-./gradlew assembleDebug
-./gradlew testDebugUnitTest
+./gradlew :app:assembleProductionDebug
+./gradlew :app:testProductionDebugUnitTest
 ```
 
 Debug APK 输出：
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/apk/production/debug/app-production-debug.apk
 ```
 
 使用 ADB 安装：
 
 ```powershell
-adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r app\build\outputs\apk\production\debug\app-production-debug.apk
 ```
 
 也可以直接在 Android Studio 中选择物理设备并运行 `app` 配置。
+
+### 演示包与常用调试变体
+
+- 运行 gradlew.bat :app:assembleDemoDebug 生成 app/build/outputs/apk/demo/debug/app-demo-debug.apk。演示包独立安装，从首页「实时沟通」直达 T9，预测使用本地词库和 Rime。
+- 运行 gradlew.bat :app:assembleProductionDebug 生成正式应用 ID 的调试包。首页「实时沟通」进入联系人、文字及视频流程。联调仅在批准的测试环境使用合成账号。
+- 视频测试使用 videoTestDebug 和独立应用 ID，接入方式见 docs/patient-chat-v1.md。生活助手的模拟设备和 USB 调试见 docs/life-assistant.md。
 
 ### 基本使用
 
@@ -333,7 +339,7 @@ Auto Backup。卸载后恢复由上述服务器恢复流程负责，而不是依
 运行 JVM 单元测试：
 
 ```powershell
-.\gradlew.bat testDebugUnitTest
+.\gradlew.bat :app:testProductionDebugUnitTest
 ```
 
 当前测试覆盖：

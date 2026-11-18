@@ -5,7 +5,9 @@ enum class AppDestination {
     ENTERTAINMENT,
     INPUT_METHOD,
     COMMUNICATION,
+    LIFE_ASSISTANT,
     ASYNC_MAZE,
+    SNAKE_CLIMB,
     TV,
     MUSIC,
     APP_SETTINGS,
@@ -22,7 +24,11 @@ enum class HomeModule(
     APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
     REALTIME_COMMUNICATION(AppDestination.COMMUNICATION, "实时沟通"),
     ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
-    HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false)
+    LIFE_ASSISTANT(AppDestination.LIFE_ASSISTANT, "生活助手"),
+    HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false);
+
+    fun resolveDestination(demoCommunication: Boolean): AppDestination =
+        if (this == REALTIME_COMMUNICATION && demoCommunication) AppDestination.INPUT_METHOD else destination
 }
 
 data class HomeSelectionState(
@@ -56,6 +62,7 @@ data class HomeSelectionState(
 
 enum class EntertainmentHubModule(val destination: AppDestination, val displayName: String, val symbol: String) {
     MAZE(AppDestination.ASYNC_MAZE, "迷宫游戏", "▦"),
+    SNAKE_CLIMB(AppDestination.SNAKE_CLIMB, "向上贪吃蛇", "蛇"),
     TELEVISION(AppDestination.TV, "看电视", "视"),
     MUSIC(AppDestination.MUSIC, "音乐", "♪"),
     BACK(AppDestination.HOME, "返回主页", "←")

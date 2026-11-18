@@ -56,6 +56,13 @@ import com.example.input_ds.personalization.UserModelManager
 import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.example.input_ds.game.SnakeAction
+import com.example.input_ds.game.SnakeClimbGame
+import com.example.input_ds.ui.assistant.AssistantInputBus
+import com.example.input_ds.ui.assistant.AssistantScreen
+import com.example.input_ds.ui.components.FloatingEegSignalWindow
+import com.example.input_ds.ui.game.SnakeClimbScreen
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.components.MainScreen
 import com.example.input_ds.ui.communication.CommunicationScreen
@@ -86,6 +93,8 @@ class MainActivity : ComponentActivity() {
     private var attemptedModelIdentity: String? = null
 
     private val destination = mutableStateOf(AppDestination.HOME)
+    private val snakeState = mutableStateOf(SnakeClimbGame.create())
+    private var assistantMediaId: String? = null
     private val homeSelection = mutableStateOf(HomeSelectionState())
     private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
     private val mazeState = mutableStateOf(
@@ -123,7 +132,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             InputDSTheme {
-                val vm: InputMethodViewModel = viewModel()
+                val vm: InputMethodViewModel = viewModel {
+                    InputMethodViewModel(application, remotePredictionsEnabled = !BuildConfig.DEMO_COMMUNICATION)
+                }
                 val chat: CommunicationViewModel = viewModel()
                 inputViewModel = vm
                 communicationViewModel = chat
@@ -132,6 +143,7 @@ class MainActivity : ComponentActivity() {
                 val video by chat.video.state.collectAsState()
                 val call = video.call
                 LaunchedEffect(chat, lifecycle) {
+                    if (BuildConfig.DEMO_COMMUNICATION) return@LaunchedEffect
                     lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                         chat.video.foreground(true)
                         try {
@@ -208,6 +220,11 @@ class MainActivity : ComponentActivity() {
                         PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)),
                             ::askVideoPermissions)
                     }
+                    FloatingEegSignalWindow(
+                        bleManager = bleManager,
+                        visible = floatingBallVisible.value && call == null &&
+                            destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB)
+                    )
                     FloatingControlBall(
                         visible = floatingBallVisible.value,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
@@ -221,6 +238,8 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent(vm: InputMethodViewModel, chat: CommunicationViewModel, bleState: NaoyunBleManager.State) {
+        val assistantState = rememberSaveableStateHolder()
+        val inputState by vm.state.collectAsState()
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
@@ -232,8 +251,8 @@ class MainActivity : ComponentActivity() {
                 val parent = when (destination.value) {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
-                    AppDestination.TV,
-                    AppDestination.MUSIC -> AppDestination.ENTERTAINMENT
+                    AppDestination.SNAKE_CLIMB -> AppDestination.ENTERTAINMENT
+                    AppDestination.TV, AppDestination.MUSIC -> mediaParent()
                     else -> AppDestination.HOME
                 }
                 navigateTo(parent)
@@ -244,7 +263,7 @@ class MainActivity : ComponentActivity() {
             AppDestination.HOME -> HomeScreen(
                 selection = homeSelection.value,
                 scanMode = scanMode.value,
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 bleManager = bleManager,
                 onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
@@ -261,7 +280,7 @@ class MainActivity : ComponentActivity() {
             AppDestination.ENTERTAINMENT -> EntertainmentScreen(
                 selection = entertainmentSelection.value,
                 scanMode = scanMode.value,
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 onSelect = { module ->
                     entertainmentSelection.value = entertainmentSelection.value.copy(
                         selectedIndex = EntertainmentHubModule.entries.indexOf(module)
@@ -281,6 +300,24 @@ class MainActivity : ComponentActivity() {
                 CommunicationScreen(chat, vm) { navigateTo(AppDestination.HOME) }
             }
 
+            AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
+                AssistantScreen(
+                    scanIntervalMs = inputState.scanIntervalMs,
+                    onBack = { navigateTo(AppDestination.HOME) },
+                    onOpenMedia = { target, id ->
+                        assistantMediaId = id
+                        navigateTo(target)
+                    }
+                )
+            }
+
+            AppDestination.SNAKE_CLIMB -> SnakeClimbScreen(
+                state = snakeState.value,
+                moveIntervalMs = inputState.scanIntervalMs,
+                onAction = ::applySnakeAction,
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+            )
+
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
                 controlStatus = bciStatus.value,
@@ -291,19 +328,21 @@ class MainActivity : ComponentActivity() {
             )
 
             AppDestination.TV -> TvScreen(
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+                onBack = { navigateTo(mediaParent()) },
+                initialChannelId = assistantMediaId
             )
 
             AppDestination.MUSIC -> MusicScreen(
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+                onBack = { navigateTo(mediaParent()) },
+                initialTrackId = assistantMediaId
             )
 
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
                 onScanModeChange = { mode ->
                     scanMode.value = ScanSettings.writeMode(applicationContext, mode)
@@ -320,7 +359,7 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.SETTINGS -> CollectionScreen(
                 bleManager = bleManager,
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 onScanIntervalChange = vm::setScanInterval,
                 onTrainingActivated = {
                     restartBciController()
@@ -364,12 +403,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterModule(module: HomeModule) {
-        when (module) {
-            HomeModule.APP_SETTINGS -> navigateTo(AppDestination.APP_SETTINGS)
-            HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.COMMUNICATION)
-            HomeModule.ENTERTAINMENT -> navigateTo(AppDestination.ENTERTAINMENT)
-            HomeModule.HEADSET_SETTINGS -> navigateTo(AppDestination.SETTINGS)
-        }
+        navigateTo(module.resolveDestination(BuildConfig.DEMO_COMMUNICATION))
+    }
+
+    private fun mediaParent(): AppDestination =
+        if (assistantMediaId == null) AppDestination.ENTERTAINMENT else AppDestination.LIFE_ASSISTANT
+
+    private fun applySnakeAction(action: SnakeAction) {
+        val next = SnakeClimbGame.applyAction(snakeState.value, action)
+        snakeState.value = next
+        if (next.exitRequested) navigateTo(AppDestination.ENTERTAINMENT)
     }
 
     private fun enterEntertainmentModule(module: EntertainmentHubModule) {
@@ -379,6 +422,10 @@ class MainActivity : ComponentActivity() {
                 if (bleManager.state.value == NaoyunBleManager.State.READY) restartBciController()
                 navigateTo(AppDestination.ASYNC_MAZE)
             }
+            EntertainmentHubModule.SNAKE_CLIMB -> {
+                snakeState.value = SnakeClimbGame.create()
+                navigateTo(AppDestination.SNAKE_CLIMB)
+            }
             EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
             EntertainmentHubModule.MUSIC -> navigateTo(AppDestination.MUSIC)
             EntertainmentHubModule.BACK -> navigateTo(AppDestination.HOME)
@@ -386,6 +433,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun navigateTo(target: AppDestination) {
+        if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
         destination.value = target
         inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
         updateBciCommandDelivery()
@@ -455,6 +503,13 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
+            AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
+            AppDestination.SNAKE_CLIMB -> when (signal) {
+                ControlSignal.LEFT_LOOK -> applySnakeAction(SnakeAction.LOOK_LEFT)
+                ControlSignal.RIGHT_LOOK -> applySnakeAction(SnakeAction.LOOK_RIGHT)
+                ControlSignal.BITE -> applySnakeAction(SnakeAction.BITE)
+                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
             AppDestination.COMMUNICATION -> {
                 val chat = communicationViewModel ?: return
                 if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&

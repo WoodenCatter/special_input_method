@@ -193,6 +193,7 @@ private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Uni
         HomeModule.APP_SETTINGS -> "⚙"
         HomeModule.REALTIME_COMMUNICATION -> "◌"
         HomeModule.ENTERTAINMENT -> "◈"
+        HomeModule.LIFE_ASSISTANT -> "✧"
         HomeModule.HEADSET_SETTINGS -> "⌁"
     }
     SelectableGlassPanel(

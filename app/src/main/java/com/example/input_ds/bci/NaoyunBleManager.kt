@@ -285,10 +285,13 @@ class NaoyunBleManager(val context: Context) {
             }
             reconnectAttempts = 0
             streamRecoveryAttempts = 0
-            _connectedDevice.value = ConnectedDevice(
-                device.name ?: device.address,
-                device.address
-            )
+            val deviceName = try {
+                device.name
+            } catch (_: SecurityException) {
+                _deviceInfo.value = "请授予蓝牙连接权限后重试"
+                return@post
+            }
+            _connectedDevice.value = ConnectedDevice(deviceName ?: device.address, device.address)
             _state.value = State.RECOVERING
             _deviceInfo.value = "采集等待中，正在重新连接耳机…"
             connectInternal(device)

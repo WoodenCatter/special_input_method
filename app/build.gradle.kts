@@ -31,6 +31,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("boolean", "DEMO_COMMUNICATION", "false")
         buildConfigField("String", "BACKNET_URL", "\"https://smu-brain.online\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -40,6 +41,12 @@ android {
     productFlavors {
         create("production") {
             dimension = "server"
+        }
+        create("demo") {
+            dimension = "server"
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-demo"
+            buildConfigField("boolean", "DEMO_COMMUNICATION", "true")
         }
         create("videoTest") {
             dimension = "server"

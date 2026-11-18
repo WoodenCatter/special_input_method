@@ -4,7 +4,10 @@ import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.webkit.CookieManager
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import androidx.activity.compose.BackHandler
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -66,7 +69,7 @@ import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.auroraBackground
 import kotlinx.coroutines.delay
 
-private data class TvChannel(
+internal data class TvChannel(
     val id: String,
     val name: String,
     val group: String,
@@ -86,7 +89,7 @@ private fun unavailableCctvChannel(
     officialPage: String
 ) = TvChannel(id, name, "央视", listOf(officialPage), temporarilyUnavailable = true)
 
-private val TV_CHANNELS = listOf(
+internal val TV_CHANNELS = listOf(
     cctvChannel("cctv1", "CCTV-1 综合", "https://tv.cctv.com/live/cctv1/"),
     cctvChannel("cctv2", "CCTV-2 财经", "https://tv.cctv.com/live/cctv2/"),
     unavailableCctvChannel("cctv3", "CCTV-3 综艺", "https://tv.cctv.com/live/cctv3/"),
@@ -113,9 +116,15 @@ private val TV_OPERATION_LABELS = listOf("继续观看", "重新加载", "退出
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
-    var currentIndex by remember { mutableIntStateOf(0) }
-    var highlightedChannelIndex by remember { mutableIntStateOf(0) }
+fun TvScreen(
+    scanIntervalMs: Long,
+    scanMode: ScanMode,
+    onBack: () -> Unit,
+    initialChannelId: String? = null
+) {
+    val initialIndex = TV_CHANNELS.indexOfFirst { it.id == initialChannelId }.coerceAtLeast(0)
+    var currentIndex by remember(initialChannelId) { mutableIntStateOf(initialIndex) }
+    var highlightedChannelIndex by remember(initialChannelId) { mutableIntStateOf(initialIndex) }
     var channelDirection by remember { mutableIntStateOf(1) }
     var operationVisible by remember { mutableStateOf(false) }
     var operationIndex by remember { mutableIntStateOf(0) }
@@ -125,15 +134,27 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
+    var fullscreenView by remember { mutableStateOf<View?>(null) }
+    var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     val currentOnBack by rememberUpdatedState(onBack)
     val listState = rememberLazyListState()
     val channel = TV_CHANNELS[currentIndex]
     val officialPage = channel.officialPages[pageVariantIndex.coerceAtMost(channel.officialPages.lastIndex)]
 
+    fun exitFullscreen() {
+        val callback = fullscreenCallback
+        fullscreenCallback = null
+        fullscreenView = null
+        callback?.onCustomViewHidden()
+    }
+
+    BackHandler(enabled = fullscreenView != null, onBack = ::exitFullscreen)
+
     fun selectChannel(index: Int) {
         val selectedIndex = (index + TV_CHANNELS.size) % TV_CHANNELS.size
         highlightedChannelIndex = selectedIndex
         if (selectedIndex == currentIndex) return
+        exitFullscreen()
         currentIndex = selectedIndex
         pageVariantIndex = 0
         loading = !TV_CHANNELS[selectedIndex].temporarilyUnavailable
@@ -155,7 +176,9 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
     }
 
     val signalHandler = rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
-        if (operationVisible) {
+        if (fullscreenView != null) {
+            if (signal == ControlSignal.BITE) exitFullscreen()
+        } else if (operationVisible) {
             when (signal) {
                 ControlSignal.LEFT_LOOK -> {
                     operationDirection = -1
@@ -197,6 +220,7 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
         TvInputBus.attach(signalSink)
         onDispose {
             TvInputBus.detach(signalSink)
+            exitFullscreen()
             activeWebView?.apply {
                 stopLoading()
                 loadUrl("about:blank")
@@ -216,8 +240,8 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(scanMode, operationVisible, highlightedChannelIndex, channelDirection, scanIntervalMs) {
-        if (scanMode == ScanMode.AUTO && !operationVisible) {
+    LaunchedEffect(scanMode, operationVisible, fullscreenView, highlightedChannelIndex, channelDirection, scanIntervalMs) {
+        if (scanMode == ScanMode.AUTO && !operationVisible && fullscreenView == null) {
             delay(scanIntervalMs.coerceIn(1_100L, 3_000L))
             highlightedChannelIndex = (highlightedChannelIndex + channelDirection + TV_CHANNELS.size) % TV_CHANNELS.size
         }
@@ -314,7 +338,19 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
                                 }
                                 CookieManager.getInstance().setAcceptCookie(true)
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                                webChromeClient = WebChromeClient()
+                                webChromeClient = object : WebChromeClient() {
+                                override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                                    if (fullscreenView != null) {
+                                        callback.onCustomViewHidden()
+                                        return
+                                    }
+                                    (view.parent as? ViewGroup)?.removeView(view)
+                                    fullscreenCallback = callback
+                                    fullscreenView = view
+                                }
+
+                                override fun onHideCustomView() = exitFullscreen()
+                            }
                                 webViewClient = OfficialTvWebViewClient(
                                     onStarted = {
                                         loading = true
@@ -420,7 +456,19 @@ fun TvScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
             }
         }
 
-        if (operationVisible) {
+        fullscreenView?.let { view ->
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+                Button(
+                    onClick = ::exitFullscreen,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                ) {
+                    Text("退出全屏")
+                }
+            }
+        }
+
+        if (operationVisible && fullscreenView == null) {
             TvOperationOverlay(
                 selectedIndex = operationIndex,
                 onSelect = ::executeOperation,

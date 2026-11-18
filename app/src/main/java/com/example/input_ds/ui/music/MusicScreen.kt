@@ -114,7 +114,12 @@ private val VOLUME_LABELS = listOf("减小音量", "增大音量", "返回音乐
 private val SETTINGS_LABELS = listOf("返回音乐", "删除音乐", "退出音乐")
 
 @Composable
-fun MusicScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
+fun MusicScreen(
+    scanIntervalMs: Long,
+    scanMode: ScanMode,
+    onBack: () -> Unit,
+    initialTrackId: String? = null
+) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
@@ -462,10 +467,13 @@ fun MusicScreen(scanIntervalMs: Long, scanMode: ScanMode, onBack: () -> Unit) {
         tracks = playbackStore.orderTracks(library.initializeAndLoadTracks())
         playbackStore.saveTrackOrder(tracks)
         shuffleOrder = playbackStore.reconcileShuffleOrder(tracks)
-        val savedTrackId = playbackStore.lastTrackId()
-        val initialTrack = tracks.firstOrNull { it.id == savedTrackId } ?: tracks.firstOrNull()
+        val initialTrack = if (initialTrackId != null) {
+            tracks.firstOrNull { it.id == initialTrackId }
+        } else {
+            tracks.firstOrNull { it.id == playbackStore.lastTrackId() } ?: tracks.firstOrNull()
+        }
         initialTrack?.let(::startTrack)
-        notice = null
+        notice = if (initialTrackId != null && initialTrack == null) "指定歌曲已不在本地曲库" else null
         while (true) {
             delay(500)
             player.refreshPosition()

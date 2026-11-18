@@ -231,7 +231,9 @@ fun SignalMonitorScreen(
 @SuppressLint("ViewConstructor")
 internal class EegStereoView(
     context: Context,
-    private val bleManager: NaoyunBleManager
+    private val bleManager: NaoyunBleManager,
+    private val refreshIntervalMs: Long = REFRESH_INTERVAL_MS,
+    private val compactMode: Boolean = false
 ) : View(context) {
     private val leftBuffer = EegScopePlotBuffer(BUFFER_SIZE)
     private val rightBuffer = EegScopePlotBuffer(BUFFER_SIZE)
@@ -300,9 +302,9 @@ internal class EegStereoView(
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            if (!refreshRunning || !isAttachedToWindow) return
+            if (!refreshRunning || !isAttachedToWindow || windowVisibility != VISIBLE) return
             requestVisibleWindow()
-            postDelayed(this, REFRESH_INTERVAL_MS)
+            postDelayed(this, refreshIntervalMs.coerceAtLeast(REFRESH_INTERVAL_MS))
         }
     }
 
@@ -318,6 +320,14 @@ internal class EegStereoView(
         refreshRunning = false
         removeCallbacks(refreshRunnable)
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        removeCallbacks(refreshRunnable)
+        if (visibility == VISIBLE && refreshRunning && isAttachedToWindow) {
+            post(refreshRunnable)
+        }
     }
 
     private fun resetPlot() {
@@ -371,8 +381,10 @@ internal class EegStereoView(
         canvas.drawText("L 左耳", 32f, 34f, leftNamePaint)
         canvas.drawCircle(138f, 27f, 5f, rightPaint)
         canvas.drawText("R 右耳", 152f, 34f, rightNamePaint)
-        val filterLabel = "1–45 Hz 带通"
-        canvas.drawText(filterLabel, width - statsPaint.measureText(filterLabel) - 16f, 33f, statsPaint)
+        if (!compactMode) {
+            val filterLabel = "1–45 Hz 带通"
+            canvas.drawText(filterLabel, width - statsPaint.measureText(filterLabel) - 16f, 33f, statsPaint)
+        }
 
         canvas.drawText("+200µV", 6f, plotTop + 24f, axisPaint)
         canvas.drawText("0", 6f, plotCenter + 8f, axisPaint)
