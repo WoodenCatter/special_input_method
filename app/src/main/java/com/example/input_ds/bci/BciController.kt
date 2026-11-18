@@ -122,9 +122,21 @@ class BciController(
             } else {
                 AsyncCalibrationManager.loadForBuiltInModel(modelInference!!.inputPoints)
             }
-            resolvedCalibration.also {
+            val modelThresholds = modelInference!!.modelCalibration
+            val effectiveCalibration = if (modelInference!!.protocol == ClassificationProtocol.FOUR_CLASS &&
+                modelInference!!.loadedFromActiveModel && modelThresholds != null
+            ) resolvedCalibration.copy(
+                directionMinStdUv = modelThresholds.first,
+                biteMinStdUv = modelThresholds.second,
+                isSessionCalibrated = true,
+                source = "模型训练集个人校准"
+            ) else resolvedCalibration
+            effectiveCalibration.also {
                 require(it.protocol == modelInference!!.protocol) {
                     "模型协议 ${modelInference!!.protocol.wireName} 与校准协议 ${it.protocol.wireName} 不一致"
+                }
+                if (it.protocol == ClassificationProtocol.FOUR_CLASS) {
+                    require(modelThresholds != null) { "四分类模型缺少训练集个人校准" }
                 }
             }
         }.getOrElse { error ->
@@ -252,7 +264,9 @@ class BciController(
                     nextWindowEndUs = scheduledEndUs
                     fourDetector?.reset()
                     sixDetector?.reset()
+                    bleManager.markConsumerDiscontinuity("推理积压")
                     Log.w(TAG, "推理积压，跳过 $skippedSteps 个步长并清空时序证据")
+                    continue
                 }
                 val rawStereo = bleManager.alignedWindow(
                     scheduledEndUs - windowDurationUs,
@@ -263,14 +277,26 @@ class BciController(
                     nextWindowEndUs = scheduledEndUs + strideDurationUs
                     fourDetector?.reset()
                     sixDetector?.reset()
+                    bleManager.markConsumerDiscontinuity("双耳窗口不可用")
                     Log.w(TAG, "固定步长窗口不可用，清空时序证据 endUs=$scheduledEndUs")
                     continue
                 }
                 nextWindowEndUs = scheduledEndUs + strideDurationUs
+                if (!bleManager.isControlStreamFresh() ||
+                    SystemClock.elapsedRealtimeNanos() / 1_000L - rawStereo.endTimeUs > 500_000L
+                ) {
+                    bleManager.markConsumerDiscontinuity("控制窗口过期或双耳失效")
+                    fourDetector?.reset()
+                    sixDetector?.reset()
+                    continue
+                }
                 val rawLeft = rawStereo.left
                 val rawRight = rawStereo.right
                 if (rawLeft.size != modelPoints || rawRight.size != modelPoints) {
                     _status.value = "异步窗口点数不足，已跳过"
+                    bleManager.markConsumerDiscontinuity("异步窗口点数不足")
+                    fourDetector?.reset()
+                    sixDetector?.reset()
                     continue
                 }
                 val inferenceStarted = SystemClock.elapsedRealtime()
@@ -282,15 +308,27 @@ class BciController(
                 )
                 if (processed == null) {
                     _status.value = "异步窗口预处理失败，已跳过"
+                    bleManager.markConsumerDiscontinuity("异步窗口预处理失败")
+                    fourDetector?.reset()
+                    sixDetector?.reset()
                     continue
                 }
                 val result = modelInference?.predictResult(processed)
                 if (result == null) {
                     _status.value = "异步推理失败：${modelInference?.lastError ?: "未知错误"}"
+                    bleManager.markConsumerDiscontinuity("异步推理失败")
+                    fourDetector?.reset()
+                    sixDetector?.reset()
                     continue
                 }
                 val currentAcquisitionEpoch = bleManager.synchronizedDataEpoch.value
-                if (!commandGate.isCurrent(windowEpoch, currentAcquisitionEpoch)) {
+                if (!commandGate.isCurrent(windowEpoch, currentAcquisitionEpoch) ||
+                    !bleManager.isControlStreamFresh() ||
+                    SystemClock.elapsedRealtimeNanos() / 1_000L - rawStereo.endTimeUs > 500_000L
+                ) {
+                    bleManager.markConsumerDiscontinuity("推理结果过期或双耳失效")
+                    fourDetector?.reset()
+                    sixDetector?.reset()
                     Log.d(TAG, "inference epoch changed; discard endUs=${rawStereo.endTimeUs}")
                     continue
                 }
@@ -341,7 +379,9 @@ class BciController(
                 eventClass?.toSignal(protocol)?.let { signal ->
                     withContext(Dispatchers.Main.immediate) {
                         if (
-                            controlActive && commandGate.isCurrent(
+                            controlActive && bleManager.isControlStreamFresh() &&
+                                SystemClock.elapsedRealtimeNanos() / 1_000L - rawStereo.endTimeUs <= 500_000L &&
+                                commandGate.isCurrent(
                                 windowEpoch,
                                 bleManager.synchronizedDataEpoch.value
                             )

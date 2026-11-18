@@ -108,7 +108,7 @@ fun CollectionScreen(
     var serverUserId by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var roundsText by remember { mutableStateOf("20") }
-    var trainingEpochsText by remember { mutableStateOf("50") }
+    var trainingEpochsText by remember { mutableStateOf("20") }
     var actionSecondsText by remember { mutableStateOf("1") }
     var scanIntervalText by remember(scanIntervalMs) { mutableStateOf(scanIntervalMs.toString()) }
     var scanIntervalError by remember { mutableStateOf<String?>(null) }
@@ -639,14 +639,16 @@ fun CollectionScreen(
                                 onValueChange = { roundsText = it.filter(Char::isDigit).take(3) },
                                 label = "采样轮次",
                                 modifier = Modifier.weight(1f),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                supportingText = "4–100"
                             )
                             AuroraTextField(
                                 value = trainingEpochsText,
                                 onValueChange = { trainingEpochsText = it.filter(Char::isDigit).take(2) },
                                 label = "训练轮次",
                                 modifier = Modifier.weight(1f),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                supportingText = "1–50"
                             )
                             AuroraTextField(
                                 value = actionSecondsText,

@@ -3,6 +3,7 @@ package com.example.input_ds
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -22,7 +23,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.input_ds.communication.videoPermissions
+import com.example.input_ds.ui.communication.PadVideoScreen
 import com.example.input_ds.bci.BciController
 import com.example.input_ds.bci.NaoyunBleManager
 import com.example.input_ds.data.CharacterDictionary
@@ -72,6 +77,12 @@ class MainActivity : ComponentActivity() {
     private var bciController: BciController? = null
     private var inputViewModel: InputMethodViewModel? = null
     private var communicationViewModel: CommunicationViewModel? = null
+    private var videoSelection by mutableStateOf(0)
+    private var videoScanDirection by mutableStateOf(1)
+    private val videoPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { communicationViewModel?.video?.permissionResult() }
+    private fun askVideoPermissions() = videoPermissionLauncher.launch(videoPermissions)
     private var attemptedModelIdentity: String? = null
 
     private val destination = mutableStateOf(AppDestination.HOME)
@@ -116,6 +127,51 @@ class MainActivity : ComponentActivity() {
                 val chat: CommunicationViewModel = viewModel()
                 inputViewModel = vm
                 communicationViewModel = chat
+                chat.requestVideoPermissions = ::askVideoPermissions
+                val lifecycle = this@MainActivity.lifecycle
+                val video by chat.video.state.collectAsState()
+                val call = video.call
+                LaunchedEffect(chat, lifecycle) {
+                    lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        chat.video.foreground(true)
+                        try {
+                            var previous: String? = null
+                            while (true) {
+                                val repository = PersonalizationRepository(applicationContext)
+                                val user = repository.activeUser()
+                                val binding = repository.deviceServerBinding()
+                                val identity = "${binding?.serverUserId}:${user?.profileId}:${user?.profileEnabled}"
+                                if (identity != previous) {
+                                    if (previous != null) vm.clearChatInput()
+                                    previous = identity
+                                    chat.open()
+                                }
+                                delay(1_000)
+                            }
+                        } finally {
+                            chat.video.foreground(false)
+                        }
+                    }
+                }
+                LaunchedEffect(chat) {
+                    chat.videoNotices.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+                }
+                LaunchedEffect(call?.id, call?.status, video.confirmEnd) {
+                    videoSelection = 0
+                    videoScanDirection = 1
+                    updateBciCommandDelivery()
+                }
+                LaunchedEffect(call?.id, scanMode.value) {
+                    if (call != null && scanMode.value == ScanMode.AUTO) {
+                        while (true) {
+                            delay(ScanSettings.read(applicationContext))
+                            val actions = chat.video.actions(::askVideoPermissions)
+                            if (actions.isNotEmpty()) {
+                                videoSelection = (videoSelection + videoScanDirection).mod(actions.size)
+                            }
+                        }
+                    }
+                }
                 LaunchedEffect(vm) { vm.setStandaloneInputActive(false) }
                 val bleState by bleManager.state.collectAsState()
 
@@ -147,6 +203,11 @@ class MainActivity : ComponentActivity() {
 
                 Box(Modifier.fillMaxSize()) {
                     AppContent(vm = vm, chat = chat, bleState = bleState)
+                    if (call != null) {
+                        val actions = chat.video.actions(::askVideoPermissions)
+                        PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)),
+                            ::askVideoPermissions)
+                    }
                     FloatingControlBall(
                         visible = floatingBallVisible.value,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
@@ -214,20 +275,10 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
             AppDestination.COMMUNICATION -> {
-                LaunchedEffect(Unit) {
-                    chat.open()
-                    try {
-                        val initialRepository = PersonalizationRepository(applicationContext)
-                        var identity = "${initialRepository.deviceServerBinding()?.serverUserId}:${initialRepository.activeUser()?.profileId}"
-                        while (true) {
-                            delay(1_000)
-                            val repository = PersonalizationRepository(applicationContext)
-                            val current = "${repository.deviceServerBinding()?.serverUserId}:${repository.activeUser()?.profileId}"
-                            if (current != identity) { identity = current; chat.open(); vm.clearChatInput() }
-                        }
-                    } finally { chat.close(); vm.setChatAction(null) }
+                androidx.compose.runtime.DisposableEffect(vm) {
+                    onDispose { vm.setChatAction(null) }
                 }
-                CommunicationScreen(chat, vm) { chat.close(); navigateTo(AppDestination.HOME) }
+                CommunicationScreen(chat, vm) { navigateTo(AppDestination.HOME) }
             }
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
@@ -355,21 +406,37 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateBciCommandDelivery() {
-        val targetAcceptsCommands = destination.value != AppDestination.DEVICE_STATUS &&
-            destination.value != AppDestination.COLLECTION &&
-            destination.value != AppDestination.SETTINGS
+        val targetAcceptsCommands = communicationViewModel?.video?.state?.value?.call != null ||
+            (destination.value != AppDestination.DEVICE_STATUS &&
+                destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS)
         bciController?.setCommandDeliveryEnabled(
             headsetControlEnabled.value && targetAcceptsCommands
         )
     }
 
     private fun routeHeadsetSignal(signal: ControlSignal) {
-        if (headsetControlEnabled.value && destination.value != AppDestination.DEVICE_STATUS &&
-            destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS
+        val inCall = communicationViewModel?.video?.state?.value?.call != null
+        if (headsetControlEnabled.value && (inCall || (destination.value != AppDestination.DEVICE_STATUS &&
+                destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS))
         ) routeSignal(signal)
     }
 
     private fun routeSignal(signal: ControlSignal) {
+        val video = communicationViewModel?.video
+        if (video?.state?.value?.call != null) {
+            val actions = video.actions(::askVideoPermissions)
+            if (actions.isEmpty() || video.state.value.pending) return
+            when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    if (scanMode.value == ScanMode.AUTO) videoScanDirection = step
+                    else videoSelection = (videoSelection + step).mod(actions.size)
+                }
+                ControlSignal.BITE -> actions[videoSelection.coerceIn(0, actions.lastIndex)].invoke()
+                else -> Unit
+            }
+            return
+        }
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
                 ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.onDirection(-1, scanMode.value)
@@ -515,6 +582,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        communicationViewModel?.requestVideoPermissions = {}
         stopBciController()
         bleManager.disconnect()
         super.onDestroy()

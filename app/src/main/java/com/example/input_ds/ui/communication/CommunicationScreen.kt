@@ -108,7 +108,7 @@ fun CommunicationScreen(chat: CommunicationViewModel, input: InputMethodViewMode
                         Text(state.contact?.name ?: "通讯方式", style = MaterialTheme.typography.headlineSmall)
                         Spacer(Modifier.weight(1f))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            listOf("返回", "输入法", "视频通话\n即将开放").forEachIndexed { index, label ->
+                            listOf("返回", "输入法", "视频通话").forEachIndexed { index, label ->
                                 val selected = index == state.actionIndex
                                 Button(onClick = { chat.chooseAction(index) }, modifier = Modifier
                                     .width(150.dp).height(110.dp)

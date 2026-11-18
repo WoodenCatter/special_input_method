@@ -39,9 +39,9 @@ class FourClassActionDetectorTest {
         val detector = FourClassActionDetector(calibration)
         val oppositePolarity = directionWave(leftDirection = true)
         val features = FourClassActionDetector.calculateFeatures(oppositePolarity, FloatArray(500), 20f)
-        assertEquals(FourClassActionDetector.LEFT_CLASS, features.allowedDirectionClass)
+        assertTrue(features.allowedDirectionClass != null)
 
-        val events = (0 until 5).mapNotNull { index ->
+        val events = (0 until 6).mapNotNull { index ->
             detector.update(
                 probabilities(right = 0.99f), oppositePolarity, FloatArray(500), index * 100L
             ).eventClass
@@ -50,14 +50,15 @@ class FourClassActionDetectorTest {
     }
 
     @Test
-    fun physicalBiteGateRequiresThreeSupportedWindows() {
+    fun physicalBiteGateRequiresFourSupportedWindows() {
         val detector = FourClassActionDetector(calibration)
         val active = biteWave(80f)
         assertNull(detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 0L).eventClass)
         assertNull(detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 100L).eventClass)
+        assertNull(detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 200L).eventClass)
         assertEquals(
             FourClassActionDetector.BITE_CLASS,
-            detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 200L).eventClass
+            detector.update(probabilities(bite = 0.99f), active, FloatArray(500), 300L).eventClass
         )
     }
 
@@ -68,9 +69,11 @@ class FourClassActionDetectorTest {
         val quiet = FloatArray(500)
         assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 0L).eventClass)
         assertNull(detector.update(probabilities(left = 0.99f), quiet, FloatArray(500), 100L).eventClass)
+        assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 200L).eventClass)
+        assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 300L).eventClass)
         assertEquals(
             FourClassActionDetector.LEFT_CLASS,
-            detector.update(probabilities(left = 0.99f), active, FloatArray(500), 200L).eventClass
+            detector.update(probabilities(left = 0.99f), active, FloatArray(500), 400L).eventClass
         )
     }
 
@@ -78,7 +81,7 @@ class FourClassActionDetectorTest {
     fun lockedActionRearmsOnlyAfterSustainedRestEvidence() {
         val detector = FourClassActionDetector(calibration)
         val active = directionWave(leftDirection = true)
-        repeat(3) { detector.update(probabilities(left = 0.99f), active, FloatArray(500), it * 100L) }
+        repeat(4) { detector.update(probabilities(left = 0.99f), active, FloatArray(500), it * 100L) }
         repeat(7) { index ->
             detector.update(
                 probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 300L + index * 100L

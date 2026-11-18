@@ -26,3 +26,8 @@
 6. 视频通话入口只显示即将开放，不请求摄像头或麦克风权限。
 
 最终 Gradle 同步、`./gradlew.bat assembleDebug`、`./gradlew.bat testDebugUnitTest` 及真机双端联调由项目维护者执行，本次未宣称这些步骤已通过。
+
+
+## 视频测试配置
+
+videoTestDebug 使用独立应用 ID。将测试基址写入仓库根目录的 .video-test/base-url.txt。如测试服务器只支持 HTTP，将仅允许该测试主机的 Android 网络安全配置写到 .video-test/res/xml/video_test_network.xml，并使用专用测试凭据。该目录只用于本地调试，已由 Git 忽略。未配置时，视频测试包使用不可解析的占位基址。生产包仍使用原有 HTTPS 配置。

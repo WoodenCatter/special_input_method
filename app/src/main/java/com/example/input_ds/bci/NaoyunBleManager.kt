@@ -112,8 +112,8 @@ class NaoyunBleManager(val context: Context) {
     private var lastPairedDataTime = 0L
     private var lastPairedLeftSamples = 0L
     private var lastPairedRightSamples = 0L
-    private var lastLeftLeadOff: Int? = null
-    private var lastRightLeadOff: Int? = null
+    @Volatile private var lastLeftLeadOff: Int? = null
+    @Volatile private var lastRightLeadOff: Int? = null
     private val leftAssembler = EegPacketAssembler()
     private val rightAssembler = EegPacketAssembler()
     private val stereoAligner = EegStereoPacketAligner()
@@ -333,6 +333,14 @@ class NaoyunBleManager(val context: Context) {
                 "consumer discontinuity: $reason epoch=${_synchronizedDataEpoch.value}"
             )
         }
+    }
+
+    /** Control has a stricter one-second deadline than BLE transport recovery. */
+    fun isControlStreamFresh(nowMs: Long = android.os.SystemClock.elapsedRealtime()): Boolean {
+        val snapshot = streamLiveness.snapshot(nowMs)
+        return snapshot.leftAgeMs != null && snapshot.leftAgeMs < 1_000L &&
+            snapshot.rightAgeMs != null && snapshot.rightAgeMs < 1_000L &&
+            lastLeftLeadOff == 0 && lastRightLeadOff == 0
     }
 
     /** Preserves history while preventing windows from spanning a packet gap. */

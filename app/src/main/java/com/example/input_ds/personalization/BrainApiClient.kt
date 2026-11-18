@@ -464,7 +464,7 @@ class BrainApiClient(
             put("hyperparameters", JSONObject().apply {
                 put("label_names", JSONArray(session.labelNames))
                 put("epochs", session.trainingEpochs)
-                put("batch_size", 8)
+                put("batch_size", if (session.asyncTrials.isNotEmpty() && session.protocol == ClassificationProtocol.FOUR_CLASS) 32 else 8)
                 put("seed", 42)
                 put("device", "auto")
             })
@@ -587,6 +587,10 @@ class BrainApiClient(
                 put("evidence_mode", "support_confidence")
                 put("physical_support_required", AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED)
                 put("rest_reset_required", AsyncWindowPolicy.REST_RESET_REQUIRED)
+                put("rest_confidence_threshold", AsyncWindowPolicy.REST_CONFIDENCE_THRESHOLD.toDouble())
+                put("bite_threshold_scale", AsyncWindowPolicy.BITE_THRESHOLD_SCALE.toDouble())
+                put("direction_threshold_scale", AsyncWindowPolicy.DIRECTION_THRESHOLD_SCALE.toDouble())
+                put("direction_score_threshold", AsyncWindowPolicy.DIRECTION_SCORE_THRESHOLD.toDouble())
             })
         }
         put(
@@ -862,7 +866,7 @@ class BrainApiClient(
             ClassificationProtocol::fromWireName
         )?.toSet() ?: ClassificationProtocol.entries.toSet()
 
-        const val BASE_URL = "https://smu-brain.online"
+        const val BASE_URL = com.example.input_ds.BuildConfig.BACKNET_URL
         private val PROFILE_ID_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
         private const val CONNECT_TIMEOUT_MS = 20_000
         private const val READ_TIMEOUT_MS = 120_000

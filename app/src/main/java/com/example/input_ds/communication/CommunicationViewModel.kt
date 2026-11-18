@@ -44,6 +44,10 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
     private val prefs = application.getSharedPreferences("chat_cache_v1", 0)
     private val _state = MutableStateFlow(CommunicationState())
     val state: StateFlow<CommunicationState> = _state
+    private val _videoNotices = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
+    internal val videoNotices: kotlinx.coroutines.flow.SharedFlow<String> = _videoNotices
+    internal val video = VideoSession(application, viewModelScope, { _videoNotices.tryEmit(it) }, preferSpeaker = true)
+    internal var requestVideoPermissions: () -> Unit = {}
     private var api: ChatApi? = null
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
@@ -67,17 +71,19 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
         if (key == sessionKey) return
         close()
         sessionKey = key
-        api = ChatApi(binding, id)
+        val service = ChatApi(binding, id)
+        api = service
+        video.attach(key, service::callRequest) { state.value.myPrincipalId }
         restore(key)
         val current = ++generation
         _state.value = _state.value.copy(loading = true, pending = outbox.toList())
         viewModelScope.launch {
             try {
-                val me = withContext(Dispatchers.IO) { api!!.me() }
-                if (current == generation) _state.value = _state.value.copy(myPrincipalId = me)
+                val me = withContext(Dispatchers.IO) { service.me() }
+                if (current == generation) { _state.value = _state.value.copy(myPrincipalId = me); video.recover() }
             } catch (_: Exception) { /* Contact loading reports the authorization error. */ }
             refresh(current)
-            connect(current)
+            if (current == generation) connect(current)
         }
     }
 
@@ -141,7 +147,7 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                     withContext(Dispatchers.IO) {
                         socket = service.socket(object : WebSocketListener() {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
-                                viewModelScope.launch { if (current == generation) { _state.value = _state.value.copy(connected = true); refresh(current) } }
+                                viewModelScope.launch { if (current == generation) { _state.value = _state.value.copy(connected = true); video.recover(); refresh(current) } }
                             }
                             override fun onMessage(webSocket: WebSocket, text: String) {
                                 val event = runCatching { JSONObject(text) }.getOrNull() ?: return
@@ -154,13 +160,16 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                                             if (message != null) merge(message.conversationId, listOf(message))
                                         }
                                         "contacts.updated", "conversation.updated", "presence.changed" -> refresh(current)
+                                        else -> video.event(event)
                                     }
                                 }
                             }
                             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                                if (code == 1008) service.invalidateToken()
                                 viewModelScope.launch { if (current == generation) _state.value = _state.value.copy(connected = false) }
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                                if (response?.code == 401 || response?.code == 403) service.invalidateToken()
                                 viewModelScope.launch { if (current == generation) _state.value = _state.value.copy(connected = false) }
                             }
                         })
@@ -204,7 +213,10 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                     runCatching { withContext(Dispatchers.IO) { api?.markRead(id, seq) } }
                 }
             }
-            2 -> _state.value = _state.value.copy(error = "视频通话即将开放", stage = CommunicationStage.CONTACT_ACTIONS).also { startActionScan() }
+            2 -> {
+                _state.value.contact?.let { video.start(it.conversationId, it.name, requestVideoPermissions) }
+                startActionScan()
+            }
         }
     }
     fun back(): Boolean = when (_state.value.stage) {
@@ -321,6 +333,7 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
     }
     fun close() {
         generation++
+        video.clear()
         scanJob?.cancel(); reconnectJob?.cancel(); socket?.close(1000, "leaving")
         socket = null; api = null; sessionKey = null
         history.clear(); outbox.clear()

@@ -16,7 +16,11 @@ class ChatApi(private val binding: DeviceServerBinding, private val profileId: S
     private val client = OkHttpClient.Builder().readTimeout(20, TimeUnit.SECONDS).build()
     @Volatile private var token: String? = null
     private val jsonType = "application/json; charset=utf-8".toMediaType()
-    private val base = "https://smu-brain.online"
+    private val base = com.example.input_ds.BuildConfig.BACKNET_URL
+
+    fun invalidateToken() {
+        token = null
+    }
 
     private fun authorization(): String {
         token?.let { return it }
@@ -43,7 +47,7 @@ class ChatApi(private val binding: DeviceServerBinding, private val profileId: S
                 else -> builder.get().build()
             }
             client.newCall(request).execute().use { response ->
-                if (response.code == 401 && attempt == 0) { token = null; return@use }
+                if (response.code == 401 && attempt == 0) { invalidateToken(); return@use }
                 val text = response.body?.string().orEmpty()
                 if (!response.isSuccessful) throw IOException("聊天请求失败 (${response.code}): $text")
                 return text
@@ -73,9 +77,12 @@ class ChatApi(private val binding: DeviceServerBinding, private val profileId: S
     fun markRead(id: String, seq: Long) {
         request("/conversations/$id/read", "POST", JSONObject().put("last_read_seq", seq))
     }
+    internal fun callRequest(path: String, method: String, body: JSONObject?): JSONObject =
+        JSONObject(request(path, method, body))
+
     fun invitation(): JSONObject = JSONObject(request("/invitations", "POST"))
     fun socket(listener: WebSocketListener): WebSocket {
-        val request = Request.Builder().url("wss://smu-brain.online/api/v1/chat/ws")
+        val request = Request.Builder().url(base.replaceFirst("http", "ws") + "/api/v1/chat/ws")
             .header("Authorization", "Bearer ${authorization()}")
             .header("X-Chat-Profile-Id", profileId).build()
         return client.newWebSocket(request, listener)
