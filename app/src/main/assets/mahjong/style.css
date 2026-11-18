@@ -555,14 +555,3 @@ button { font: inherit; }
   .brand span { display: none; }
   .action-bar { left: 17%; right: 17%; }
 }
-
-
-.tile:not(.tile-back) {
-  color: #19342a;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
-}
-.tile.mini:not(.tile-back), .tile.small:not(.tile-back) {
-  font-size: clamp(8px, 1vw, 13px);
-}

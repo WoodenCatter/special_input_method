@@ -8,6 +8,8 @@ enum class AppDestination {
     LIFE_ASSISTANT,
     ASYNC_MAZE,
     SNAKE_CLIMB,
+    WIZARD_GAME,
+    CHINESE_CHESS,
     DOUDIZHU,
     MAHJONG,
     TV,
@@ -65,6 +67,8 @@ data class HomeSelectionState(
 enum class EntertainmentHubModule(val destination: AppDestination, val displayName: String, val symbol: String) {
     MAZE(AppDestination.ASYNC_MAZE, "迷宫游戏", "▦"),
     SNAKE_CLIMB(AppDestination.SNAKE_CLIMB, "向上贪吃蛇", "蛇"),
+    WIZARD_GAME(AppDestination.WIZARD_GAME, "魔法师游戏", "✦"),
+    CHINESE_CHESS(AppDestination.CHINESE_CHESS, "中国象棋", "楚"),
     DOUDIZHU(AppDestination.DOUDIZHU, "斗地主", "斗"),
     MAHJONG(AppDestination.MAHJONG, "打麻将", "麻"),
     TELEVISION(AppDestination.TV, "看电视", "视"),

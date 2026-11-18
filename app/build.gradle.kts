@@ -73,6 +73,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    androidResources {
+        noCompress += "pck"
+    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -91,6 +94,7 @@ androidComponents {
 }
 
 dependencies {
+    implementation("org.godotengine:godot:4.7.1.stable")
     implementation("io.livekit:livekit-android:2.30.0")
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)

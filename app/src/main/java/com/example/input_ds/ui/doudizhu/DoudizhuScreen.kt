@@ -123,7 +123,7 @@ private class OfflineDoudizhuWebViewClient(
                     "Cache-Control" to "no-store",
                     "Content-Security-Policy" to
                         "default-src 'self'; script-src 'self'; style-src 'self'; " +
-                        "img-src 'none'; media-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+                        "img-src 'self' data:; media-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
                 ),
                 assets.open(assetPath)
             )

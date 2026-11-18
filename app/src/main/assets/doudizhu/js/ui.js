@@ -387,7 +387,7 @@ function bciBack() {
 function bciSettingsCandidates() {
   return [
     { kind: 'return_selection', label: '返回选择' },
-    { kind: 'sound', label: `声音：${Snd.enabled ? '开' : '关'}` },
+    { kind: 'sound', label: `声音：${Snd.enabled && Bgm.enabled ? '开' : '关'}` },
     { kind: 'confirmation', label: `二次确认：${BciScan.confirmationEnabled ? '开' : '关'}` },
     { kind: 'restart', label: '重新开始' },
     { kind: 'exit', label: '退出斗地主' },
@@ -1474,15 +1474,17 @@ function requestAppExit() {
 
 function setCombinedSound(enabled) {
   if (Snd.enabled !== enabled) Snd.toggle();
+  if (Bgm.enabled !== enabled) Bgm.toggle();
   if (enabled) {
     Snd.unlock();
+    Bgm.poke();
   }
   $('#settings-sound-label').textContent = `声音：${enabled ? '开' : '关'}`;
   $('#btn-sound-toggle').classList.toggle('off', !enabled);
 }
 
 function toggleCombinedSound() {
-  setCombinedSound(!(Snd.enabled));
+  setCombinedSound(!(Snd.enabled && Bgm.enabled));
 }
 
 /* ---------------- navigation / cleanup ---------------- */
@@ -1526,7 +1528,7 @@ function boot() {
   setLang('zh');
   applyStaticTexts();
 
-  setCombinedSound(Snd.enabled);
+  setCombinedSound(Snd.enabled && Bgm.enabled);
   bciSetConfirmationEnabled(BciScan.confirmationEnabled);
   $('#btn-sound-toggle').onclick = toggleCombinedSound;
   $('#btn-settings').onclick = bciEnterSettings;
@@ -1537,7 +1539,7 @@ function boot() {
   $('#btn-bci-confirm').onclick = bciConfirmPending;
   $('#btn-bci-cancel').onclick = bciCancelConfirmation;
   // Browsers only allow audio after a user gesture; arm on any click.
-  document.addEventListener('pointerdown', () => { Snd.unlock(); });
+  document.addEventListener('pointerdown', () => { Snd.unlock(); Bgm.poke(); });
 
   bindHandDrag();
   window.addEventListener('resize', () => {
@@ -1546,7 +1548,7 @@ function boot() {
     layoutPlayedCards();
   });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { Snd.unlock(); }
+    if (!document.hidden) { Snd.unlock(); Bgm.poke(); }
   });
   $('#btn-chat').onclick = toggleChatPop;
 

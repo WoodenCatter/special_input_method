@@ -41,7 +41,23 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.example.input_ds.bci.NaoyunBleManager
 import com.example.input_ds.ui.bci.EegStereoView
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.roundToInt
+
+/** Shares the existing acquisition instance with the separate Godot activity. */
+internal object FloatingEegSignalSource {
+    private val currentManager = MutableStateFlow<NaoyunBleManager?>(null)
+    val manager: StateFlow<NaoyunBleManager?> = currentManager
+
+    fun attach(manager: NaoyunBleManager) {
+        currentManager.value = manager
+    }
+
+    fun detach(manager: NaoyunBleManager) {
+        if (currentManager.value === manager) currentManager.value = null
+    }
+}
 
 /** Passive signal monitor. Only its header captures touches for dragging. */
 @Composable

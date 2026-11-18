@@ -2,6 +2,7 @@ package com.example.input_ds
 
 import android.Manifest
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -57,7 +58,9 @@ import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.example.input_ds.chess.ChineseChessInputBus
 import com.example.input_ds.doudizhu.DoudizhuInputBus
+import com.example.input_ds.ui.chess.ChineseChessScreen
 import com.example.input_ds.mahjong.MahjongInputBus
 import com.example.input_ds.ui.doudizhu.DoudizhuScreen
 import com.example.input_ds.ui.mahjong.MahjongScreen
@@ -65,7 +68,10 @@ import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
 import com.example.input_ds.ui.assistant.AssistantInputBus
 import com.example.input_ds.ui.assistant.AssistantScreen
+import com.example.input_ds.ui.components.FloatingEegSignalSource
 import com.example.input_ds.ui.components.FloatingEegSignalWindow
+import com.example.input_ds.wizard.WizardGameActivity
+import com.example.input_ds.wizard.WizardGameInputBus
 import com.example.input_ds.ui.game.SnakeClimbScreen
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.components.MainScreen
@@ -93,6 +99,12 @@ class MainActivity : ComponentActivity() {
     private val videoPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { communicationViewModel?.video?.permissionResult() }
+    private val wizardGameLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        navigateTo(AppDestination.ENTERTAINMENT)
+    }
+
     private fun askVideoPermissions() = videoPermissionLauncher.launch(videoPermissions)
     private var attemptedModelIdentity: String? = null
 
@@ -127,6 +139,7 @@ class MainActivity : ComponentActivity() {
         LanguageModel.init(applicationContext)
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
+        FloatingEegSignalSource.attach(bleManager)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
         floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
         scanMode.value = ScanSettings.readMode(applicationContext)
@@ -256,6 +269,8 @@ class MainActivity : ComponentActivity() {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
                     AppDestination.SNAKE_CLIMB,
+                    AppDestination.WIZARD_GAME,
+                    AppDestination.CHINESE_CHESS,
                     AppDestination.DOUDIZHU,
                     AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
                     AppDestination.TV, AppDestination.MUSIC -> mediaParent()
@@ -315,6 +330,16 @@ class MainActivity : ComponentActivity() {
                         navigateTo(target)
                     }
                 )
+            }
+
+            AppDestination.WIZARD_GAME -> AuroraBackground {
+                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Text("魔法师游戏运行中…", style = MaterialTheme.typography.headlineMedium)
+                }
+            }
+
+            AppDestination.CHINESE_CHESS -> ChineseChessScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
             }
 
             AppDestination.DOUDIZHU -> DoudizhuScreen(inputState.scanIntervalMs) {
@@ -440,6 +465,11 @@ class MainActivity : ComponentActivity() {
                 snakeState.value = SnakeClimbGame.create()
                 navigateTo(AppDestination.SNAKE_CLIMB)
             }
+            EntertainmentHubModule.WIZARD_GAME -> {
+                navigateTo(AppDestination.WIZARD_GAME)
+                wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
+            }
+            EntertainmentHubModule.CHINESE_CHESS -> navigateTo(AppDestination.CHINESE_CHESS)
             EntertainmentHubModule.DOUDIZHU -> navigateTo(AppDestination.DOUDIZHU)
             EntertainmentHubModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
             EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
@@ -486,6 +516,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun routeSignal(signal: ControlSignal) {
+        if (destination.value == AppDestination.WIZARD_GAME) {
+            WizardGameInputBus.dispatch(signal)
+            return
+        }
         val video = communicationViewModel?.video
         if (video?.state?.value?.call != null) {
             val actions = video.actions(::askVideoPermissions)
@@ -520,6 +554,8 @@ class MainActivity : ComponentActivity() {
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
             AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
+            AppDestination.WIZARD_GAME -> Unit
+            AppDestination.CHINESE_CHESS -> ChineseChessInputBus.dispatch(signal)
             AppDestination.DOUDIZHU -> DoudizhuInputBus.dispatch(signal)
             AppDestination.MAHJONG -> MahjongInputBus.dispatch(signal)
             AppDestination.SNAKE_CLIMB -> when (signal) {
@@ -655,6 +691,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        FloatingEegSignalSource.detach(bleManager)
         communicationViewModel?.requestVideoPermissions = {}
         stopBciController()
         bleManager.disconnect()

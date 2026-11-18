@@ -10,6 +10,8 @@ class EntertainmentHubNavigationTest {
             listOf(
                 EntertainmentHubModule.MAZE,
                 EntertainmentHubModule.SNAKE_CLIMB,
+                EntertainmentHubModule.WIZARD_GAME,
+                EntertainmentHubModule.CHINESE_CHESS,
                 EntertainmentHubModule.DOUDIZHU,
                 EntertainmentHubModule.MAHJONG,
                 EntertainmentHubModule.TELEVISION,

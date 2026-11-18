@@ -7,52 +7,140 @@
   const SEAT_NAMES = ["你 · 东", "右家 · 南", "对家 · 西", "左家 · 北"];
   const CLAIM_PRIORITY = { hu: 4, kong: 3, pong: 3, chow: 2 };
   const AI_ACTION_DELAY_MS = 1500;
+  const TILE_AUDIO_FILES = [
+    "wan_1.wav", "wan_2.wav", "wan_3.wav", "wan_4.wav", "wan_5.wav", "wan_6.wav", "wan_7.wav", "wan_8.wav", "wan_9.wav",
+    "tong_1.wav", "tong_2.wav", "tong_3.wav", "tong_4.wav", "tong_5.wav", "tong_6.wav", "tong_7.wav", "tong_8.wav", "tong_9.wav",
+    "tiao_1.wav", "tiao_2.wav", "tiao_3.wav", "tiao_4.wav", "tiao_5.wav", "tiao_6.wav", "tiao_7.wav", "tiao_8.wav", "tiao_9.wav",
+    "wind_east.wav", "wind_south.wav", "wind_west.wav", "wind_north.wav",
+    "dragon_red.wav", "dragon_green.wav", "dragon_white.wav"
+  ];
+  const ACTION_AUDIO_FILES = {
+    chow: "action_chi.wav",
+    pong: "action_peng.wav",
+    kong: "action_gang.wav",
+    hu: "action_hu.wav",
+    zimo: "action_zimo.wav",
+    buhua: "action_buhua.wav"
+  };
+
+  // 0=玩家，1=右家，2=对家，3=左家。后续只需调整这里即可互换角色声音。
+  const SEAT_AUDIO_VOICES = [
+    "voice_03_youth_male",
+    "voice_01_deep_male",
+    "voice_04_dubbed_male",
+    "voice_05_entertainment_female"
+  ];
+  const NARRATOR_AUDIO_VOICE = "voice_02_female_narrator";
+
   class MahjongAudio {
     constructor() {
-      this.enabled = true;
-      try {
-        const saved = localStorage.getItem("mahjong_sound_enabled") ??
-          localStorage.getItem("mahjong_speech_enabled");
-        this.enabled = saved !== "false";
-      } catch (error) { /* Optional storage. */ }
+      this.enabled = this.loadEnabledSetting();
+      this.queue = [];
+      this.current = null;
+      this.generation = 0;
+      this.bgm = new Audio("audio/bgm/mahjong_bgm.mp3");
+      this.bgm.loop = true;
+      this.bgm.preload = "auto";
+      this.bgm.volume = 0.36;
     }
 
-    unlock() {
-      if (!this.enabled || !window.AudioContext) return;
-      this.context ??= new AudioContext();
-      this.context.resume().catch(() => {});
+    loadEnabledSetting() {
+      try {
+        const saved = window.localStorage.getItem("mahjong_sound_enabled");
+        if (saved !== null) return saved !== "false";
+        return window.localStorage.getItem("mahjong_speech_enabled") !== "false";
+      } catch (_error) {
+        return true;
+      }
+    }
+
+    setEnabled(enabled) {
+      this.enabled = Boolean(enabled);
+      try {
+        window.localStorage.setItem("mahjong_sound_enabled", this.enabled ? "true" : "false");
+        window.localStorage.setItem("mahjong_speech_enabled", this.enabled ? "true" : "false");
+      } catch (_error) {
+        // The game still works if a WebView blocks local storage.
+      }
+      if (this.enabled) {
+        this.startBgm(true);
+      } else {
+        this.stopAll();
+        this.stopBgm(true);
+      }
     }
 
     toggle() {
-      this.enabled = !this.enabled;
-      try {
-        localStorage.setItem("mahjong_sound_enabled", String(this.enabled));
-      } catch (error) { /* Optional storage. */ }
-      if (this.enabled) this.unlock(); else this.stopAll();
+      this.setEnabled(!this.enabled);
       return this.enabled;
     }
 
     stopAll() {
-      this.context?.suspend().catch(() => {});
+      this.generation += 1;
+      this.queue.length = 0;
+      if (this.current) {
+        this.current.pause();
+        this.current.removeAttribute("src");
+        this.current.load();
+        this.current = null;
+      }
     }
 
-    cue(frequency) {
-      this.unlock();
-      if (this.context?.state !== "running") return;
-      const oscillator = this.context.createOscillator();
-      const gain = this.context.createGain();
-      const now = this.context.currentTime;
-      oscillator.frequency.value = frequency;
-      oscillator.connect(gain).connect(this.context.destination);
-      gain.gain.setValueAtTime(0.05, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-      oscillator.start(now);
-      oscillator.stop(now + 0.12);
+    startBgm(restart) {
+      if (!this.enabled) return;
+      if (restart) {
+        try { this.bgm.currentTime = 0; } catch (_error) { }
+      }
+      const playResult = this.bgm.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(() => {});
     }
 
-    playTile(_seat, type) { this.cue(350 + (type % 9) * 25); }
-    playAction(_seat, action) { this.cue(action === "hu" || action === "zimo" ? 820 : 550); }
-    playSystem(event) { this.cue(event === "lose" ? 240 : 620); }
+    stopBgm(reset) {
+      this.bgm.pause();
+      if (reset) {
+        try { this.bgm.currentTime = 0; } catch (_error) { }
+      }
+    }
+
+    playTile(seat, tileType) {
+      const filename = TILE_AUDIO_FILES[tileType];
+      if (filename) this.enqueue(SEAT_AUDIO_VOICES[seat], filename);
+    }
+
+    playAction(seat, action) {
+      const filename = ACTION_AUDIO_FILES[action];
+      if (filename) this.enqueue(SEAT_AUDIO_VOICES[seat], filename);
+    }
+
+    playSystem(filename) {
+      this.enqueue(NARRATOR_AUDIO_VOICE, filename);
+    }
+
+    enqueue(voice, filename) {
+      if (!this.enabled || !voice || !filename) return;
+      this.queue.push("audio/" + voice + "/" + filename);
+      this.pump();
+    }
+
+    pump() {
+      if (!this.enabled || this.current || !this.queue.length) return;
+      const generation = this.generation;
+      const audio = new Audio(this.queue.shift());
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (this.current === audio) this.current = null;
+        if (generation === this.generation) this.pump();
+      };
+      this.current = audio;
+      audio.preload = "auto";
+      audio.volume = 1;
+      audio.addEventListener("ended", finish, { once: true });
+      audio.addEventListener("error", finish, { once: true });
+      const playResult = audio.play();
+      if (playResult && typeof playResult.catch === "function") playResult.catch(finish);
+    }
   }
 
   class MahjongGame {
@@ -148,6 +236,7 @@
     startRound() {
       this.roundToken += 1;
       this.audio.stopAll();
+      this.audio.startBgm(false);
       this.gameOver = false;
       this.el.gameOver.classList.add("hidden");
       this.el.settings.classList.add("hidden");
@@ -174,8 +263,8 @@
       this.turn = HUMAN;
       this.phase = "humanDiscard";
       this.addMessage("新牌局开始，你是东家，请选择一张牌打出");
-      this.audio.playSystem("system_game_start");
-      this.audio.playSystem("system_your_turn");
+      this.audio.playSystem("system_game_start.wav");
+      this.audio.playSystem("system_your_turn.wav");
       this.prepareHumanTurn();
       this.render();
       this.syncBciForGamePhase();
@@ -229,7 +318,7 @@
         if (seat === HUMAN) {
           this.phase = "humanDiscard";
           this.addMessage("轮到你摸牌，请选择一张牌打出");
-          this.audio.playSystem("system_your_turn");
+          this.audio.playSystem("system_your_turn.wav");
           this.prepareHumanTurn();
           this.render();
           this.syncBciForGamePhase();
@@ -550,7 +639,7 @@
       this.setActions([]);
       this.addMessage(this.players[seat].name + " 胡牌（" + method + "）");
       this.audio.playAction(seat, method === "自摸" ? "zimo" : "hu");
-      this.audio.playSystem(seat === HUMAN ? "win" : "lose");
+      this.audio.playSystem(seat === HUMAN ? "result_player_win.wav" : "result_player_lose.wav");
       this.render();
       this.el.gameOverTitle.textContent = seat === HUMAN ? "恭喜，你胡牌了！" : this.players[seat].name + "胡牌";
       this.el.gameOverDetail.textContent = method + (winningTile ? " · " + Core.tileName(winningTile.type) : "");
@@ -563,7 +652,7 @@
       this.phase = "gameOver";
       this.setActions([]);
       this.addMessage("牌墙已摸完，本局流局");
-      this.audio.playSystem("result_draw");
+      this.audio.playSystem("result_draw.wav");
       this.render();
       this.el.gameOverTitle.textContent = "本局流局";
       this.el.gameOverDetail.textContent = "牌墙已经摸完，四家均未胡牌";
@@ -999,11 +1088,18 @@
         if (reveal) {
           element.title = tileName;
           element.setAttribute("aria-label", tileName);
-          element.textContent = tileName;
+          let image = element.querySelector("img");
+          if (!image) {
+            image = document.createElement("img");
+            element.appendChild(image);
+          }
+          const asset = Core.tileAsset(tile.type);
+          if (image.getAttribute("src") !== asset) image.src = asset;
+          image.alt = tileName;
         } else {
           element.removeAttribute("title");
           element.setAttribute("aria-label", "未公开的牌");
-          element.textContent = "";
+          if (element.firstElementChild) element.textContent = "";
         }
 
         const nodeAtPosition = container.children[index] || null;
@@ -1029,7 +1125,10 @@
           element = document.createElement("span");
           element.className = "tile mini face-up";
           element.dataset.tileId = String(tile.id);
-          element.textContent = tileName;
+          const image = document.createElement("img");
+          image.src = Core.tileAsset(tile.type);
+          image.alt = tileName;
+          element.appendChild(image);
         }
 
         element.title = tileName;
@@ -1070,7 +1169,10 @@
           button.className = "tile human-tile face-up";
           button.dataset.id = String(tile.id);
 
-          button.textContent = tileName;
+          const image = document.createElement("img");
+          image.src = Core.tileAsset(tile.type);
+          image.alt = tileName;
+          button.appendChild(image);
         }
 
         button.setAttribute("aria-label", tileName);
@@ -1083,7 +1185,7 @@
 
     tileHtml(type, classes) {
       return "<span class=\"tile " + classes + "\" title=\"" + Core.tileName(type) + "\">" +
-        Core.tileName(type) + "</span>";
+        "<img src=\"" + Core.tileAsset(type) + "\" alt=\"" + Core.tileName(type) + "\"></span>";
     }
 
   }

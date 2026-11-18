@@ -14,6 +14,14 @@
     "春", "夏", "秋", "冬", "梅", "兰", "竹", "菊"
   ];
 
+  const TILE_ASSETS = [
+    "w1.svg", "w2.svg", "w3.svg", "w4.svg", "w5.svg", "w6.svg", "w7.svg", "w8.svg", "w9.svg",
+    "d1.svg", "d2.svg", "d3.svg", "d4.svg", "d5.svg", "d6.svg", "d7.svg", "d8.svg", "d9.svg",
+    "s1.svg", "s2.svg", "s3.svg", "s4.svg", "s5.svg", "s6.svg", "s7.svg", "s8.svg", "s9.svg",
+    "east.svg", "south.svg", "west.svg", "north.svg", "red.svg", "green.svg", "white.svg",
+    "spring.svg", "summer.svg", "autumn.svg", "winter.svg", "plum.svg", "orchid.svg", "bamboo.svg", "chrysanthemum.svg"
+  ];
+
   function isFlower(type) {
     return type >= FLOWER_START;
   }
@@ -24,6 +32,10 @@
 
   function tileName(type) {
     return TILE_NAMES[type] || "未知牌";
+  }
+
+  function tileAsset(type) {
+    return "tiles/" + TILE_ASSETS[type];
   }
 
   function createDeck() {
@@ -256,9 +268,11 @@
   return {
     FLOWER_START: FLOWER_START,
     TILE_NAMES: TILE_NAMES,
+    TILE_ASSETS: TILE_ASSETS,
     isFlower: isFlower,
     isSuited: isSuited,
     tileName: tileName,
+    tileAsset: tileAsset,
     createDeck: createDeck,
     shuffle: shuffle,
     sortTiles: sortTiles,

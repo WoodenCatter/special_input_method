@@ -100,4 +100,16 @@ The legacy media code retains a fallback DNS-over-HTTPS resolver, but it is not 
 ## Dou Dizhu Online
 
 - Code attribution: Jiacheng Wang, MIT. See LICENSES/DOUDIZHU-ONLINE-MIT.txt.
-- The app packages Huang's adapted HTML, CSS and JavaScript for local three-player play with two AI opponents and EEG scanning. Avatar labels are rendered with CSS. Gameplay cues are synthesized locally.
+- The app packages Huang's adapted HTML, CSS and JavaScript for local three-player play with two AI opponents and EEG scanning. Includes the team-authorized avatars, recorded voice cues, and background music.
+
+
+## Mahjong and Chinese Chess AI
+
+- Mahjong packages Huang's team-authorized tile graphics, recorded voice cues, and background music.
+- Chinese Chess AI by shibing624, https://github.com/shibing624/chinese-chess-ai. See LICENSES/CHINESE-CHESS-AI-APACHE-2.0.txt. Huang adapted the tablet UI, rules, AI search, and EEG scanning. The team confirmed permission for the integrated game and resources.
+
+
+## Godot Engine and Wizard Game
+
+- Godot Engine Android runtime 4.7.1 stable, MIT. Source and release notices: https://github.com/godotengine/godot/releases/tag/4.7.1-stable. See LICENSES/GODOT-ENGINE-MIT.txt.
+- Huang's game uses the team-authorized wizard_game.pck from the pinned input branch. The Android host uses the existing BCI controller and does not acquire from a second BLE connection.
