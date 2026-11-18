@@ -4,6 +4,7 @@ enum class AppDestination {
     HOME,
     ENTERTAINMENT,
     INPUT_METHOD,
+    LIFE_ASSISTANT,
     ASYNC_MAZE,
     SNAKE_CLIMB,
     WIZARD_GAME,
@@ -26,6 +27,7 @@ enum class HomeModule(
     APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
     REALTIME_COMMUNICATION(AppDestination.INPUT_METHOD, "实时沟通"),
     ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
+    LIFE_ASSISTANT(AppDestination.LIFE_ASSISTANT, "生活助手"),
     HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false)
 }
 

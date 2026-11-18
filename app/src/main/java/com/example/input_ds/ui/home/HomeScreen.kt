@@ -162,7 +162,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                HomeModule.entries.chunked(2).forEach { modules ->
+                HomeModule.entries.chunked(3).forEach { modules ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         modules.forEach { module ->
                             ModuleCard(
@@ -185,6 +185,7 @@ private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Uni
         HomeModule.APP_SETTINGS -> "⚙"
         HomeModule.REALTIME_COMMUNICATION -> "◌"
         HomeModule.ENTERTAINMENT -> "◈"
+        HomeModule.LIFE_ASSISTANT -> "✧"
         HomeModule.HEADSET_SETTINGS -> "⌁"
     }
     SelectableGlassPanel(

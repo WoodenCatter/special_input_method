@@ -20,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,8 @@ import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.PersonalizationRepository
 import com.example.input_ds.personalization.TrainingWorkScheduler
 import com.example.input_ds.personalization.UserModelManager
+import com.example.input_ds.ui.assistant.AssistantInputBus
+import com.example.input_ds.ui.assistant.AssistantScreen
 import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
@@ -79,6 +82,8 @@ import com.example.input_ds.wizard.WizardGameActivity
 import com.example.input_ds.wizard.WizardGameInputBus
 import kotlinx.coroutines.delay
 
+private data class AssistantMediaLaunch(val destination: AppDestination, val id: String)
+
 class MainActivity : ComponentActivity() {
     private lateinit var bleManager: NaoyunBleManager
     private var bciController: BciController? = null
@@ -86,6 +91,7 @@ class MainActivity : ComponentActivity() {
     private var attemptedModelIdentity: String? = null
 
     private val destination = mutableStateOf(AppDestination.HOME)
+    private var assistantMediaLaunch by mutableStateOf<AssistantMediaLaunch?>(null)
     private val homeSelection = mutableStateOf(HomeSelectionState())
     private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
     private val mazeState = mutableStateOf(
@@ -164,7 +170,12 @@ class MainActivity : ComponentActivity() {
                     FloatingEegSignalWindow(
                         bleManager = bleManager,
                         visible = destination.value != AppDestination.HOME &&
-                            destination.value != AppDestination.WIZARD_GAME
+                            destination.value != AppDestination.WIZARD_GAME,
+                        modifier = if (destination.value == AppDestination.LIFE_ASSISTANT) {
+                            Modifier.padding(top = 64.dp)
+                        } else {
+                            Modifier
+                        }
                     )
                     FloatingControlBall(
                         visible = floatingBallVisible.value,
@@ -191,6 +202,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent(vm: InputMethodViewModel, bleState: NaoyunBleManager.State) {
+        val assistantState = rememberSaveableStateHolder()
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
@@ -202,9 +214,8 @@ class MainActivity : ComponentActivity() {
                     AppDestination.WIZARD_GAME,
                     AppDestination.CHINESE_CHESS,
                     AppDestination.DOUDIZHU,
-                    AppDestination.MAHJONG,
-                    AppDestination.TV,
-                    AppDestination.MUSIC -> AppDestination.ENTERTAINMENT
+                    AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
+                    AppDestination.TV, AppDestination.MUSIC -> mediaReturnDestination()
                     else -> AppDestination.HOME
                 }
                 navigateTo(parent)
@@ -243,6 +254,17 @@ class MainActivity : ComponentActivity() {
             )
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
+
+            AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
+                AssistantScreen(
+                    scanIntervalMs = vm.state.value.scanIntervalMs,
+                    onBack = { navigateTo(AppDestination.HOME) },
+                    onOpenMedia = { media, id ->
+                        assistantMediaLaunch = AssistantMediaLaunch(media, id)
+                        navigateTo(media)
+                    }
+                )
+            }
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
@@ -283,12 +305,14 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.TV -> TvScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+                onBack = { navigateTo(mediaReturnDestination()) },
+                initialChannelId = assistantMediaLaunch?.id
             )
 
             AppDestination.MUSIC -> MusicScreen(
                 scanIntervalMs = vm.state.value.scanIntervalMs,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+                onBack = { navigateTo(mediaReturnDestination()) },
+                initialTrackId = assistantMediaLaunch?.id
             )
 
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
@@ -335,7 +359,7 @@ class MainActivity : ComponentActivity() {
                 Box(Modifier.weight(1f)) {
                     MainScreen(
                         state = state,
-                        onBlockClick = vm::selectBlockByTouch,
+                        onBlockClick = { vm.selectBlockByTouch(it) },
                         onPinyinClick = vm::selectPinyinByTouch,
                         onPinyinNavigationClick = vm::selectPinyinNavigationByTouch,
                         onCharacterClick = vm::selectCharacterByTouch,
@@ -353,6 +377,7 @@ class MainActivity : ComponentActivity() {
             HomeModule.APP_SETTINGS -> navigateTo(AppDestination.APP_SETTINGS)
             HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.INPUT_METHOD)
             HomeModule.ENTERTAINMENT -> navigateTo(AppDestination.ENTERTAINMENT)
+            HomeModule.LIFE_ASSISTANT -> navigateTo(AppDestination.LIFE_ASSISTANT)
             HomeModule.HEADSET_SETTINGS -> navigateTo(AppDestination.SETTINGS)
         }
     }
@@ -382,9 +407,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun navigateTo(target: AppDestination) {
+        if (assistantMediaLaunch?.destination != target) assistantMediaLaunch = null
         destination.value = target
         updateBciCommandDelivery()
     }
+
+    private fun mediaReturnDestination(): AppDestination =
+        if (assistantMediaLaunch != null) AppDestination.LIFE_ASSISTANT else AppDestination.ENTERTAINMENT
 
     private fun setHeadsetControlEnabled(enabled: Boolean) {
         headsetControlEnabled.value = enabled
@@ -433,6 +462,7 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
+            AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
             AppDestination.ASYNC_MAZE -> {
                 val action = when (signal) {
                     ControlSignal.LEFT_LOOK -> MazeAction.LOOK_LEFT

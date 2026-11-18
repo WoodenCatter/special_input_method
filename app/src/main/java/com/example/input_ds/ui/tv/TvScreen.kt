@@ -69,7 +69,7 @@ import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.auroraBackground
 import kotlinx.coroutines.delay
 
-private data class TvChannel(
+internal data class TvChannel(
     val id: String,
     val name: String,
     val officialPages: List<String>
@@ -81,7 +81,7 @@ private fun cctvChannel(
     vararg officialPages: String
 ) = TvChannel(id, name, officialPages.toList())
 
-private val TV_CHANNELS = listOf(
+internal val TV_CHANNELS = listOf(
     cctvChannel("cctv1", "CCTV-1 综合", "https://tv.cctv.com/live/cctv1/"),
     cctvChannel("cctv2", "CCTV-2 财经", "https://tv.cctv.com/live/cctv2/"),
     cctvChannel("cctv4", "CCTV-4 中文国际", "https://tv.cctv.com/live/cctv4/"),
@@ -103,8 +103,10 @@ private val TV_OPERATION_LABELS = listOf("继续观看", "重新加载", "退出
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit) {
-    var currentIndex by remember { mutableIntStateOf(0) }
+fun TvScreen(scanIntervalMs: Long, onBack: () -> Unit, initialChannelId: String? = null) {
+    var currentIndex by remember(initialChannelId) {
+        mutableIntStateOf(TV_CHANNELS.indexOfFirst { it.id == initialChannelId }.coerceAtLeast(0))
+    }
     var operationVisible by remember { mutableStateOf(false) }
     var operationIndex by remember { mutableIntStateOf(0) }
     var operationDirection by remember { mutableIntStateOf(1) }

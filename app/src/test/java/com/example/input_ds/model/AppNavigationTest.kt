@@ -10,11 +10,11 @@ class AppNavigationTest {
         val initial = HomeSelectionState()
 
         assertEquals(HomeModule.APP_SETTINGS, initial.selectedModule)
-        assertEquals(HomeModule.ENTERTAINMENT, initial.moveLeft().selectedModule)
+        assertEquals(HomeModule.LIFE_ASSISTANT, initial.moveLeft().selectedModule)
         assertEquals(HomeModule.REALTIME_COMMUNICATION, initial.moveRight().selectedModule)
         assertEquals(
             HomeModule.APP_SETTINGS,
-            initial.moveRight().moveRight().moveRight().selectedModule
+            initial.moveRight().moveRight().moveRight().moveRight().selectedModule
         )
     }
 
@@ -24,7 +24,7 @@ class AppNavigationTest {
 
         assertEquals(HomeModule.REALTIME_COMMUNICATION, initial.advance().selectedModule)
         assertEquals(
-            HomeModule.ENTERTAINMENT,
+            HomeModule.LIFE_ASSISTANT,
             initial.changeDirection(-1).advance().selectedModule
         )
     }

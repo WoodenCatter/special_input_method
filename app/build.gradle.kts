@@ -28,6 +28,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            ndk {
+                abiFilters += "x86"
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

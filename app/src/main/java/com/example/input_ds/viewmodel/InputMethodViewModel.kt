@@ -46,7 +46,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
-class InputMethodViewModel(application: Application) : AndroidViewModel(application) {
+class InputMethodViewModel(
+    application: Application,
+    private val remotePredictionsEnabled: Boolean,
+    private val priorityPhrases: List<String> = emptyList()
+) : AndroidViewModel(application) {
+
+    constructor(application: Application) : this(application, true)
 
     private val _state = MutableStateFlow(
         InputState(scanIntervalMs = ScanSettings.read(application))
@@ -76,9 +82,9 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     init { startScanning() }
 
-    fun handleSignal(signal: ControlSignal) {
+    fun handleSignal(signal: ControlSignal, onSubmit: () -> Unit = ::sendText) {
         when (_state.value.phase) {
-            InputPhase.LEVEL_1_SCANNING -> handleLevel1Signal(signal)
+            InputPhase.LEVEL_1_SCANNING -> handleLevel1Signal(signal, onSubmit)
             InputPhase.LEVEL_2_LETTER_SELECT -> handleLevel2Signal(signal)
             InputPhase.LEVEL_3_CHAR_SELECT -> handleLevel3Signal(signal)
             InputPhase.PREDICTION -> handlePredictionSignal(signal)
@@ -88,14 +94,14 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     // ==================== Level 1 ====================
 
-    private fun handleLevel1Signal(signal: ControlSignal) {
+    private fun handleLevel1Signal(signal: ControlSignal, onSubmit: () -> Unit) {
         when (signal) {
             ControlSignal.LEFT_LOOK -> {
-                if (_state.value.scanSide == ScanSide.LEFT) selectHighlightedBlock()
+                if (_state.value.scanSide == ScanSide.LEFT) selectHighlightedBlock(onSubmit)
                 else switchToLeftSide()
             }
             ControlSignal.RIGHT_LOOK -> {
-                if (_state.value.scanSide == ScanSide.RIGHT) selectHighlightedBlock()
+                if (_state.value.scanSide == ScanSide.RIGHT) selectHighlightedBlock(onSubmit)
                 else switchToRightSide()
             }
             ControlSignal.BITE -> {
@@ -106,19 +112,19 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private fun selectHighlightedBlock() {
+    private fun selectHighlightedBlock(onSubmit: () -> Unit) {
         val s = _state.value
         val sideBlocks = if (s.scanSide == ScanSide.LEFT) LetterBlockMapping.LEFT_BLOCKS
                          else LetterBlockMapping.RIGHT_BLOCKS
         val idx = s.highlightedBlockIndex
         if (idx >= sideBlocks.size) return
-        applyBlock(sideBlocks[idx])
+        applyBlock(sideBlocks[idx], onSubmit)
     }
 
-    private fun applyBlock(block: Int) {
+    private fun applyBlock(block: Int, onSubmit: () -> Unit) {
         val s = _state.value
 
-        if (block == LetterBlockMapping.SEND_BLOCK) { sendText(); return }
+        if (block == LetterBlockMapping.SEND_BLOCK) { onSubmit(); return }
         if (block == LetterBlockMapping.DELETE_BLOCK) {
             if (hasActivePinyinInput(s) && s.selectedBlocks.isNotEmpty()) {
                 _state.value = s.copy(selectedBlocks = s.selectedBlocks.dropLast(1), pinyinCombinations = emptyList())
@@ -134,7 +140,7 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /** Touch counterpart of the BCI block selection path. */
-    fun selectBlockByTouch(block: Int) {
+    fun selectBlockByTouch(block: Int, onSubmit: () -> Unit = ::sendText) {
         if (block !in LetterBlockMapping.LEFT_BLOCKS && block !in LetterBlockMapping.RIGHT_BLOCKS) return
         if (_state.value.phase != InputPhase.LEVEL_1_SCANNING) returnToLevel1()
         val side = if (block in LetterBlockMapping.LEFT_BLOCKS) ScanSide.LEFT else ScanSide.RIGHT
@@ -143,7 +149,7 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
             scanSide = side,
             highlightedBlockIndex = sideBlocks.indexOf(block).coerceAtLeast(0)
         )
-        applyBlock(block)
+        applyBlock(block, onSubmit)
         restartScanning()
     }
 
@@ -186,7 +192,8 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
     /** Commits a common phrase directly from the level-one preview grid. */
     fun selectCommonPhraseByTouch(phrase: String) {
         val state = _state.value
-        if (state.phase != InputPhase.LEVEL_1_SCANNING || phrase !in CharacterDictionary.COMMON_PHRASES) return
+        if (state.phase != InputPhase.LEVEL_1_SCANNING) return
+        if (phrase !in priorityPhrases && phrase !in CharacterDictionary.COMMON_PHRASES) return
         stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         CommonPhraseUsage.record(phrase)
         val newOutput = state.outputText + phrase
@@ -213,13 +220,17 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
             state.currentPinyin.isNotEmpty() ||
             state.selectedLetters.isNotEmpty()
 
+    internal fun rankedCommonPhrases(): List<String> =
+        (CommonPhraseUsage.sorted(priorityPhrases) +
+            CommonPhraseUsage.sorted(CharacterDictionary.COMMON_PHRASES)).distinct()
+
     private fun enterCommonPhraseSelection() {
         stopScanning()
         val s = _state.value
         _state.value = s.copy(
             phase = InputPhase.PREDICTION,
             currentChar = "",
-            predictionCandidates = CommonPhraseUsage.sorted(CharacterDictionary.COMMON_PHRASES).map { phrase ->
+            predictionCandidates = rankedCommonPhrases().map { phrase ->
                 PredictionCandidate(
                     text = phrase,
                     source = PredictionSource.USER,
@@ -564,6 +575,7 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
                     }
                 }
                 launch {
+                    if (!remotePredictionsEnabled) return@launch
                     val conversation = conversationContextProvider.getContext()
                     val serverContext = takeLastCodePoints(context, MAX_SERVER_TEXT_CODE_POINTS)
                     val result = llmPredictionProvider.predictContext(
@@ -722,12 +734,17 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
             hasInitialPredictionOption = true,
             initialBlocksKey = blocksKey,
             initialRequestId = requestId,
-            initialPredictionStatus = PredictionStatus.LOADING,
+            initialPredictionStatus = when {
+                remotePredictionsEnabled -> PredictionStatus.LOADING
+                localCandidates.isEmpty() -> PredictionStatus.UNAVAILABLE
+                else -> PredictionStatus.READY
+            },
             initialCandidates = localCandidates,
             initialPage = 0,
             highlightedInitialIndex = 0,
             initialHasMore = false
         )
+        if (!remotePredictionsEnabled) return
         initialPredictionJob = viewModelScope.launch {
             val conversation = conversationContextProvider.getContext()
             val result = llmPredictionProvider.predictInitial(
@@ -884,27 +901,35 @@ class InputMethodViewModel(application: Application) : AndroidViewModel(applicat
 
     // ==================== 退出 ====================
 
-    private fun returnToLevel1() {
+    internal fun loadDraft(text: String) {
+        returnToLevel1(text)
+    }
+
+    private fun returnToLevel1(outputText: String = _state.value.outputText) {
         cancelPredictionRequest()
         cancelInitialPredictionRequest()
         stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         _state.value = InputState(
-            outputText = _state.value.outputText,
+            outputText = outputText,
             scanIntervalMs = _state.value.scanIntervalMs
         )
         startScanning()
     }
 
     fun sendText() {
-        cancelPredictionRequest()
-        cancelInitialPredictionRequest()
-        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         val previous = _state.value
         if (previous.outputText.isNotBlank()) {
             conversationContextProvider.append(ConversationTurn("user", previous.outputText))
         }
+        clearDraft()
+    }
+
+    internal fun clearDraft() {
+        cancelPredictionRequest()
+        cancelInitialPredictionRequest()
+        stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         _state.value = InputState(
-            scanIntervalMs = previous.scanIntervalMs
+            scanIntervalMs = _state.value.scanIntervalMs
         )
         startScanning()
     }
