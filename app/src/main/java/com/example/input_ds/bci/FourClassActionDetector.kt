@@ -59,15 +59,18 @@ class FourClassActionDetector(
     ): DetectorResult {
         require(probabilities.size >= CLASS_COUNT)
         val features = calculateFeatures(leftRaw, rightRaw, calibration.directionMinStdUv)
-        val hasDirectionEvidence = features.allowedDirectionClass != null
+        val hasDirectionEvidence = features.activityStdUv >=
+            calibration.directionMinStdUv * AsyncWindowPolicy.DIRECTION_THRESHOLD_SCALE &&
+            abs(features.directionScore) >= AsyncWindowPolicy.DIRECTION_SCORE_THRESHOLD
         // The differential feature validates that an eye movement happened.
         // Its sign is phase-dependent in an asynchronous rolling window, so
         // the model—not the sign heuristic—owns the left/right class decision.
         directionPhysicalEvidence.pushEvidence(hasDirectionEvidence)
-        bitePhysicalEvidence.pushEvidence(features.activityStdUv >= calibration.biteMinStdUv)
+        bitePhysicalEvidence.pushEvidence(features.activityStdUv >=
+            calibration.biteMinStdUv * AsyncWindowPolicy.BITE_THRESHOLD_SCALE)
 
         val strongBite = probabilities[BITE_CLASS] >= STRONG_BITE_PROBABILITY &&
-            features.activityStdUv >= calibration.biteMinStdUv
+            features.activityStdUv >= calibration.biteMinStdUv * AsyncWindowPolicy.BITE_THRESHOLD_SCALE
         val modelDirection = if (probabilities[LEFT_CLASS] >= probabilities[RIGHT_CLASS]) {
             LEFT_CLASS
         } else {
@@ -76,7 +79,7 @@ class FourClassActionDetector(
         val strongDirection = hasDirectionEvidence &&
             probabilities[modelDirection] >= STRONG_DIRECTION_PROBABILITY &&
             abs(features.directionScore) >= STRONG_DIRECTION_SCORE &&
-            features.activityStdUv >= calibration.directionMinStdUv
+            features.activityStdUv >= calibration.directionMinStdUv * AsyncWindowPolicy.DIRECTION_THRESHOLD_SCALE
 
         val temporal = temporalEvidence.update(probabilities) { candidate ->
             when (candidate) {
@@ -110,7 +113,6 @@ class FourClassActionDetector(
         private const val CLASS_COUNT = 4
         private const val STRONG_DIRECTION_PROBABILITY = 0.94f
         private const val STRONG_DIRECTION_SCORE = 0.80f
-        private const val BASE_DIRECTION_SCORE = 0.50f
         private const val STRONG_BITE_PROBABILITY = 0.90f
 
         fun calculateFeatures(
@@ -137,9 +139,8 @@ class FourClassActionDetector(
             }
             val score = ((segmentMean(0.40f, 0.70f) - segmentMean(0.05f, 0.30f)) / std).toFloat()
             val allowed = when {
-                std < directionMinStdUv -> null
-                score <= -BASE_DIRECTION_SCORE -> LEFT_CLASS
-                score >= BASE_DIRECTION_SCORE -> RIGHT_CLASS
+                std < directionMinStdUv * AsyncWindowPolicy.DIRECTION_THRESHOLD_SCALE -> null
+                abs(score) >= AsyncWindowPolicy.DIRECTION_SCORE_THRESHOLD -> RIGHT_CLASS
                 else -> null
             }
             return WindowFeatures(std, score, allowed)

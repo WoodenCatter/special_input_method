@@ -9,6 +9,18 @@ object ScanSettings {
 
     private const val PREFERENCES = "input_method_ui_settings"
     private const val KEY_INTERVAL_MS = "scan_interval_ms"
+    private const val KEY_MODE = "page_scan_mode"
+
+    fun readMode(context: Context): ScanMode = runCatching {
+        ScanMode.valueOf(context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .getString(KEY_MODE, ScanMode.MANUAL.name) ?: ScanMode.MANUAL.name)
+    }.getOrDefault(ScanMode.MANUAL)
+
+    fun writeMode(context: Context, mode: ScanMode): ScanMode {
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .edit().putString(KEY_MODE, mode.name).apply()
+        return mode
+    }
 
     fun read(context: Context): Long = context
         .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)

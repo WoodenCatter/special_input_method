@@ -41,6 +41,8 @@ class ModelInference(private val context: Context) {
         private set
     var inputPoints: Int = DEFAULT_POINTS
         private set
+    var modelCalibration: Pair<Float, Float>? = null
+        private set
     var lastError: String? = null
         private set
     var loadedModelDescription: String = "未加载"
@@ -106,6 +108,13 @@ class ModelInference(private val context: Context) {
                 ?: error("ONNX 缺少有效分类协议")
             require(labelNames == protocol.labelNames) { "ONNX 分类协议与标签顺序不一致" }
             validateAsyncControl(metadata["async_control"], inputPoints)
+            modelCalibration = metadata["async_calibration"]?.let { raw ->
+                val json = JSONObject(raw)
+                val direction = json.optDouble("direction_base_std_uv", Double.NaN).toFloat()
+                val bite = json.optDouble("bite_base_std_uv", Double.NaN).toFloat()
+                if (direction.isFinite() && direction > 0f && bite.isFinite() && bite > 0f)
+                    direction to bite else null
+            }
             // The production API names the tensor `logits`; v0.3.0 does not
             // require an equivalent custom-metadata entry.
             outputSemantics = metadata["output_semantics"] ?: OUTPUT_LOGITS
@@ -255,6 +264,10 @@ class ModelInference(private val context: Context) {
             ) == AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED
         )
         require(json.optInt("rest_reset_required", AsyncWindowPolicy.REST_RESET_REQUIRED) == AsyncWindowPolicy.REST_RESET_REQUIRED)
+        require(kotlin.math.abs(json.optDouble("rest_confidence_threshold", 0.80) - 0.80) <= 1e-6)
+        require(kotlin.math.abs(json.optDouble("bite_threshold_scale", 0.5329) - 0.5329) <= 1e-6)
+        require(kotlin.math.abs(json.optDouble("direction_threshold_scale", 0.65) - 0.65) <= 1e-6)
+        require(kotlin.math.abs(json.optDouble("direction_score_threshold", 1.075) - 1.075) <= 1e-6)
         require(
             kotlin.math.abs(
                 json.optDouble("confidence_threshold", AsyncWindowPolicy.CONFIDENCE_THRESHOLD.toDouble()) -
@@ -271,6 +284,7 @@ class ModelInference(private val context: Context) {
         env = null
         isLoaded = false
         loadedFromActiveModel = false
+        modelCalibration = null
         protocol = ClassificationProtocol.FOUR_CLASS
         labelNames = ClassificationProtocol.FOUR_CLASS.labelNames
         classCount = labelNames.size

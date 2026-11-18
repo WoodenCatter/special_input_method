@@ -15,11 +15,12 @@ class RimeDataDeployer(private val context: Context) {
         val marker = File(shared, ".asset-version")
         user.mkdirs()
 
-        if (!marker.exists() || marker.readText() != ASSET_VERSION) {
+        if (!marker.isFile || marker.readText() != ASSET_VERSION || !hasOpenCcDictionaries(shared)) {
             if (shared.exists()) shared.deleteRecursively()
             shared.mkdirs()
             copyAssetTree(ASSET_ROOT, shared)
             buildOpenCcDictionaries(shared)
+            check(hasOpenCcDictionaries(shared)) { "OpenCC dictionaries could not be prepared" }
             buildContextDictionary(shared)
             marker.writeText(ASSET_VERSION)
         }
@@ -28,10 +29,13 @@ class RimeDataDeployer(private val context: Context) {
 
     private fun buildOpenCcDictionaries(shared: File) {
         val openCcDir = File(shared, "opencc")
-        listOf("STPhrases", "STCharacters", "TSPhrases", "TSCharacters").forEach { name ->
+        OPEN_CC_DICTIONARIES.forEach { name ->
             val source = File(openCcDir, "$name.txt")
             val destination = File(openCcDir, "$name.ocd2")
-            if (source.exists() && !destination.exists()) {
+            check(source.isFile && source.canRead() && source.length() > 0L) {
+                "OpenCC source dictionary missing: $name"
+            }
+            if (!destination.isFile) {
                 OpenCCDictManager.openCCDictConv(
                     source.absolutePath,
                     destination.absolutePath,
@@ -41,9 +45,15 @@ class RimeDataDeployer(private val context: Context) {
         }
     }
 
+    private fun hasOpenCcDictionaries(shared: File): Boolean =
+        OPEN_CC_DICTIONARIES.all { name ->
+            val dictionary = File(shared, "opencc/$name.ocd2")
+            dictionary.isFile && dictionary.canRead() && dictionary.length() > 0L
+        }
+
     private fun buildContextDictionary(shared: File) {
         val s2tConfig = File(shared, "opencc/s2t.json").absolutePath
-        val entries = LinkedHashSet<String>()
+        val readings = ArrayList<ContextReading>()
         context.assets.open("pinyin_map.txt").bufferedReader(Charsets.UTF_8).useLines { lines ->
             lines.forEach { line ->
                 val parts = line.split(":", limit = 2)
@@ -54,12 +64,25 @@ class RimeDataDeployer(private val context: Context) {
                     val text = rawText.trim()
                     if (!isSingleHanCodePoint(text)) return@forEachIndexed
                     val weight = maxOf(100 - index * 2, 10)
-                    entries += "$text\t$pinyin\t$weight"
-                    val traditional = OpenCCDictManager.openCCLineConv(text, s2tConfig)
-                    if (traditional.isNotEmpty() && traditional != text) {
-                        entries += "$traditional\t$pinyin\t$weight"
-                    }
+                    readings += ContextReading(text, pinyin, weight)
                 }
+            }
+        }
+
+        val characters = readings.map { it.text }.distinct()
+        check(characters.isNotEmpty()) { "Rime pinyin dictionary is empty" }
+        // Newlines keep individual characters independent while loading the converter only once.
+        val converted = OpenCCDictManager.openCCLineConv(characters.joinToString("\n"), s2tConfig)
+            .split('\n')
+        check(converted.size == characters.size) { "Unexpected OpenCC dictionary output" }
+        val traditionalByCharacter = characters.zip(converted).toMap()
+
+        val entries = LinkedHashSet<String>()
+        readings.forEach { (text, pinyin, weight) ->
+            entries += "$text\t$pinyin\t$weight"
+            val traditional = traditionalByCharacter.getValue(text)
+            if (traditional.isNotEmpty() && traditional != text) {
+                entries += "$traditional\t$pinyin\t$weight"
             }
         }
 
@@ -74,6 +97,8 @@ class RimeDataDeployer(private val context: Context) {
             entries.forEach { writer.appendLine(it) }
         }
     }
+
+    private data class ContextReading(val text: String, val pinyin: String, val weight: Int)
 
     private fun isSingleHanCodePoint(text: String): Boolean {
         if (text.codePointCount(0, text.length) != 1) return false
@@ -96,6 +121,7 @@ class RimeDataDeployer(private val context: Context) {
     }
 
     private companion object {
+        val OPEN_CC_DICTIONARIES = listOf("STPhrases", "STCharacters", "TSPhrases", "TSCharacters")
         const val ASSET_ROOT = "rime_prediction"
         const val ASSET_VERSION = "predict-data-1.0-2a5a2b7c-context-v1"
     }

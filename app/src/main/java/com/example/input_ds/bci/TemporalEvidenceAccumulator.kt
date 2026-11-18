@@ -30,7 +30,7 @@ class TemporalEvidenceAccumulator(
         require(classCount >= 2)
         require(restClass in 0 until classCount)
         require(evidenceWindows >= 1)
-        require(confidenceThreshold in 0.5f..1f)
+        require(confidenceThreshold in 0f..1f)
         require(supportRequired in 1..evidenceWindows)
         require(restResetRequired in 1..evidenceWindows)
     }
@@ -83,7 +83,7 @@ class TemporalEvidenceAccumulator(
         val support = supportByClass[candidate]
         val currentWinner = labels.last()
         val currentRestConfident = currentWinner == restClass &&
-            normalized[restClass] >= confidenceThreshold
+            normalized[restClass] >= AsyncWindowPolicy.REST_CONFIDENCE_THRESHOLD
 
         if (lockedClass != null) {
             if (currentRestConfident) {

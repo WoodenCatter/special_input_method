@@ -2,7 +2,9 @@ package com.example.input_ds
 
 import android.Manifest
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -22,7 +24,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.input_ds.communication.videoPermissions
+import com.example.input_ds.ui.communication.PadVideoScreen
 import com.example.input_ds.bci.BciController
 import com.example.input_ds.bci.NaoyunBleManager
 import com.example.input_ds.data.CharacterDictionary
@@ -33,19 +39,17 @@ import com.example.input_ds.game.MazeAction
 import com.example.input_ds.game.MazeExitChoice
 import com.example.input_ds.game.MazeGame
 import com.example.input_ds.game.MazeProtocol
-import com.example.input_ds.media.EntertainmentMediaMode
-import com.example.input_ds.media.EntertainmentPlayer
 import com.example.input_ds.model.AppDestination
+import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
-import com.example.input_ds.model.EntertainmentAction
-import com.example.input_ds.model.EntertainmentSelectionState
+import com.example.input_ds.model.EntertainmentHubModule
+import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.HomeModule
 import com.example.input_ds.model.HomeSelectionState
-import com.example.input_ds.model.MusicControlAction
-import com.example.input_ds.model.MusicSelectionEffect
-import com.example.input_ds.model.MusicSelectionState
-import com.example.input_ds.model.TvSelectionEffect
-import com.example.input_ds.model.TvSelectionState
+import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.ScanSettings
+import com.example.input_ds.music.MusicInputBus
+import com.example.input_ds.settings.AppSettingsInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.PersonalizationRepository
 import com.example.input_ds.personalization.TrainingWorkScheduler
@@ -53,34 +57,70 @@ import com.example.input_ds.personalization.UserModelManager
 import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.example.input_ds.chess.ChineseChessInputBus
+import com.example.input_ds.doudizhu.DoudizhuInputBus
+import com.example.input_ds.ui.chess.ChineseChessScreen
+import com.example.input_ds.mahjong.MahjongInputBus
+import com.example.input_ds.ui.doudizhu.DoudizhuScreen
+import com.example.input_ds.ui.mahjong.MahjongScreen
+import com.example.input_ds.game.SnakeAction
+import com.example.input_ds.game.SnakeClimbGame
+import com.example.input_ds.ui.assistant.AssistantInputBus
+import com.example.input_ds.ui.assistant.AssistantScreen
+import com.example.input_ds.ui.components.FloatingEegSignalSource
+import com.example.input_ds.ui.components.FloatingEegSignalWindow
+import com.example.input_ds.wizard.WizardGameActivity
+import com.example.input_ds.wizard.WizardGameInputBus
+import com.example.input_ds.ui.game.SnakeClimbScreen
+import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.components.MainScreen
-import com.example.input_ds.ui.entertainment.EntertainmentScreen
+import com.example.input_ds.ui.communication.CommunicationScreen
+import com.example.input_ds.communication.CommunicationViewModel
 import com.example.input_ds.ui.game.MazeScreen
+import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
 import com.example.input_ds.ui.music.MusicScreen
+import com.example.input_ds.ui.settings.AppSettingsScreen
 import com.example.input_ds.ui.tv.TvScreen
 import com.example.input_ds.ui.theme.InputDSTheme
 import com.example.input_ds.ui.theme.AuroraBackground
+import com.example.input_ds.tv.TvInputBus
 import com.example.input_ds.viewmodel.InputMethodViewModel
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private lateinit var bleManager: NaoyunBleManager
-    private lateinit var entertainmentPlayer: EntertainmentPlayer
     private var bciController: BciController? = null
     private var inputViewModel: InputMethodViewModel? = null
+    private var communicationViewModel: CommunicationViewModel? = null
+    private var videoSelection by mutableStateOf(0)
+    private var videoScanDirection by mutableStateOf(1)
+    private val videoPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { communicationViewModel?.video?.permissionResult() }
+    private val wizardGameLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        navigateTo(AppDestination.ENTERTAINMENT)
+    }
+
+    private fun askVideoPermissions() = videoPermissionLauncher.launch(videoPermissions)
     private var attemptedModelIdentity: String? = null
 
     private val destination = mutableStateOf(AppDestination.HOME)
+    private val snakeState = mutableStateOf(SnakeClimbGame.create())
+    private var assistantMediaId: String? = null
     private val homeSelection = mutableStateOf(HomeSelectionState())
-    private val entertainmentSelection = mutableStateOf(EntertainmentSelectionState())
-    private val musicSelection = mutableStateOf(MusicSelectionState())
-    private val tvSelection = mutableStateOf(TvSelectionState())
+    private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
     private val mazeState = mutableStateOf(
         MazeGame.create(MazeProtocol.FOUR_CLASS)
     )
+    private val scanMode = mutableStateOf(ScanMode.MANUAL)
     private val bciActive = mutableStateOf(false)
     private val bciStatus = mutableStateOf("耳机未连接")
+    private val floatingBallVisible = mutableStateOf(true)
+    private val headsetControlEnabled = mutableStateOf(false)
 
     private val bluetoothPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -99,16 +139,75 @@ class MainActivity : ComponentActivity() {
         LanguageModel.init(applicationContext)
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
-        entertainmentPlayer = EntertainmentPlayer(applicationContext)
+        FloatingEegSignalSource.attach(bleManager)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
+        floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
+        scanMode.value = ScanSettings.readMode(applicationContext)
+        window.attributes = window.attributes.apply {
+            screenBrightness = AppUiSettings.readScreenBrightness(applicationContext)
+        }
 
         setContent {
             InputDSTheme {
-                val vm: InputMethodViewModel = viewModel()
+                val vm: InputMethodViewModel = viewModel {
+                    InputMethodViewModel(application, remotePredictionsEnabled = !BuildConfig.DEMO_COMMUNICATION)
+                }
+                val chat: CommunicationViewModel = viewModel()
                 inputViewModel = vm
+                communicationViewModel = chat
+                chat.requestVideoPermissions = ::askVideoPermissions
+                val lifecycle = this@MainActivity.lifecycle
+                val video by chat.video.state.collectAsState()
+                val call = video.call
+                LaunchedEffect(chat, lifecycle) {
+                    if (BuildConfig.DEMO_COMMUNICATION) return@LaunchedEffect
+                    lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        chat.video.foreground(true)
+                        try {
+                            var previous: String? = null
+                            while (true) {
+                                val repository = PersonalizationRepository(applicationContext)
+                                val user = repository.activeUser()
+                                val binding = repository.deviceServerBinding()
+                                val identity = "${binding?.serverUserId}:${user?.profileId}:${user?.profileEnabled}"
+                                if (identity != previous) {
+                                    if (previous != null) vm.clearChatInput()
+                                    previous = identity
+                                    chat.open()
+                                }
+                                delay(1_000)
+                            }
+                        } finally {
+                            chat.video.foreground(false)
+                        }
+                    }
+                }
+                LaunchedEffect(chat) {
+                    chat.videoNotices.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+                }
+                LaunchedEffect(call?.id, call?.status, video.confirmEnd) {
+                    videoSelection = 0
+                    videoScanDirection = 1
+                    updateBciCommandDelivery()
+                }
+                LaunchedEffect(call?.id, scanMode.value) {
+                    if (call != null && scanMode.value == ScanMode.AUTO) {
+                        while (true) {
+                            delay(ScanSettings.read(applicationContext))
+                            val actions = chat.video.actions(::askVideoPermissions)
+                            if (actions.isNotEmpty()) {
+                                videoSelection = (videoSelection + videoScanDirection).mod(actions.size)
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(vm) { vm.setStandaloneInputActive(false) }
                 val bleState by bleManager.state.collectAsState()
 
                 LaunchedEffect(bleState) {
+                    if (bleState != NaoyunBleManager.State.READY && headsetControlEnabled.value) {
+                        setHeadsetControlEnabled(false)
+                    }
                     if (bleState == NaoyunBleManager.State.READY) {
                         UserModelManager.activePreset(applicationContext)?.let { preset ->
                             bleManager.setPreprocessing(preset.displaySteps())
@@ -131,76 +230,175 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                AppContent(vm = vm, bleState = bleState)
+                Box(Modifier.fillMaxSize()) {
+                    AppContent(vm = vm, chat = chat, bleState = bleState)
+                    if (call != null) {
+                        val actions = chat.video.actions(::askVideoPermissions)
+                        PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)),
+                            ::askVideoPermissions)
+                    }
+                    FloatingEegSignalWindow(
+                        bleManager = bleManager,
+                        visible = floatingBallVisible.value && call == null &&
+                            destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB)
+                    )
+                    FloatingControlBall(
+                        visible = floatingBallVisible.value,
+                        onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
+                        onRightLook = { routeSignal(ControlSignal.RIGHT_LOOK) },
+                        onBite = { routeSignal(ControlSignal.BITE) }
+                    )
+                }
             }
         }
     }
 
     @Composable
-    private fun AppContent(vm: InputMethodViewModel, bleState: NaoyunBleManager.State) {
-        val playbackState by entertainmentPlayer.state.collectAsState()
+    private fun AppContent(vm: InputMethodViewModel, chat: CommunicationViewModel, bleState: NaoyunBleManager.State) {
+        val assistantState = rememberSaveableStateHolder()
+        val inputState by vm.state.collectAsState()
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
-            BackHandler { navigateBack() }
+            BackHandler {
+                if (destination.value == AppDestination.COMMUNICATION) {
+                    if (!chat.back()) navigateTo(AppDestination.HOME)
+                    return@BackHandler
+                }
+                val parent = when (destination.value) {
+                    AppDestination.ENTERTAINMENT -> AppDestination.HOME
+                    AppDestination.ASYNC_MAZE,
+                    AppDestination.SNAKE_CLIMB,
+                    AppDestination.WIZARD_GAME,
+                    AppDestination.CHINESE_CHESS,
+                    AppDestination.DOUDIZHU,
+                    AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
+                    AppDestination.TV, AppDestination.MUSIC -> mediaParent()
+                    else -> AppDestination.HOME
+                }
+                navigateTo(parent)
+            }
         }
 
         when (destination.value) {
             AppDestination.HOME -> HomeScreen(
                 selection = homeSelection.value,
+                scanMode = scanMode.value,
+                scanIntervalMs = inputState.scanIntervalMs,
                 bleManager = bleManager,
                 onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
-                    homeSelection.value = HomeSelectionState(HomeModule.entries.indexOf(module))
+                    if (module.scanEnabled) {
+                        homeSelection.value = homeSelection.value.copy(
+                            selectedIndex = HomeModule.entries.indexOf(module)
+                        )
+                    }
                     enterModule(module)
                 },
-                onMoveLeft = { homeSelection.value = homeSelection.value.moveLeft() },
-                onMoveRight = { homeSelection.value = homeSelection.value.moveRight() },
-                onConfirm = {
-                    homeSelection.value.selectedModule
-                        .takeUnless { it == HomeModule.SETTINGS }
-                        ?.let(::enterModule)
+                onAdvance = { homeSelection.value = homeSelection.value.advance() }
+            )
+
+            AppDestination.ENTERTAINMENT -> EntertainmentScreen(
+                selection = entertainmentSelection.value,
+                scanMode = scanMode.value,
+                scanIntervalMs = inputState.scanIntervalMs,
+                onSelect = { module ->
+                    entertainmentSelection.value = entertainmentSelection.value.copy(
+                        selectedIndex = EntertainmentHubModule.entries.indexOf(module)
+                    )
+                    enterEntertainmentModule(module)
+                },
+                onAdvance = {
+                    entertainmentSelection.value = entertainmentSelection.value.advance()
                 }
             )
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
+            AppDestination.COMMUNICATION -> {
+                androidx.compose.runtime.DisposableEffect(vm) {
+                    onDispose { vm.setChatAction(null) }
+                }
+                CommunicationScreen(chat, vm) { navigateTo(AppDestination.HOME) }
+            }
+
+            AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
+                AssistantScreen(
+                    scanIntervalMs = inputState.scanIntervalMs,
+                    onBack = { navigateTo(AppDestination.HOME) },
+                    onOpenMedia = { target, id ->
+                        assistantMediaId = id
+                        navigateTo(target)
+                    }
+                )
+            }
+
+            AppDestination.WIZARD_GAME -> AuroraBackground {
+                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Text("魔法师游戏运行中…", style = MaterialTheme.typography.headlineMedium)
+                }
+            }
+
+            AppDestination.CHINESE_CHESS -> ChineseChessScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
+            }
+
+            AppDestination.DOUDIZHU -> DoudizhuScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
+            }
+
+            AppDestination.MAHJONG -> MahjongScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
+            }
+
+            AppDestination.SNAKE_CLIMB -> SnakeClimbScreen(
+                state = snakeState.value,
+                moveIntervalMs = inputState.scanIntervalMs,
+                onAction = ::applySnakeAction,
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+            )
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
                 controlStatus = bciStatus.value,
-                onBack = { navigateTo(AppDestination.HOME) },
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) },
                 onAction = ::applyMazeAction,
                 onExitDecision = ::resolveMazeExit,
                 onReset = { resetMazeForActiveModel() }
             )
 
-            AppDestination.ENTERTAINMENT -> EntertainmentScreen(
-                selection = entertainmentSelection.value,
-                onBack = { navigateTo(AppDestination.HOME) },
-                onMusic = ::openMusic,
-                onTelevision = ::openTelevision
+            AppDestination.TV -> TvScreen(
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                onBack = { navigateTo(mediaParent()) },
+                initialChannelId = assistantMediaId
             )
 
             AppDestination.MUSIC -> MusicScreen(
-                tracks = EntertainmentPlayer.musicTracks,
-                playback = playbackState,
-                selection = musicSelection.value,
-                onBack = ::leaveMusic,
-                onControl = ::handleMusicControlTouch,
-                onTrack = ::handleMusicTrackTouch
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                onBack = { navigateTo(mediaParent()) },
+                initialTrackId = assistantMediaId
             )
 
-            AppDestination.TV -> TvScreen(
-                channels = EntertainmentPlayer.tvChannels,
-                playback = playbackState,
-                selection = tvSelection.value,
-                onBack = ::leaveTelevision,
-                onChannel = ::handleTvChannelTouch
+            AppDestination.APP_SETTINGS -> AppSettingsScreen(
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                onScanModeChange = { mode ->
+                    scanMode.value = ScanSettings.writeMode(applicationContext, mode)
+                },
+                floatingBallVisible = floatingBallVisible.value,
+                headsetControlEnabled = headsetControlEnabled.value,
+                onFloatingBallVisibleChange = { visible ->
+                    floatingBallVisible.value = visible
+                    AppUiSettings.writeFloatingBallVisible(applicationContext, visible)
+                },
+                onHeadsetControlEnabledChange = ::setHeadsetControlEnabled,
+                onBack = { navigateTo(AppDestination.HOME) }
             )
 
             AppDestination.SETTINGS -> CollectionScreen(
                 bleManager = bleManager,
-                scanIntervalMs = vm.state.value.scanIntervalMs,
+                scanIntervalMs = inputState.scanIntervalMs,
                 onScanIntervalChange = vm::setScanInterval,
                 onTrainingActivated = {
                     restartBciController()
@@ -244,124 +442,136 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterModule(module: HomeModule) {
+        navigateTo(module.resolveDestination(BuildConfig.DEMO_COMMUNICATION))
+    }
+
+    private fun mediaParent(): AppDestination =
+        if (assistantMediaId == null) AppDestination.ENTERTAINMENT else AppDestination.LIFE_ASSISTANT
+
+    private fun applySnakeAction(action: SnakeAction) {
+        val next = SnakeClimbGame.applyAction(snakeState.value, action)
+        snakeState.value = next
+        if (next.exitRequested) navigateTo(AppDestination.ENTERTAINMENT)
+    }
+
+    private fun enterEntertainmentModule(module: EntertainmentHubModule) {
         when (module) {
-            HomeModule.REALTIME_COMMUNICATION -> navigateTo(AppDestination.INPUT_METHOD)
-            HomeModule.MAZE -> {
+            EntertainmentHubModule.MAZE -> {
                 resetMazeForActiveModel()
                 if (bleManager.state.value == NaoyunBleManager.State.READY) restartBciController()
                 navigateTo(AppDestination.ASYNC_MAZE)
             }
-            HomeModule.ENTERTAINMENT -> {
-                entertainmentSelection.value = EntertainmentSelectionState()
-                navigateTo(AppDestination.ENTERTAINMENT)
+            EntertainmentHubModule.SNAKE_CLIMB -> {
+                snakeState.value = SnakeClimbGame.create()
+                navigateTo(AppDestination.SNAKE_CLIMB)
             }
-            HomeModule.SETTINGS -> navigateTo(AppDestination.SETTINGS)
-        }
-    }
-
-    private fun navigateBack() {
-        when (destination.value) {
-            AppDestination.MUSIC -> leaveMusic()
-            AppDestination.TV -> leaveTelevision()
-            AppDestination.ENTERTAINMENT -> navigateTo(AppDestination.HOME)
-            else -> navigateTo(AppDestination.HOME)
-        }
-    }
-
-    private fun openMusic() {
-        entertainmentSelection.value = entertainmentSelection.value.select(EntertainmentAction.MUSIC)
-        if (entertainmentPlayer.state.value.mode != EntertainmentMediaMode.MUSIC) {
-            musicSelection.value = MusicSelectionState(
-                highlightedTrackIndex = musicSelection.value.highlightedTrackIndex
-            )
-            entertainmentPlayer.prepareMusic(
-                index = musicSelection.value.highlightedTrackIndex,
-                playWhenReady = false
-            )
-        }
-        navigateTo(AppDestination.MUSIC)
-    }
-
-    private fun openTelevision() {
-        entertainmentSelection.value = entertainmentSelection.value.select(EntertainmentAction.TV)
-        val channelIndex = (tvSelection.value.selectedIndex - 1).coerceAtLeast(0)
-        tvSelection.value = tvSelection.value.selectChannel(
-            channelIndex,
-            EntertainmentPlayer.tvChannels.size
-        )
-        entertainmentPlayer.playChannel(channelIndex)
-        navigateTo(AppDestination.TV)
-    }
-
-    private fun leaveTelevision() {
-        entertainmentPlayer.stopTelevision()
-        navigateTo(AppDestination.ENTERTAINMENT)
-    }
-
-    private fun leaveMusic() {
-        entertainmentPlayer.stopMusic()
-        navigateTo(AppDestination.ENTERTAINMENT)
-    }
-
-    private fun handleMusicControlTouch(action: MusicControlAction) {
-        musicSelection.value = musicSelection.value.selectControl(action)
-        confirmMusicSelection()
-    }
-
-    private fun handleMusicTrackTouch(index: Int) {
-        musicSelection.value = musicSelection.value.selectTrack(
-            index,
-            EntertainmentPlayer.musicTracks.size
-        )
-        entertainmentPlayer.playMusic(index)
-    }
-
-    private fun confirmMusicSelection() {
-        val result = musicSelection.value.confirm(
-            trackCount = EntertainmentPlayer.musicTracks.size,
-            currentTrackIndex = entertainmentPlayer.state.value.currentIndex
-        )
-        musicSelection.value = result.state
-        when (val effect = result.effect) {
-            MusicSelectionEffect.Back -> leaveMusic()
-            MusicSelectionEffect.Previous -> entertainmentPlayer.previousTrack()
-            MusicSelectionEffect.TogglePlayback -> entertainmentPlayer.toggleMusicPlayback()
-            MusicSelectionEffect.Next -> entertainmentPlayer.nextTrack()
-            is MusicSelectionEffect.PlayTrack -> entertainmentPlayer.playMusic(effect.index)
-            null -> Unit
-        }
-    }
-
-    private fun handleTvChannelTouch(index: Int) {
-        tvSelection.value = tvSelection.value.selectChannel(index, EntertainmentPlayer.tvChannels.size)
-        entertainmentPlayer.playChannel(index)
-    }
-
-    private fun confirmTelevisionSelection() {
-        when (val effect = tvSelection.value.confirm(EntertainmentPlayer.tvChannels.size)) {
-            TvSelectionEffect.Back -> leaveTelevision()
-            is TvSelectionEffect.PlayChannel -> entertainmentPlayer.playChannel(effect.index)
+            EntertainmentHubModule.WIZARD_GAME -> {
+                navigateTo(AppDestination.WIZARD_GAME)
+                wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
+            }
+            EntertainmentHubModule.CHINESE_CHESS -> navigateTo(AppDestination.CHINESE_CHESS)
+            EntertainmentHubModule.DOUDIZHU -> navigateTo(AppDestination.DOUDIZHU)
+            EntertainmentHubModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
+            EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
+            EntertainmentHubModule.MUSIC -> navigateTo(AppDestination.MUSIC)
+            EntertainmentHubModule.BACK -> navigateTo(AppDestination.HOME)
         }
     }
 
     private fun navigateTo(target: AppDestination) {
+        if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
         destination.value = target
-        val commandsEnabled = target != AppDestination.DEVICE_STATUS &&
-            target != AppDestination.COLLECTION && target != AppDestination.SETTINGS
-        bciController?.setCommandDeliveryEnabled(commandsEnabled)
+        inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
+        updateBciCommandDelivery()
+    }
+
+    private fun setHeadsetControlEnabled(enabled: Boolean) {
+        headsetControlEnabled.value = enabled
+        updateBciCommandDelivery()
+        if (enabled && bciActive.value) {
+            bciStatus.value = if (bciController?.loadedProtocol == ClassificationProtocol.SIX_ACTION) {
+                "六分类异步控制运行中"
+            } else {
+                "四分类异步控制运行中"
+            }
+        } else if (!enabled && bleManager.state.value == NaoyunBleManager.State.READY) {
+            bciStatus.value = "耳机已连接 · 控制已停用"
+        }
+    }
+
+    private fun updateBciCommandDelivery() {
+        val targetAcceptsCommands = communicationViewModel?.video?.state?.value?.call != null ||
+            (destination.value != AppDestination.DEVICE_STATUS &&
+                destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS)
+        bciController?.setCommandDeliveryEnabled(
+            headsetControlEnabled.value && targetAcceptsCommands
+        )
+    }
+
+    private fun routeHeadsetSignal(signal: ControlSignal) {
+        val inCall = communicationViewModel?.video?.state?.value?.call != null
+        if (headsetControlEnabled.value && (inCall || (destination.value != AppDestination.DEVICE_STATUS &&
+                destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS))
+        ) routeSignal(signal)
     }
 
     private fun routeSignal(signal: ControlSignal) {
+        if (destination.value == AppDestination.WIZARD_GAME) {
+            WizardGameInputBus.dispatch(signal)
+            return
+        }
+        val video = communicationViewModel?.video
+        if (video?.state?.value?.call != null) {
+            val actions = video.actions(::askVideoPermissions)
+            if (actions.isEmpty() || video.state.value.pending) return
+            when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    if (scanMode.value == ScanMode.AUTO) videoScanDirection = step
+                    else videoSelection = (videoSelection + step).mod(actions.size)
+                }
+                ControlSignal.BITE -> actions[videoSelection.coerceIn(0, actions.lastIndex)].invoke()
+                else -> Unit
+            }
+            return
+        }
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
-                ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.moveLeft()
-                ControlSignal.RIGHT_LOOK -> homeSelection.value = homeSelection.value.moveRight()
-                ControlSignal.BITE -> homeSelection.value.selectedModule
-                    .takeUnless { it == HomeModule.SETTINGS }
-                    ?.let(::enterModule)
+                ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.onDirection(-1, scanMode.value)
+                ControlSignal.RIGHT_LOOK -> homeSelection.value = homeSelection.value.onDirection(1, scanMode.value)
+                ControlSignal.BITE -> enterModule(homeSelection.value.selectedModule)
+                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            AppDestination.ENTERTAINMENT -> when (signal) {
+                ControlSignal.LEFT_LOOK -> entertainmentSelection.value =
+                    entertainmentSelection.value.onDirection(-1, scanMode.value)
+                ControlSignal.RIGHT_LOOK -> entertainmentSelection.value =
+                    entertainmentSelection.value.onDirection(1, scanMode.value)
+                ControlSignal.BITE -> enterEntertainmentModule(
+                    entertainmentSelection.value.selectedModule
+                )
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
+            AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
+            AppDestination.WIZARD_GAME -> Unit
+            AppDestination.CHINESE_CHESS -> ChineseChessInputBus.dispatch(signal)
+            AppDestination.DOUDIZHU -> DoudizhuInputBus.dispatch(signal)
+            AppDestination.MAHJONG -> MahjongInputBus.dispatch(signal)
+            AppDestination.SNAKE_CLIMB -> when (signal) {
+                ControlSignal.LEFT_LOOK -> applySnakeAction(SnakeAction.LOOK_LEFT)
+                ControlSignal.RIGHT_LOOK -> applySnakeAction(SnakeAction.LOOK_RIGHT)
+                ControlSignal.BITE -> applySnakeAction(SnakeAction.BITE)
+                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            AppDestination.COMMUNICATION -> {
+                val chat = communicationViewModel ?: return
+                if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
+                    signal == ControlSignal.BITE) inputViewModel?.handleSignal(signal)
+                else if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
+                    signal in setOf(ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK)) inputViewModel?.handleSignal(signal)
+                else if (!chat.onSignal(signal)) navigateTo(AppDestination.HOME)
+            }
             AppDestination.ASYNC_MAZE -> {
                 val action = when (signal) {
                     ControlSignal.LEFT_LOOK -> MazeAction.LOOK_LEFT
@@ -372,35 +582,14 @@ class MainActivity : ComponentActivity() {
                 }
                 applyMazeAction(action)
             }
-            AppDestination.ENTERTAINMENT -> when (signal) {
-                ControlSignal.LEFT_LOOK -> entertainmentSelection.value = entertainmentSelection.value.moveLeft()
-                ControlSignal.RIGHT_LOOK -> entertainmentSelection.value = entertainmentSelection.value.moveRight()
-                ControlSignal.BITE -> when (entertainmentSelection.value.selectedAction) {
-                    EntertainmentAction.BACK -> navigateTo(AppDestination.HOME)
-                    EntertainmentAction.MUSIC -> openMusic()
-                    EntertainmentAction.TV -> openTelevision()
-                }
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            AppDestination.TV -> {
+                TvInputBus.dispatch(signal)
             }
-            AppDestination.MUSIC -> when (signal) {
-                ControlSignal.LEFT_LOOK -> musicSelection.value = musicSelection.value.moveLeft(
-                    EntertainmentPlayer.musicTracks.size
-                )
-                ControlSignal.RIGHT_LOOK -> musicSelection.value = musicSelection.value.moveRight(
-                    EntertainmentPlayer.musicTracks.size
-                )
-                ControlSignal.BITE -> confirmMusicSelection()
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            AppDestination.MUSIC -> {
+                MusicInputBus.dispatch(signal)
             }
-            AppDestination.TV -> when (signal) {
-                ControlSignal.LEFT_LOOK -> tvSelection.value = tvSelection.value.moveLeft(
-                    EntertainmentPlayer.tvChannels.size
-                )
-                ControlSignal.RIGHT_LOOK -> tvSelection.value = tvSelection.value.moveRight(
-                    EntertainmentPlayer.tvChannels.size
-                )
-                ControlSignal.BITE -> confirmTelevisionSelection()
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            AppDestination.APP_SETTINGS -> {
+                AppSettingsInputBus.dispatch(signal)
             }
             AppDestination.SETTINGS -> Unit
             AppDestination.DEVICE_STATUS, AppDestination.COLLECTION -> Unit
@@ -410,23 +599,23 @@ class MainActivity : ComponentActivity() {
     private fun startBciController() {
         stopBciController()
         attemptedModelIdentity = activeModelIdentity()
-        val controller = BciController(applicationContext, bleManager, ::routeSignal)
+        val controller = BciController(applicationContext, bleManager, ::routeHeadsetSignal)
         bciController = controller
-        val commandsEnabled = destination.value != AppDestination.DEVICE_STATUS &&
-            destination.value != AppDestination.COLLECTION &&
-            destination.value != AppDestination.SETTINGS
-        controller.setCommandDeliveryEnabled(commandsEnabled)
+        updateBciCommandDelivery()
         if (!controller.loadModel()) {
             bciStatus.value = "耳机已连接，控制模型不可用"
             controller.stop()
             bciController = null
             bciActive.value = false
+            headsetControlEnabled.value = false
             return
         }
         controller.start()
         bciActive.value = true
         val protocol = controller.loadedProtocol ?: ClassificationProtocol.FOUR_CLASS
-        bciStatus.value = if (protocol == ClassificationProtocol.SIX_ACTION) {
+        bciStatus.value = if (!headsetControlEnabled.value) {
+            "耳机已连接 · 等待手动启用控制"
+        } else if (protocol == ClassificationProtocol.SIX_ACTION) {
             "六分类异步控制运行中"
         } else {
             "四分类异步控制运行中"
@@ -461,13 +650,13 @@ class MainActivity : ComponentActivity() {
     private fun applyMazeAction(action: MazeAction) {
         val nextState = MazeGame.applyAction(mazeState.value, action)
         mazeState.value = nextState
-        if (nextState.exitConfirmed) navigateTo(AppDestination.HOME)
+        if (nextState.exitConfirmed) navigateTo(AppDestination.ENTERTAINMENT)
     }
 
     private fun resolveMazeExit(choice: MazeExitChoice) {
         val nextState = MazeGame.resolveExitDialog(mazeState.value, choice)
         mazeState.value = nextState
-        if (nextState.exitConfirmed) navigateTo(AppDestination.HOME)
+        if (nextState.exitConfirmed) navigateTo(AppDestination.ENTERTAINMENT)
     }
 
     private fun activeModelIdentity(): String {
@@ -488,7 +677,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun deviceStatusText(state: NaoyunBleManager.State): String = when (state) {
-        NaoyunBleManager.State.READY -> if (bciActive.value) "耳机已连接 · 控制运行中" else "耳机已连接"
+        NaoyunBleManager.State.READY -> when {
+            bciActive.value && headsetControlEnabled.value -> "耳机已连接 · 控制已启用"
+            bciActive.value -> "耳机已连接 · 等待手动启用控制"
+            else -> "耳机已连接"
+        }
         NaoyunBleManager.State.SCANNING -> "正在扫描耳机"
         NaoyunBleManager.State.CONNECTING, NaoyunBleManager.State.INITIALIZING -> "正在连接耳机"
         NaoyunBleManager.State.STREAM_STALLED -> "耳机数据流中断"
@@ -498,8 +691,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        FloatingEegSignalSource.detach(bleManager)
+        communicationViewModel?.requestVideoPermissions = {}
         stopBciController()
-        entertainmentPlayer.close()
         bleManager.disconnect()
         super.onDestroy()
     }

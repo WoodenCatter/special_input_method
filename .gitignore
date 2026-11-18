@@ -41,3 +41,6 @@ Desktop.ini
 *.log
 /current_phone_screen.png
 /codex_window.xml
+
+# Local-only video test server and debug network policy
+/.video-test/
