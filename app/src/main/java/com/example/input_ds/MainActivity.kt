@@ -57,6 +57,10 @@ import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.example.input_ds.doudizhu.DoudizhuInputBus
+import com.example.input_ds.mahjong.MahjongInputBus
+import com.example.input_ds.ui.doudizhu.DoudizhuScreen
+import com.example.input_ds.ui.mahjong.MahjongScreen
 import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
 import com.example.input_ds.ui.assistant.AssistantInputBus
@@ -251,7 +255,9 @@ class MainActivity : ComponentActivity() {
                 val parent = when (destination.value) {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
-                    AppDestination.SNAKE_CLIMB -> AppDestination.ENTERTAINMENT
+                    AppDestination.SNAKE_CLIMB,
+                    AppDestination.DOUDIZHU,
+                    AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
                     AppDestination.TV, AppDestination.MUSIC -> mediaParent()
                     else -> AppDestination.HOME
                 }
@@ -309,6 +315,14 @@ class MainActivity : ComponentActivity() {
                         navigateTo(target)
                     }
                 )
+            }
+
+            AppDestination.DOUDIZHU -> DoudizhuScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
+            }
+
+            AppDestination.MAHJONG -> MahjongScreen(inputState.scanIntervalMs) {
+                navigateTo(AppDestination.ENTERTAINMENT)
             }
 
             AppDestination.SNAKE_CLIMB -> SnakeClimbScreen(
@@ -426,6 +440,8 @@ class MainActivity : ComponentActivity() {
                 snakeState.value = SnakeClimbGame.create()
                 navigateTo(AppDestination.SNAKE_CLIMB)
             }
+            EntertainmentHubModule.DOUDIZHU -> navigateTo(AppDestination.DOUDIZHU)
+            EntertainmentHubModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
             EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
             EntertainmentHubModule.MUSIC -> navigateTo(AppDestination.MUSIC)
             EntertainmentHubModule.BACK -> navigateTo(AppDestination.HOME)
@@ -504,6 +520,8 @@ class MainActivity : ComponentActivity() {
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
             AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
+            AppDestination.DOUDIZHU -> DoudizhuInputBus.dispatch(signal)
+            AppDestination.MAHJONG -> MahjongInputBus.dispatch(signal)
             AppDestination.SNAKE_CLIMB -> when (signal) {
                 ControlSignal.LEFT_LOOK -> applySnakeAction(SnakeAction.LOOK_LEFT)
                 ControlSignal.RIGHT_LOOK -> applySnakeAction(SnakeAction.LOOK_RIGHT)

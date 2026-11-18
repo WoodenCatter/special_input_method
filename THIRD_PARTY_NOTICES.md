@@ -95,3 +95,9 @@ The current music page plays files imported by the user. No commercial recording
 - Usage: Retained legacy Media3 HTTP transport and fallback resolver code; current local music and WebView television pages do not use this path.
 
 The legacy media code retains a fallback DNS-over-HTTPS resolver, but it is not called by the current music or television pages.
+
+
+## Dou Dizhu Online
+
+- Code attribution: Jiacheng Wang, MIT. See LICENSES/DOUDIZHU-ONLINE-MIT.txt.
+- The app packages Huang's adapted HTML, CSS and JavaScript for local three-player play with two AI opponents and EEG scanning. Avatar labels are rendered with CSS. Gameplay cues are synthesized locally.
