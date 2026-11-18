@@ -64,7 +64,7 @@ class InputMethodViewModel(
     private val pinyinRecoveryEngine = PinyinRecoveryEngine()
     private val characterLookupEngine = CharacterLookupEngine()
     private val localPredictionProvider = LocalPredictionProvider()
-    private val rimePredictionProvider = RimePredictionProvider(application)
+    private val rimePredictionProvider = RimePredictionProvider.shared(application)
     private val llmPredictionProvider = LlmPredictionProvider(application)
     private val conversationContextProvider = MutableConversationContextProvider()
     private val initialPhraseIndex = InitialPhraseIndex(application)
@@ -1076,7 +1076,6 @@ class InputMethodViewModel(
         cancelPredictionRequest()
         cancelInitialPredictionRequest()
         predictionDebugClearJob?.cancel()
-        rimePredictionProvider.close()
         stopScanning(); stopPinyinScanning(); stopCharScanning(); stopPredScanning()
         super.onCleared()
     }
