@@ -149,7 +149,10 @@ internal fun AssistantScreen(
     }
     val library = remember(context) { MusicLibrary(context) }
     val allowHttp = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-    val channels = remember { TV_CHANNELS.map { AssistantCatalogItem(it.id, it.name) } }
+    val channels = remember {
+        TV_CHANNELS.filterNot { it.temporarilyUnavailable }
+            .map { AssistantCatalogItem(it.id, it.name) }
+    }
 
     var address by remember { mutableStateOf(preferences.getString("address", "").orEmpty()) }
     var accessCode by remember { mutableStateOf(preferences.getString("access_code", "").orEmpty()) }
