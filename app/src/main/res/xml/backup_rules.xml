@@ -10,6 +10,9 @@
     <exclude domain="sharedpref" path="personalization_credentials.xml" />
     <!-- Ear-EEG recordings and downloaded personalized models are sensitive and user-specific. -->
     <exclude domain="file" path="personalization/" />
+    <exclude domain="file" path="bci_async_runs/" />
+    <exclude domain="sharedpref" path="chat_cache_v1.xml" />
+    <exclude domain="sharedpref" path="assistant_connection.xml" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

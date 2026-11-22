@@ -1,6 +1,20 @@
+import com.android.build.api.variant.BuildConfigField
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+val videoTestUrlFile = rootProject.layout.projectDirectory.file(".video-test/base-url.txt")
+val videoTestResourceDirectory = rootProject.layout.projectDirectory.dir(".video-test/res")
+val videoTestUrl = providers.fileContents(videoTestUrlFile).asText.map { text ->
+    val url = URI(text.trim())
+    require(url.scheme in listOf("http", "https") && url.host != null &&
+        url.userInfo == null && url.query == null && url.fragment == null) {
+        "Video test endpoint must be an HTTP(S) URL without credentials, query, or fragment."
+    }
+    url.toASCIIString().trimEnd('/')
 }
 
 android {
@@ -17,8 +31,33 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("boolean", "DEMO_COMMUNICATION", "false")
+        buildConfigField("String", "BACKNET_URL", "\"https://smu-brain.online\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    flavorDimensions += "server"
+    productFlavors {
+        create("production") {
+            dimension = "server"
+        }
+        create("demo") {
+            dimension = "server"
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-demo"
+            buildConfigField("boolean", "DEMO_COMMUNICATION", "true")
+        }
+        create("videoTest") {
+            dimension = "server"
+            applicationIdSuffix = ".videotest"
+            versionNameSuffix = "-video-test"
+            buildConfigField("String", "BACKNET_URL", "\"https://example.invalid\"")
+        }
+    }
+
+    if (videoTestResourceDirectory.asFile.isDirectory) {
+        sourceSets.maybeCreate("videoTestDebug").res.setSrcDirs(listOf(videoTestResourceDirectory))
     }
 
     buildTypes {
@@ -34,12 +73,29 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    androidResources {
+        noCompress += "pck"
+    }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("debug").withFlavor("server" to "videoTest")) { variant ->
+        variant.buildConfigFields?.put(
+            "BACKNET_URL",
+            videoTestUrl.orElse("https://example.invalid").map { url ->
+                BuildConfigField("String", "\"$url\"", "Local video test endpoint")
+            }
+        )
     }
 }
 
 dependencies {
+    implementation("org.godotengine:godot:4.7.1.stable")
+    implementation("io.livekit:livekit-android:2.30.0")
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)

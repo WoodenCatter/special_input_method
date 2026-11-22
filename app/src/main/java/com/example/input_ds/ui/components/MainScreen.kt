@@ -59,7 +59,9 @@ fun MainScreen(
     onCharacterClick: (String) -> Unit,
     onCommonPhraseClick: (String) -> Unit,
     onPredictionClick: (Int) -> Unit,
-    onInitialPredictionClick: (Int) -> Unit
+    onInitialPredictionClick: (Int) -> Unit,
+    sendLabel: String = "发送",
+    commonPhrases: (() -> List<String>)? = null
 ) {
     GlassPanel(
         modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 4.dp),
@@ -86,7 +88,11 @@ fun MainScreen(
             ) {
                 LetterBlockMapping.LEFT_BLOCKS.forEachIndexed { index, block ->
                     LetterBlockItem(
-                        label = LetterBlockMapping.DIGIT_LABELS[block] ?: "",
+                        label = if (block == LetterBlockMapping.SEND_BLOCK) {
+                            sendLabel
+                        } else {
+                            LetterBlockMapping.DIGIT_LABELS[block].orEmpty()
+                        },
                         isHighlighted = state.phase == InputPhase.LEVEL_1_SCANNING
                                 && state.scanSide == ScanSide.LEFT
                                 && state.highlightedBlockIndex == index,
@@ -120,6 +126,7 @@ fun MainScreen(
                     onCommonPhraseClick = onCommonPhraseClick,
                     onPredictionClick = onPredictionClick,
                     onInitialPredictionClick = onInitialPredictionClick,
+                    commonPhrases = commonPhrases,
                     modifier = Modifier.weight(1.5f)
                 )
             }
@@ -456,6 +463,7 @@ fun Region2(
     onCommonPhraseClick: (String) -> Unit,
     onPredictionClick: (Int) -> Unit,
     onInitialPredictionClick: (Int) -> Unit,
+    commonPhrases: (() -> List<String>)? = null,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -550,9 +558,9 @@ fun Region2(
                             fontSize = 11.sp,
                             color = TextGray
                         )
-                        val commonPhrases = CommonPhraseUsage.sorted(
+                        val previewPhrases = (commonPhrases?.invoke() ?: CommonPhraseUsage.sorted(
                             com.example.input_ds.data.CharacterDictionary.COMMON_PHRASES
-                        ).take(15)
+                        )).take(15)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             for (row in 0..2) {
                                 Row(
@@ -561,13 +569,13 @@ fun Region2(
                                 ) {
                                     for (col in 0..4) {
                                         val idx = row * 5 + col
-                                        if (idx < commonPhrases.size) {
+                                        if (idx < previewPhrases.size) {
                                             GridCharBox(
                                                 false,
-                                                commonPhrases[idx],
+                                                previewPhrases[idx],
                                                 18.sp,
                                                 16.sp,
-                                                onClick = { onCommonPhraseClick(commonPhrases[idx]) },
+                                                onClick = { onCommonPhraseClick(previewPhrases[idx]) },
                                                 modifier = Modifier.weight(1f)
                                             )
                                         } else {

@@ -49,6 +49,7 @@ internal class AsyncControlLogger(
                 put("stride_seconds", AsyncWindowPolicy.STRIDE_SECONDS.toDouble())
                 put("evidence_windows", AsyncWindowPolicy.EVIDENCE_WINDOWS)
                 put("confidence_threshold", AsyncWindowPolicy.CONFIDENCE_THRESHOLD.toDouble())
+                put("rest_confidence_threshold", AsyncWindowPolicy.REST_CONFIDENCE_THRESHOLD.toDouble())
                 put("support_required", AsyncWindowPolicy.SUPPORT_REQUIRED)
                 put("evidence_mode", "support_confidence")
                 put("physical_support_required", AsyncWindowPolicy.PHYSICAL_SUPPORT_REQUIRED)

@@ -340,16 +340,23 @@ class RimePredictionProvider(
         executor.shutdown()
     }
 
-    private companion object {
-        const val SCHEMA_ID = "prediction_context"
-        const val DISTRIBUTION_VERSION = "1.0-trime-3.3.11-predict-data-1.0"
-        const val MAX_CONTEXT_CODE_POINTS = 32
-        const val MAX_RIME_QUERY_CODE_POINTS = 8
-        const val CONTEXT_CANDIDATE_LIMIT = 512
-        const val RIME_CANDIDATE_MULTIPLIER = 4
-        const val DEPLOY_RETRIES = 120
-        const val DEPLOY_RETRY_DELAY_MS = 250L
-        const val PREDICT_DATABASE_NAME = "predict.db"
+    companion object {
+        private var processProvider: RimePredictionProvider? = null
+
+        /** librime owns process-wide native state; all input screens share one worker. */
+        @Synchronized
+        internal fun shared(context: Context): RimePredictionProvider =
+            processProvider ?: RimePredictionProvider(context).also { processProvider = it }
+
+        private const val SCHEMA_ID = "prediction_context"
+        private const val DISTRIBUTION_VERSION = "1.0-trime-3.3.11-predict-data-1.0"
+        private const val MAX_CONTEXT_CODE_POINTS = 32
+        private const val MAX_RIME_QUERY_CODE_POINTS = 8
+        private const val CONTEXT_CANDIDATE_LIMIT = 512
+        private const val RIME_CANDIDATE_MULTIPLIER = 4
+        private const val DEPLOY_RETRIES = 120
+        private const val DEPLOY_RETRY_DELAY_MS = 250L
+        private const val PREDICT_DATABASE_NAME = "predict.db"
     }
 
     private enum class RuntimeState {
