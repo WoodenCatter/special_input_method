@@ -1,36 +1,28 @@
 package com.example.input_ds.ui.settings
 
-import com.example.input_ds.ui.design.*
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.media.AudioManager
-import androidx.activity.compose.BackHandler
+import android.os.SystemClock
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,461 +30,432 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.input_ds.R
 import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.ScanSettings
+import com.example.input_ds.model.runScanTimer
 import com.example.input_ds.settings.AppSettingsInputBus
 import com.example.input_ds.settings.AppSettingsSignalSink
-import com.example.input_ds.ui.theme.AuroraBackground
-import com.example.input_ds.ui.theme.AuroraButton
-import com.example.input_ds.ui.theme.AuroraButtonStyle
-import com.example.input_ds.ui.theme.AuroraCyan
-import com.example.input_ds.ui.theme.AuroraDarkSurfaceStrong
-import com.example.input_ds.ui.theme.AuroraOk
-import com.example.input_ds.ui.theme.AuroraVioletBright
-import com.example.input_ds.ui.theme.GlassPanel
-import com.example.input_ds.ui.theme.SelectableGlassPanel
-import kotlinx.coroutines.delay
+import com.example.input_ds.ui.design.ActionHints
+import com.example.input_ds.ui.design.AdjustOverlayKind
+import com.example.input_ds.ui.design.ReportActionHints
+import com.example.input_ds.ui.design.scanItem
+import com.example.input_ds.ui.theme.BciType
+import com.example.input_ds.ui.theme.LocalBciColors
+import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class SettingsFocusMode {
-    MENU,
-    VOLUME,
-    BRIGHTNESS,
-    FLOATING_BALL
+internal enum class AppSettingItem(
+    val label: String,
+    @param:DrawableRes val iconRes: Int,
+    val description: String,
+    val isNavigation: Boolean = false
+) {
+    BACK("返回主页", R.drawable.ic_lucide_arrow_left, "回到主页，选择其他功能。", isNavigation = true),
+    VOLUME("音量", R.drawable.ic_lucide_volume_2, "整个应用的声音大小，包括朗读、通话和提示音。"),
+    BRIGHTNESS("屏幕亮度", R.drawable.ic_lucide_sun, "只在使用本应用时生效。夜间建议调低。"),
+    SPEED("每项停留", R.drawable.ic_lucide_gauge, "自动扫描时，光标在每一项停留多久。范围 1.1–3.0 秒。"),
+    SCAN_MODE(
+        "扫描方式",
+        R.drawable.ic_lucide_arrow_left_right,
+        "自动：光标按停留时间自己移动，看向左右改变方向。手动：光标不自己动，左看上一项、右看下一项。沟通的字母块始终自动扫描。"
+    ),
+    DISPLAY_MODE("显示模式", R.drawable.ic_lucide_sun_moon, "咬牙依次切换：自动 → 日间 → 夜间。自动为 7:00–19:00 日间，其余时间夜间。"),
+    FLOATING_BALL("模拟悬浮球", R.drawable.ic_lucide_circle_dot, "照护者测试用的模拟按钮，不影响真实耳机控制。"),
+    SPEED_PRACTICE("速度练习", R.drawable.ic_lucide_target, "做 12 次目标选择，系统推荐合适的停留时间，由你决定是否采用。")
 }
 
-private enum class PatientSetting(
-    val title: String,
-    val description: String,
-    val symbol: String
-) {
-    VOLUME("调整声音大小", "调节整个 APP 的媒体音量", "♫"),
-    BRIGHTNESS("调整屏幕亮度", "调节本 APP 使用期间的屏幕亮度", "☀"),
-    FLOATING_BALL("隐藏/显示悬浮球", "隐藏或重新显示测试悬浮球", "●"),
-    BACK("返回主页面", "返回主界面继续选择功能", "←")
+internal object AppSettingsLogic {
+    const val INITIAL_INDEX = 1
+
+    fun cycleDisplayMode(current: AppUiSettings.DisplayMode): AppUiSettings.DisplayMode = when (current) {
+        AppUiSettings.DisplayMode.AUTO -> AppUiSettings.DisplayMode.LIGHT
+        AppUiSettings.DisplayMode.LIGHT -> AppUiSettings.DisplayMode.DARK
+        AppUiSettings.DisplayMode.DARK -> AppUiSettings.DisplayMode.AUTO
+    }
+
+    fun displayModeLabel(mode: AppUiSettings.DisplayMode): String = when (mode) {
+        AppUiSettings.DisplayMode.AUTO -> "自动"
+        AppUiSettings.DisplayMode.LIGHT -> "日间"
+        AppUiSettings.DisplayMode.DARK -> "夜间"
+    }
+
+    fun stepVolumePercent(percent: Int, delta: Int): Int =
+        (percent + delta * 10).coerceIn(0, 100)
+
+    fun streamLevelToPercent(level: Int, maxLevel: Int): Int {
+        val safeMax = maxLevel.coerceAtLeast(1)
+        return (level.coerceIn(0, safeMax) * 100f / safeMax).roundToInt().coerceIn(0, 100)
+    }
+
+    fun nextStreamVolumeLevel(currentLevel: Int, maxLevel: Int, delta: Int): Int {
+        val safeMax = maxLevel.coerceAtLeast(1)
+        val clampedCurrent = currentLevel.coerceIn(0, safeMax)
+        if (delta == 0) return clampedCurrent
+        val targetPercent = stepVolumePercent(streamLevelToPercent(clampedCurrent, safeMax), delta)
+        val mapped = (targetPercent / 100f * safeMax).roundToInt().coerceIn(0, safeMax)
+        return when {
+            delta > 0 && clampedCurrent < safeMax && mapped <= clampedCurrent -> clampedCurrent + 1
+            delta < 0 && clampedCurrent > 0 && mapped >= clampedCurrent -> clampedCurrent - 1
+            else -> mapped
+        }
+    }
+
+    fun stepBrightnessPercent(percent: Int, delta: Int): Int =
+        (percent + delta * 10).coerceIn(10, 100)
+
+    fun stepScanIntervalMs(intervalMs: Long, delta: Int): Long =
+        (intervalMs + delta * 100L).coerceIn(ScanSettings.MIN_INTERVAL_MS, ScanSettings.MAX_INTERVAL_MS)
+
+    fun adjustFraction(
+        kind: AdjustOverlayKind,
+        volPercent: Int,
+        briPercent: Int,
+        intervalMs: Long
+    ): Float = when (kind) {
+        AdjustOverlayKind.VOLUME -> volPercent.coerceIn(0, 100) / 100f
+        AdjustOverlayKind.BRIGHTNESS -> briPercent.coerceIn(0, 100) / 100f
+        AdjustOverlayKind.SPEED -> ((intervalMs - ScanSettings.MIN_INTERVAL_MS).toFloat() /
+            (ScanSettings.MAX_INTERVAL_MS - ScanSettings.MIN_INTERVAL_MS).toFloat()).coerceIn(0f, 1f)
+    }
+
+    fun formatScanInterval(intervalMs: Long): String =
+        String.format(Locale.ROOT, "%.1f 秒", intervalMs / 1000.0)
+
+    fun valueFor(
+        item: AppSettingItem,
+        volumePercent: Int,
+        brightnessPercent: Int,
+        scanIntervalMs: Long,
+        scanMode: ScanMode,
+        displayMode: AppUiSettings.DisplayMode,
+        floatingBallVisible: Boolean
+    ): String = when (item) {
+        AppSettingItem.BACK -> ""
+        AppSettingItem.VOLUME -> "${volumePercent}%"
+        AppSettingItem.BRIGHTNESS -> "${brightnessPercent}%"
+        AppSettingItem.SPEED -> formatScanInterval(scanIntervalMs)
+        AppSettingItem.SCAN_MODE -> if (scanMode == ScanMode.AUTO) "自动" else "手动"
+        AppSettingItem.DISPLAY_MODE -> displayModeLabel(displayMode)
+        AppSettingItem.FLOATING_BALL -> if (floatingBallVisible) "显示" else "隐藏"
+        AppSettingItem.SPEED_PRACTICE -> "12 题"
+    }
 }
 
 @Composable
 fun AppSettingsScreen(
     scanIntervalMs: Long,
     scanMode: ScanMode,
-    onScanModeChange: (ScanMode) -> Unit,
+    displayMode: AppUiSettings.DisplayMode,
     floatingBallVisible: Boolean,
-    headsetControlEnabled: Boolean,
+    volumePercent: Int,
+    brightnessPercent: Int,
+    paused: Boolean,
+    frozen: Boolean,
+    initialIndex: Int = AppSettingsLogic.INITIAL_INDEX,
+    onOpenAdjust: (AdjustOverlayKind) -> Unit,
+    onOpenSpeedPractice: () -> Unit,
+    onScanModeChange: (ScanMode) -> Unit,
+    onDisplayModeChange: (AppUiSettings.DisplayMode) -> Unit,
     onFloatingBallVisibleChange: (Boolean) -> Unit,
-    onHeadsetControlEnabledChange: (Boolean) -> Unit,
+    onToast: (String, Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
-    val audioManager = remember(context) {
-        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    val maxVolume = remember(audioManager) {
-        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-    }
+    val items = AppSettingItem.entries
     val currentOnBack by rememberUpdatedState(onBack)
-    val currentOnFloatingBallVisibleChange by rememberUpdatedState(onFloatingBallVisibleChange)
-    val currentOnHeadsetControlEnabledChange by rememberUpdatedState(onHeadsetControlEnabledChange)
+    val currentOnOpenAdjust by rememberUpdatedState(onOpenAdjust)
+    val currentOnOpenSpeedPractice by rememberUpdatedState(onOpenSpeedPractice)
     val currentOnScanModeChange by rememberUpdatedState(onScanModeChange)
+    val currentOnDisplayModeChange by rememberUpdatedState(onDisplayModeChange)
+    val currentOnFloatingBallChange by rememberUpdatedState(onFloatingBallVisibleChange)
+    val currentOnToast by rememberUpdatedState(onToast)
 
-    var focusMode by remember { mutableStateOf(SettingsFocusMode.MENU) }
-    var menuIndex by remember { mutableIntStateOf(0) }
-    var optionIndex by remember { mutableIntStateOf(0) }
-    var scanDirection by remember { mutableIntStateOf(1) }
-    var volume by remember {
-        mutableIntStateOf(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC))
+    var cursor by remember {
+        mutableStateOf(
+            ScanCursor(
+                size = items.size,
+                index = initialIndex.coerceIn(items.indices),
+                direction = 1
+            )
+        )
     }
-    var brightness by remember {
-        mutableFloatStateOf(AppUiSettings.readScreenBrightness(context))
-    }
-    val scanDelay = scanIntervalMs.coerceIn(1_100L, 3_000L)
+    var dwellRevision by remember { mutableIntStateOf(0) }
 
-    val focusedLabel = when (focusMode) {
-        SettingsFocusMode.MENU -> PatientSetting.entries[menuIndex].title
-        SettingsFocusMode.VOLUME -> listOf("减小音量", "增大音量", "返回设置").getOrNull(optionIndex)
-        SettingsFocusMode.BRIGHTNESS -> listOf("降低亮度", "提高亮度", "返回设置").getOrNull(optionIndex)
-        SettingsFocusMode.FLOATING_BALL -> listOf(if (floatingBallVisible) "隐藏悬浮球" else "显示悬浮球", "返回设置").getOrNull(optionIndex)
-    }
-    ReportActionHints(ActionHints.list(focusedLabel.orEmpty(), scanMode, scanDirection))
+    val focusedItem = items[cursor.index.coerceIn(items.indices)]
+    ReportActionHints(ActionHints.list(focusedItem.label, scanMode, cursor.direction))
 
-    fun applyBrightness(value: Float) {
-        brightness = AppUiSettings.writeScreenBrightness(context, value)
-        activity?.let { owner ->
-            val attributes = owner.window.attributes
-            attributes.screenBrightness = brightness
-            owner.window.attributes = attributes
+    fun choose(index: Int) {
+        val item = items.getOrNull(index) ?: return
+        cursor = cursor.copy(index = index)
+        when (item) {
+            AppSettingItem.BACK -> currentOnBack()
+            AppSettingItem.VOLUME -> currentOnOpenAdjust(AdjustOverlayKind.VOLUME)
+            AppSettingItem.BRIGHTNESS -> currentOnOpenAdjust(AdjustOverlayKind.BRIGHTNESS)
+            AppSettingItem.SPEED -> currentOnOpenAdjust(AdjustOverlayKind.SPEED)
+            AppSettingItem.SCAN_MODE -> {
+                val nextMode = if (scanMode == ScanMode.AUTO) ScanMode.MANUAL else ScanMode.AUTO
+                currentOnScanModeChange(nextMode)
+                if (!frozen) {
+                    currentOnToast("扫描方式：${if (nextMode == ScanMode.AUTO) "自动" else "手动"}", true)
+                }
+                dwellRevision++
+            }
+            AppSettingItem.DISPLAY_MODE -> {
+                val nextDisplay = AppSettingsLogic.cycleDisplayMode(displayMode)
+                currentOnDisplayModeChange(nextDisplay)
+                if (!frozen) {
+                    currentOnToast("显示模式：${AppSettingsLogic.displayModeLabel(nextDisplay)}", true)
+                }
+                dwellRevision++
+            }
+            AppSettingItem.FLOATING_BALL -> {
+                val nextVisible = !floatingBallVisible
+                currentOnFloatingBallChange(nextVisible)
+                if (!frozen) {
+                    currentOnToast(if (nextVisible) "模拟悬浮球已显示" else "模拟悬浮球已隐藏", true)
+                }
+                dwellRevision++
+            }
+            AppSettingItem.SPEED_PRACTICE -> currentOnOpenSpeedPractice()
         }
     }
 
-    fun changeVolume(delta: Int) {
-        val direction = if (delta < 0) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE
-        runCatching {
-            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
-        }
-        volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-    }
-
-    fun returnToMenu() {
-        focusMode = SettingsFocusMode.MENU
-        optionIndex = 0
-    }
-
-    fun open(setting: PatientSetting) {
-        optionIndex = 0
-        focusMode = when (setting) {
-            PatientSetting.VOLUME -> SettingsFocusMode.VOLUME
-            PatientSetting.BRIGHTNESS -> SettingsFocusMode.BRIGHTNESS
-            PatientSetting.FLOATING_BALL -> SettingsFocusMode.FLOATING_BALL
-            PatientSetting.BACK -> {
-                currentOnBack()
-                SettingsFocusMode.MENU
-            }
-        }
-    }
-
-    fun executeOption() {
-        when (focusMode) {
-            SettingsFocusMode.MENU -> open(PatientSetting.entries[menuIndex])
-            SettingsFocusMode.VOLUME -> when (optionIndex) {
-                0 -> changeVolume(-1)
-                1 -> changeVolume(1)
-                else -> returnToMenu()
-            }
-            SettingsFocusMode.BRIGHTNESS -> when (optionIndex) {
-                0 -> applyBrightness(brightness - AppUiSettings.BRIGHTNESS_STEP)
-                1 -> applyBrightness(brightness + AppUiSettings.BRIGHTNESS_STEP)
-                else -> returnToMenu()
-            }
-            SettingsFocusMode.FLOATING_BALL -> when (optionIndex) {
-                0 -> currentOnFloatingBallVisibleChange(!floatingBallVisible)
-                else -> returnToMenu()
-            }
-        }
-    }
-
-    fun optionCount(): Int = when (focusMode) {
-        SettingsFocusMode.MENU -> PatientSetting.entries.size
-        SettingsFocusMode.VOLUME, SettingsFocusMode.BRIGHTNESS -> 3
-        SettingsFocusMode.FLOATING_BALL -> 2
-    }
-
-    LaunchedEffect(
-        scanMode,
-        focusMode,
-        menuIndex,
-        optionIndex,
-        scanDirection,
-        scanDelay,
-        volume,
-        brightness,
-        floatingBallVisible
-    ) {
-        if (scanMode == ScanMode.AUTO) {
-            delay(scanDelay)
-            if (focusMode == SettingsFocusMode.MENU) {
-                menuIndex = (menuIndex + scanDirection + PatientSetting.entries.size) %
-                    PatientSetting.entries.size
-            } else {
-                val count = optionCount()
-                optionIndex = (optionIndex + scanDirection + count) % count
-            }
-        }
-    }
-
-    val signalHandler = rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
+    val signalHandler by rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
+        val now = SystemClock.elapsedRealtime()
+        val grace = if (frozen) 0L else AppUiSettings.graceMs(context)
         when (signal) {
             ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
-                val direction = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
-                scanDirection = direction
-                if (scanMode == ScanMode.MANUAL) {
-                    if (focusMode == SettingsFocusMode.MENU) {
-                        menuIndex = (menuIndex + direction + PatientSetting.entries.size) % PatientSetting.entries.size
-                    } else {
-                        val count = optionCount()
-                        optionIndex = (optionIndex + direction + count) % count
-                    }
-                }
+                val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                cursor = cursor.look(step, scanMode)
+                dwellRevision++
             }
-            ControlSignal.BITE -> executeOption()
+            ControlSignal.BITE -> {
+                val chosen = cursor.selected(now, grace, scanMode)
+                if (chosen != cursor.index && !frozen) {
+                    currentOnToast("已按上一项执行（延迟补偿）", false)
+                }
+                choose(chosen)
+            }
             ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
         }
     }
-    val signalSink = remember { AppSettingsSignalSink { signalHandler.value(it) } }
+    val tickHandler by rememberUpdatedState<() -> Unit> {
+        cursor = cursor.advance(SystemClock.elapsedRealtime(), ScanMode.AUTO)
+    }
+    val resetFocusHandler by rememberUpdatedState<(Int) -> Unit> { targetIndex ->
+        cursor = ScanCursor(size = items.size, index = targetIndex.coerceIn(items.indices), direction = 1)
+        dwellRevision++
+    }
+    val signalSink = remember { AppSettingsSignalSink { signalHandler(it) } }
 
     DisposableEffect(signalSink) {
-        AppSettingsInputBus.attach(signalSink)
+        AppSettingsInputBus.attach(
+            candidate = signalSink,
+            onTick = { tickHandler() },
+            onResetFocus = { targetIndex -> resetFocusHandler(targetIndex) }
+        )
         onDispose { AppSettingsInputBus.detach(signalSink) }
     }
 
-    BackHandler {
-        if (focusMode == SettingsFocusMode.MENU) currentOnBack() else returnToMenu()
+    LaunchedEffect(paused) {
+        cursor = cursor.reset()
     }
 
-    AuroraBackground {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(paused, frozen, scanMode, dwellRevision, scanIntervalMs, lifecycleOwner) {
+        if (!paused && !frozen && scanMode == ScanMode.AUTO) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                cursor = cursor.copy(previousIndex = -1, advancedAtMs = 0L)
+                runScanTimer(
+                    interval = { scanIntervalMs },
+                    onFailure = { android.util.Log.e("ScanCursor", "Settings tick failed", it) }
+                ) {
+                    cursor = cursor.advance(SystemClock.elapsedRealtime(), ScanMode.AUTO)
+                }
+            }
+        }
+    }
+
+    val dwellProgress = remember { Animatable(0f) }
+    LaunchedEffect(cursor.index, cursor.direction, dwellRevision, scanIntervalMs, scanMode, paused, frozen, lifecycleOwner) {
+        when {
+            frozen -> dwellProgress.snapTo(if (scanMode == ScanMode.AUTO) 0.5f else 0f)
+            paused || scanMode != ScanMode.AUTO -> dwellProgress.snapTo(0f)
+            else -> lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                dwellProgress.snapTo(0f)
+                dwellProgress.animateTo(1f, tween(scanIntervalMs.toInt(), easing = LinearEasing))
+            }
+        }
+    }
+
+    val c = LocalBciColors.current
+    val dir = if (scanMode == ScanMode.AUTO) cursor.direction else 0
+    val progressProvider: () -> Float? = { if (scanMode == ScanMode.AUTO) dwellProgress.value else null }
+    val cssLineBox = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
+
+    Row(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(22.dp)
+    ) {
+        // Left column: 8 equal-height setting rows.
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 22.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .weight(1.1f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("设置", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        "左侧可用耳机操作 · 右侧仅允许医护人员触摸",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TextButton(onClick = currentOnBack) { Text("返回主页") }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                GlassPanel(Modifier.weight(1.15f).fillMaxHeight()) {
-                    Text("病人可操作", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(
-                        if (scanMode == ScanMode.AUTO) {
-                            "光标自动跳转 ${if (scanDirection < 0) "←" else "→"} · 左看/右看改变方向 · 咬牙进入"
-                        } else {
-                            "手动扫描 · 左看/右看移动光标 · 咬牙进入"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    PatientSetting.entries.forEachIndexed { index, setting ->
-                        PatientSettingCard(
-                            setting = setting,
-                            status = when (setting) {
-                                PatientSetting.VOLUME -> "$volume / $maxVolume"
-                                PatientSetting.BRIGHTNESS -> "${(brightness * 100).roundToInt()}%"
-                                PatientSetting.FLOATING_BALL -> if (floatingBallVisible) "当前显示" else "当前隐藏"
-                                PatientSetting.BACK -> ""
-                            },
-                            selected = focusMode == SettingsFocusMode.MENU && menuIndex == index,
-                            onClick = {
-                                menuIndex = index
-                                open(setting)
-                            }
+            items.forEachIndexed { idx, item ->
+                val focused = idx == cursor.index
+                val valueText = AppSettingsLogic.valueFor(
+                    item = item,
+                    volumePercent = volumePercent,
+                    brightnessPercent = brightnessPercent,
+                    scanIntervalMs = scanIntervalMs,
+                    scanMode = scanMode,
+                    displayMode = displayMode,
+                    floatingBallVisible = floatingBallVisible
+                )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .scanItem(
+                            focused = focused,
+                            direction = dir,
+                            picked = false,
+                            progress = if (focused) progressProvider else null,
+                            navigation = item.isNavigation,
+                            showDirectionTag = false
                         )
-                    }
-                }
-
-                GlassPanel(Modifier.weight(.85f).fillMaxHeight()) {
-                    Text("医护人员辅助设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(
-                        "此列不会进入自动扫描，只能用手触摸。耳机信号稳定后再启用控制。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    AuroraButton(
-                        text = if (headsetControlEnabled) {
-                            "耳机控制：已启用\n点击后停用"
-                        } else {
-                            "耳机控制：已停用\n信号稳定后点击启用"
-                        },
-                        onClick = {
-                            currentOnHeadsetControlEnabledChange(!headsetControlEnabled)
-                        },
-                        modifier = Modifier.fillMaxWidth().height(88.dp),
-                        style = if (headsetControlEnabled) {
-                            AuroraButtonStyle.SUCCESS
-                        } else {
-                            AuroraButtonStyle.DANGER
-                        }
-                    )
-                    Text(
-                        if (headsetControlEnabled) {
-                            "真实耳机识别结果现在会执行操作；悬浮球始终可用于测试。"
-                        } else {
-                            "真实耳机仍可连接并等待信号稳定，但识别结果不会触发界面操作。"
-                        },
-                        color = if (headsetControlEnabled) AuroraOk else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text("页面导航扫描模式：${if (scanMode == ScanMode.MANUAL) "手动" else "自动"}")
-                    AuroraButton(
-                        text = if (scanMode == ScanMode.MANUAL) "切换为自动扫描" else "切换为手动扫描",
-                        onClick = { currentOnScanModeChange(if (scanMode == ScanMode.MANUAL) ScanMode.AUTO else ScanMode.MANUAL) },
-                        modifier = Modifier.fillMaxWidth().height(64.dp)
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(116.dp)
-                            .clip(MaterialTheme.shapes.medium)
-                            .background(AuroraDarkSurfaceStrong),
-                        contentAlignment = Alignment.Center
+                        .clickable(enabled = !paused) { choose(idx) }
+                        .padding(horizontal = 26.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Icon(
+                            painter = painterResource(item.iconRes),
+                            contentDescription = null,
+                            tint = c.muted,
+                            modifier = Modifier.size(28.dp)
+                        )
                         Text(
-                            "医护辅助设置预留区\n后续仅触摸的选项将放在这里",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
+                            text = item.label,
+                            color = c.text,
+                            fontFamily = BciType.chinese,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
+                            lineHeight = 32.sp,
+                            style = TextStyle(
+                                lineHeightStyle = cssLineBox,
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
+                        )
+                    }
+                    if (valueText.isNotEmpty()) {
+                        Text(
+                            text = mixedLatinText(valueText),
+                            color = if (focused) c.focus else c.muted,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
+                            lineHeight = 32.sp,
+                            style = TextStyle(
+                                lineHeightStyle = cssLineBox,
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
                         )
                     }
                 }
             }
         }
 
-        if (focusMode != SettingsFocusMode.MENU) {
-            SettingsOverlay(
-                mode = focusMode,
-                selectedIndex = optionIndex,
-                volume = volume,
-                maxVolume = maxVolume,
-                brightness = brightness,
-                floatingBallVisible = floatingBallVisible,
-                direction = scanDirection,
-                onSelect = { index ->
-                    optionIndex = index
-                    executeOption()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-private fun PatientSettingCard(
-    setting: PatientSetting,
-    status: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    SelectableGlassPanel(
-        selected = selected,
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(82.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-    ) {
-        Row(
-            Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        // Right column (.sdesc): zoomed value and description for the focused row.
+        val focusedValue = AppSettingsLogic.valueFor(
+            item = focusedItem,
+            volumePercent = volumePercent,
+            brightnessPercent = brightnessPercent,
+            scanIntervalMs = scanIntervalMs,
+            scanMode = scanMode,
+            displayMode = displayMode,
+            floatingBallVisible = floatingBallVisible
+        )
+        val panelShape = RoundedCornerShape(20.dp)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .background(c.mag, panelShape)
+                .border(2.dp, c.line, panelShape)
+                .padding(34.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
         ) {
             Text(
-                setting.symbol,
-                color = if (selected) AuroraVioletBright else MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.headlineMedium
+                text = focusedItem.label,
+                color = c.muted,
+                fontFamily = BciType.chinese,
+                fontSize = 22.sp,
+                lineHeight = 31.sp,
+                style = TextStyle(
+                    lineHeightStyle = cssLineBox,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                )
             )
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
-                Text(setting.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            if (focusedValue.isNotEmpty()) {
                 Text(
-                    setting.description,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
+                    text = mixedLatinText(focusedValue),
+                    color = c.focus,
+                    fontWeight = FontWeight(800),
+                    fontSize = 92.sp,
+                    lineHeight = 92.sp,
+                    style = TextStyle(
+                        lineHeightStyle = cssLineBox,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
                 )
             }
-            if (status.isNotBlank()) {
-                Text(status, color = AuroraCyan, fontWeight = FontWeight.Bold)
-            }
+            Text(
+                text = mixedLatinText(focusedItem.description),
+                color = c.text,
+                fontWeight = FontWeight.Normal,
+                fontSize = 24.sp,
+                lineHeight = 36.sp,
+                style = TextStyle(
+                    lineHeightStyle = cssLineBox,
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                )
+            )
         }
     }
 }
 
-@Composable
-private fun SettingsOverlay(
-    mode: SettingsFocusMode,
-    selectedIndex: Int,
-    volume: Int,
-    maxVolume: Int,
-    brightness: Float,
-    floatingBallVisible: Boolean,
-    direction: Int,
-    onSelect: (Int) -> Unit
-) {
-    val title: String
-    val labels: List<String>
-    when (mode) {
-        SettingsFocusMode.VOLUME -> {
-            title = "声音大小"
-            labels = listOf("减小音量", "增大音量", "返回设置")
-        }
-        SettingsFocusMode.BRIGHTNESS -> {
-            title = "屏幕亮度"
-            labels = listOf("降低亮度", "提高亮度", "返回设置")
-        }
-        SettingsFocusMode.FLOATING_BALL -> {
-            title = "悬浮球显示"
-            labels = listOf(
-                if (floatingBallVisible) "隐藏悬浮球" else "显示悬浮球",
-                "返回设置"
-            )
-        }
-        SettingsFocusMode.MENU -> return
-    }
+internal fun displayModeBrightnessDefaultNote(value: Float): Int =
+    (value.coerceIn(AppUiSettings.MIN_BRIGHTNESS, AppUiSettings.MAX_BRIGHTNESS) * 100f).roundToInt()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(50f)
-            .background(Color.Black.copy(alpha = .72f))
-            .clickable(onClick = {}),
-        contentAlignment = Alignment.Center
-    ) {
-        GlassPanel(Modifier.fillMaxWidth(.56f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-            Text(
-                "光标自动跳转 ${if (direction < 0) "←" else "→"} · 左看/右看改变方向 · 咬牙选择",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-            if (mode == SettingsFocusMode.VOLUME) {
-                Text("音量：$volume / $maxVolume", fontWeight = FontWeight.Bold)
-                LinearProgressIndicator(
-                    progress = { volume.toFloat() / maxVolume.coerceAtLeast(1) },
-                    modifier = Modifier.fillMaxWidth().height(12.dp).clip(MaterialTheme.shapes.small),
-                    color = AuroraCyan,
-                    trackColor = AuroraDarkSurfaceStrong
-                )
-            }
-            if (mode == SettingsFocusMode.BRIGHTNESS) {
-                Text("亮度：${(brightness * 100).roundToInt()}%", fontWeight = FontWeight.Bold)
-                LinearProgressIndicator(
-                    progress = { brightness },
-                    modifier = Modifier.fillMaxWidth().height(12.dp).clip(MaterialTheme.shapes.small),
-                    color = AuroraCyan,
-                    trackColor = AuroraDarkSurfaceStrong
-                )
-            }
-            labels.forEachIndexed { index, label ->
-                AuroraButton(
-                    text = label,
-                    onClick = { onSelect(index) },
-                    modifier = Modifier.fillMaxWidth(),
-                    style = if (index == selectedIndex) {
-                        AuroraButtonStyle.PRIMARY
-                    } else {
-                        AuroraButtonStyle.SECONDARY
-                    }
-                )
-            }
+private fun mixedLatinText(value: String) = buildAnnotatedString {
+    for (ch in value) {
+        withStyle(SpanStyle(fontFamily = if (ch.code < 0x3000) BciType.latin else BciType.chinese)) {
+            append(ch)
         }
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }

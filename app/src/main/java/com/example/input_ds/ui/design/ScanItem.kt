@@ -35,7 +35,8 @@ fun Modifier.scanItem(
     dwellInset: Dp = 14.dp,
     dwellBottom: Dp = 8.dp,
     dwellHeight: Dp = 5.dp,
-    showShadow: Boolean = !navigation
+    showShadow: Boolean = !navigation,
+    showDirectionTag: Boolean = true
 ): Modifier = composed {
     val c = LocalBciColors.current
     val shape = RoundedCornerShape(cornerRadius)
@@ -121,7 +122,7 @@ fun Modifier.scanItem(
                 CornerRadius((cornerRadius - borderWidth / 2).coerceAtLeast(0.dp).toPx()),
                 style = Stroke(border, pathEffect = dash)
             )
-            if (focused && direction != 0) {
+            if (focused && direction != 0 && showDirectionTag) {
                 drawText(arrow, topLeft = Offset(size.width - 12.dp.toPx() - arrow.size.width, 8.dp.toPx()))
             }
             val fraction = progress?.invoke()

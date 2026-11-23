@@ -13,12 +13,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.input_ds.alert.NurseCallState
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.ScanMode
@@ -42,6 +49,21 @@ data class SpeakOverlayState(
 ) {
     companion object {
         val LABELS = listOf("返回修改", "再说一遍", "清空，开始新的一句")
+    }
+}
+
+enum class AdjustOverlayKind(val title: String) {
+    VOLUME("音量"),
+    BRIGHTNESS("屏幕亮度"),
+    SPEED("每项停留")
+}
+
+data class AdjustOverlayState(
+    val kind: AdjustOverlayKind,
+    val cursor: ScanCursor = ScanCursor(size = 3, index = 1)
+) {
+    companion object {
+        val LABELS = listOf("减小", "增大", "完成")
     }
 }
 
@@ -347,6 +369,126 @@ private fun ConfirmHalfCard(
                     fontSize = 24.sp,
                     style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun AdjustOverlay(
+    state: AdjustOverlayState,
+    valueText: String,
+    progressFraction: Float,
+    scanMode: ScanMode,
+    scanIntervalMs: Long,
+    dwellRevision: Int,
+    paused: Boolean,
+    frozen: Boolean,
+    onChoose: (Int) -> Unit
+) {
+    val c = LocalBciColors.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(state.cursor.index, state.cursor.direction, dwellRevision, scanIntervalMs, scanMode, paused, frozen, lifecycleOwner) {
+        when {
+            frozen -> progress.snapTo(if (scanMode == ScanMode.AUTO) 0.5f else 0f)
+            paused || scanMode != ScanMode.AUTO -> progress.snapTo(0f)
+            else -> lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                progress.snapTo(0f)
+                progress.animateTo(1f, tween(scanIntervalMs.toInt(), easing = LinearEasing))
+            }
+        }
+    }
+    val dir = if (scanMode == ScanMode.AUTO) state.cursor.direction else 0
+    val interaction = remember { MutableInteractionSource() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(c.ov)
+            .clickable(interactionSource = interaction, indication = null) {}
+            .padding(horizontal = 48.dp, vertical = 34.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
+    ) {
+        Text(
+            text = state.kind.title,
+            color = c.text,
+            fontFamily = BciType.chinese,
+            fontWeight = FontWeight(900),
+            fontSize = 40.sp,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        Text(
+            text = buildAnnotatedString {
+                for (ch in valueText) {
+                    withStyle(SpanStyle(fontFamily = if (ch.code < 0x3000) BciType.latin else BciType.chinese)) {
+                        append(ch)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            color = c.focus,
+            fontWeight = FontWeight(800),
+            fontSize = 120.sp,
+            lineHeight = 120.sp,
+            textAlign = TextAlign.Center,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        )
+
+        val clamped = progressFraction.coerceIn(0f, 1f)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .clip(CircleShape)
+                .background(c.line)
+        ) {
+            if (clamped > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(clamped)
+                        .clip(CircleShape)
+                        .background(c.focus)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(118.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            AdjustOverlayState.LABELS.forEachIndexed { index, label ->
+                val focused = index == state.cursor.index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .scanItem(
+                            focused = focused,
+                            direction = dir,
+                            picked = false,
+                            progress = if (focused) ({ if (scanMode == ScanMode.AUTO) progress.value else null }) else null
+                        )
+                        .clickable { onChoose(index) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        color = c.text,
+                        fontFamily = BciType.chinese,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 30.sp,
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
+                }
             }
         }
     }

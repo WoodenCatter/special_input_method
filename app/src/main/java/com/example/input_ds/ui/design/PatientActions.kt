@@ -42,6 +42,7 @@ internal fun patientPath(
         }
         AppDestination.LIFE_ASSISTANT -> listOf("主页", "生活助手")
         AppDestination.APP_SETTINGS -> listOf("主页", "设置")
+        AppDestination.SPEED_PRACTICE -> listOf("主页", "设置", "速度练习")
         AppDestination.ENTERTAINMENT -> listOf("主页", "娱乐")
         AppDestination.TV -> listOf(media, "看电视")
         AppDestination.MUSIC -> listOf(media, "音乐")

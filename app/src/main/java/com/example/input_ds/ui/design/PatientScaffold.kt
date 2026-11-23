@@ -64,10 +64,12 @@ fun PatientScaffold(
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) { content() }
                     if (overlay != null) {
+                        Box(Modifier.fillMaxSize().interceptBackgroundPointers())
                         Box(Modifier.fillMaxSize()) { overlay() }
                     }
                     if (videoLayer != null) {
-                        Box(Modifier.fillMaxSize().background(c.bg)) { videoLayer() }
+                        Box(Modifier.fillMaxSize().background(c.bg).interceptBackgroundPointers())
+                        Box(Modifier.fillMaxSize()) { videoLayer() }
                     }
                 }
                 ActionBar(hints, feedback.hit, readiness)
@@ -75,6 +77,14 @@ fun PatientScaffold(
             FeedbackOverlay(feedback)
             BciToast(feedback, Modifier.align(Alignment.BottomCenter).padding(bottom = 128.dp))
             drawer?.invoke(this)
+        }
+    }
+}
+
+private fun Modifier.interceptBackgroundPointers(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent().changes.forEach { it.consume() }
         }
     }
 }

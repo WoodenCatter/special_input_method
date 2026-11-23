@@ -1,17 +1,21 @@
 package com.example.input_ds
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.media.AudioManager
 import android.os.Build
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import kotlin.math.roundToInt
 import com.example.input_ds.alert.NurseCallAlarm
 import com.example.input_ds.alert.NurseCallState
 import com.example.input_ds.assistant.AssistantCareStore
 import com.example.input_ds.model.InputMode
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.runScanTimer
+import com.example.input_ds.music.MusicLibrary
 import com.example.input_ds.speech.SpeechOutput
 import com.example.input_ds.ui.communication.ComposerScreen
 import com.example.input_ds.ui.design.*
@@ -65,6 +69,7 @@ import com.example.input_ds.model.ScanMode
 import com.example.input_ds.model.ScanSettings
 import com.example.input_ds.music.MusicInputBus
 import com.example.input_ds.settings.AppSettingsInputBus
+import com.example.input_ds.settings.SpeedPracticeInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.PersonalizationRepository
 import com.example.input_ds.personalization.TrainingWorkScheduler
@@ -72,6 +77,7 @@ import com.example.input_ds.personalization.UserModelManager
 import com.example.input_ds.ui.bci.BleScanScreen
 import com.example.input_ds.ui.bci.CollectionScreen
 import com.example.input_ds.ui.bci.SignalMonitorScreen
+import com.example.input_ds.ui.calibration.SpeedPracticeScreen
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.example.input_ds.chess.ChineseChessInputBus
 import com.example.input_ds.doudizhu.DoudizhuInputBus
@@ -98,6 +104,8 @@ import com.example.input_ds.ui.game.MazeScreen
 import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
 import com.example.input_ds.ui.music.MusicScreen
+import com.example.input_ds.ui.settings.AppSettingItem
+import com.example.input_ds.ui.settings.AppSettingsLogic
 import com.example.input_ds.ui.settings.AppSettingsScreen
 import com.example.input_ds.ui.tv.TvScreen
 import com.example.input_ds.ui.theme.InputDSTheme
@@ -141,6 +149,11 @@ class MainActivity : ComponentActivity() {
     private var nurseCall by mutableStateOf<NurseCallState?>(null)
     private var speakOverlay by mutableStateOf<SpeakOverlayState?>(null)
     private var confirmOverlay by mutableStateOf<Pair<ConfirmOverlaySpec, ScanCursor>?>(null)
+    private var adjustOverlay by mutableStateOf<AdjustOverlayState?>(null)
+    private var settingsInitialIndex by mutableIntStateOf(AppSettingsLogic.INITIAL_INDEX)
+    private var volumePercent by mutableIntStateOf(60)
+    private var brightnessPercent by mutableIntStateOf(80)
+    private var liveMusicCount by mutableIntStateOf(0)
     private var assistantEditing by mutableStateOf(false)
     private var careOpen by mutableStateOf(false)
     private var feedbackSound by mutableStateOf(true)
@@ -154,7 +167,13 @@ class MainActivity : ComponentActivity() {
     private var unregisterDebug: () -> Unit = {}
     private val caregiverPages = setOf(AppDestination.SETTINGS, AppDestination.COLLECTION, AppDestination.DEVICE_STATUS)
 
-    private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
+    private var entCursor by mutableStateOf(
+        ScanCursor(
+            size = EntertainmentHubModule.entries.size,
+            index = EntertainmentHubModule.MAZE.ordinal,
+            direction = 1
+        )
+    )
     private val mazeState = mutableStateOf(
         MazeGame.create(MazeProtocol.FOUR_CLASS)
     )
@@ -195,6 +214,7 @@ class MainActivity : ComponentActivity() {
         }
 
         displayMode = AppUiSettings.displayMode(this)
+        refreshHardwareSettings()
         unregisterDebug = registerRedesignDebug(this, ::debugCommand)
         setContent {
             var hour by remember { mutableIntStateOf(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) }
@@ -253,11 +273,12 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(chat, destination.value) {
                     chat.setScreenActive(destination.value == AppDestination.COMMUNICATION)
                 }
-                LaunchedEffect(chat, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, call != null) {
-                    chat.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || call != null)
+                LaunchedEffect(chat, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, call != null) {
+                    chat.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || adjustOverlay != null || call != null)
                 }
                 LaunchedEffect(call?.id, call?.status, video.connected, video.camera, video.confirmEnd) {
                     if (call != null) {
+                        if (!hadActiveCall) resetCursorsForPauseBoundary()
                         if (!hadActiveCall && video.incoming && careOpen) toggleCareSheet(false)
                         hadActiveCall = true
                         lastCallWasIncoming = video.incoming
@@ -269,6 +290,7 @@ class MainActivity : ComponentActivity() {
                         dwellRevision++
                     } else if (hadActiveCall) {
                         hadActiveCall = false
+                        resetCursorsForPauseBoundary()
                         chat.onVideoCallEnded(lastCallWasIncoming)
                         dwellRevision++
                     }
@@ -302,8 +324,13 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(vm, scanMode.value) { vm.setScanMode(scanMode.value) }
                 LaunchedEffect(vm, frozen) { vm.setFrozen(frozen) }
-                LaunchedEffect(vm, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, call != null) {
-                    vm.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || call != null)
+                LaunchedEffect(vm, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, call != null) {
+                    vm.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || adjustOverlay != null || call != null)
+                }
+                LaunchedEffect(destination.value) {
+                    if (destination.value == AppDestination.ENTERTAINMENT || liveMusicCount == 0) {
+                        liveMusicCount = MusicLibrary(applicationContext).reloadTracks().size
+                    }
                 }
                 val bleState by bleManager.state.collectAsState()
 
@@ -390,10 +417,13 @@ class MainActivity : ComponentActivity() {
                     else controller.show(WindowInsetsCompat.Type.systemBars())
                     controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
-                LaunchedEffect(confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                LaunchedEffect(confirmOverlay != null, call?.id, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
                     val active = confirmOverlay
-                    if (active != null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                    if (active != null && call == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            confirmOverlay = confirmOverlay?.let { (spec, c) ->
+                                spec to c.copy(previousIndex = -1, advancedAtMs = 0L)
+                            }
                             runScanTimer(
                                 interval = {
                                     (confirmOverlay?.second ?: active.second).dwell(state.scanIntervalMs, confirmation = true)
@@ -405,21 +435,50 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                LaunchedEffect(speakOverlay != null, confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
-                    if (speakOverlay != null && confirmOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                LaunchedEffect(speakOverlay != null, call?.id, confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (speakOverlay != null && call == null && confirmOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            speakOverlay = speakOverlay?.let {
+                                it.copy(cursor = it.cursor.copy(previousIndex = -1, advancedAtMs = 0L))
+                            }
                             runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Speak tick failed", it) }) {
                                 advanceSpeakOverlay()
                             }
                         }
                     }
                 }
-                LaunchedEffect(destination.value, call?.id, nurseCall != null, speakOverlay != null, confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
-                    if (destination.value == AppDestination.HOME && call == null && nurseCall == null && speakOverlay == null && confirmOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                val adjustPaused = careOpen || call != null || confirmOverlay != null || speakOverlay != null || nurseCall != null
+                LaunchedEffect(adjustPaused) {
+                    adjustOverlay = adjustOverlay?.let { it.copy(cursor = it.cursor.reset()) }
+                }
+                LaunchedEffect(adjustOverlay != null, call?.id, confirmOverlay != null, speakOverlay != null, nurseCall != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (adjustOverlay != null && call == null && confirmOverlay == null && speakOverlay == null && nurseCall == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                            cursor = cursor.copy(previousIndex = -1)
+                            adjustOverlay = adjustOverlay?.let {
+                                it.copy(cursor = it.cursor.copy(previousIndex = -1, advancedAtMs = 0L))
+                            }
+                            runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Adjust tick failed", it) }) {
+                                advanceAdjustOverlay()
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(destination.value, call?.id, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.HOME && call == null && nurseCall == null && speakOverlay == null && confirmOverlay == null && adjustOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            cursor = cursor.copy(previousIndex = -1, advancedAtMs = 0L)
                             runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Home tick failed", it) }) {
                                 advanceHome()
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(destination.value, call?.id, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.ENTERTAINMENT && call == null && nurseCall == null && speakOverlay == null && confirmOverlay == null && adjustOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            entCursor = entCursor.copy(previousIndex = -1, advancedAtMs = 0L)
+                            runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Entertainment tick failed", it) }) {
+                                advanceEntertainment()
                             }
                         }
                     }
@@ -430,7 +489,7 @@ class MainActivity : ComponentActivity() {
                     patientPath(destination.value, conversation, video, mediaParent(), state.mode)
                 }
                 androidx.compose.runtime.SideEffect { statusPath = path }
-                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, speakOverlay != null, confirmOverlay != null, careOpen) {
+                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, careOpen) {
                     bciController?.invalidatePendingCommands()
                 }
                 Box(Modifier.fillMaxSize()) {
@@ -447,7 +506,8 @@ class MainActivity : ComponentActivity() {
                         val activeNurseCall = nurseCall
                         val activeSpeak = speakOverlay
                         val activeConfirm = confirmOverlay
-                        val hasTopOverlay = activeNurseCall != null || activeSpeak != null || activeConfirm != null
+                        val activeAdjust = adjustOverlay
+                        val hasTopOverlay = activeNurseCall != null || activeSpeak != null || activeConfirm != null || activeAdjust != null
                         val baseHints = when {
                             call != null && video.confirmEnd ->
                                 confirmHints(if (videoConfirmCursor.index == 0) "继续通话" else "挂断", scanMode.value)
@@ -471,8 +531,13 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ActionHints("取消呼叫", "立即呼叫", "立即呼叫")
                             }
+                            activeAdjust != null -> ActionHints.list(
+                                AdjustOverlayState.LABELS.getOrElse(activeAdjust.cursor.index) { "" },
+                                scanMode.value,
+                                activeAdjust.cursor.direction
+                            )
                             destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName, scanMode.value, cursor.direction)
-                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(entertainmentSelection.value.selectedModule.displayName, scanMode.value, entertainmentSelection.value.scanDirection, true)
+                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(EntertainmentHubModule.entries[entCursor.index].displayName, scanMode.value, entCursor.direction, true)
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
                             destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
                             destination.value == AppDestination.TV -> ActionHints("上一台", "打开菜单", "下一台")
@@ -490,13 +555,37 @@ class MainActivity : ComponentActivity() {
                             onCare = { toggleCareSheet(true) },
                             overlay = if (hasTopOverlay) {
                                 {
+                                    activeAdjust?.let { adjust ->
+                                        val adjValueText = when (adjust.kind) {
+                                            AdjustOverlayKind.VOLUME -> "${volumePercent}%"
+                                            AdjustOverlayKind.BRIGHTNESS -> "${brightnessPercent}%"
+                                            AdjustOverlayKind.SPEED -> AppSettingsLogic.formatScanInterval(state.scanIntervalMs)
+                                        }
+                                        val adjFraction = AppSettingsLogic.adjustFraction(
+                                            kind = adjust.kind,
+                                            volPercent = volumePercent,
+                                            briPercent = brightnessPercent,
+                                            intervalMs = state.scanIntervalMs
+                                        )
+                                        AdjustOverlay(
+                                            state = adjust,
+                                            valueText = adjValueText,
+                                            progressFraction = adjFraction,
+                                            scanMode = scanMode.value,
+                                            scanIntervalMs = state.scanIntervalMs,
+                                            dwellRevision = dwellRevision,
+                                            paused = adjustPaused,
+                                            frozen = frozen,
+                                            onChoose = ::chooseAdjustOption
+                                        )
+                                    }
                                     activeSpeak?.let { speak ->
                                         SpeakOverlay(
                                             state = speak,
                                             scanMode = scanMode.value,
                                             scanIntervalMs = state.scanIntervalMs,
                                             dwellRevision = dwellRevision,
-                                            paused = careOpen || activeConfirm != null,
+                                            paused = careOpen || call != null || activeConfirm != null,
                                             frozen = frozen,
                                             onChoose = ::chooseSpeakOption
                                         )
@@ -508,7 +597,7 @@ class MainActivity : ComponentActivity() {
                                             scanMode = scanMode.value,
                                             scanIntervalMs = state.scanIntervalMs,
                                             dwellRevision = dwellRevision,
-                                            paused = careOpen,
+                                            paused = careOpen || call != null,
                                             frozen = frozen,
                                             onChoose = ::chooseConfirmOption
                                         )
@@ -628,14 +717,17 @@ class MainActivity : ComponentActivity() {
                     } else AppContent(vm = vm, chat = chat, bleState = bleState)
                     // Conditionally mounted so opening an overlay registers on top of OnBackPressedDispatcher (LIFO).
                     androidx.compose.runtime.key(destination.value, call?.id) {
+                        if (adjustOverlay != null) {
+                            BackHandler(enabled = call == null && !careOpen && confirmOverlay == null && speakOverlay == null && nurseCall == null) { dismissAdjustOverlay() }
+                        }
                         if (nurseCall != null) {
-                            BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null) { dismissNurseCall() }
+                            BackHandler(enabled = call == null && !careOpen && confirmOverlay == null && speakOverlay == null) { dismissNurseCall() }
                         }
                         if (speakOverlay != null) {
-                            BackHandler(enabled = !careOpen && confirmOverlay == null) { dismissSpeakOverlay() }
+                            BackHandler(enabled = call == null && !careOpen && confirmOverlay == null) { dismissSpeakOverlay() }
                         }
                         if (confirmOverlay != null) {
-                            BackHandler(enabled = !careOpen) { dismissConfirmOverlay() }
+                            BackHandler(enabled = call == null && !careOpen) { dismissConfirmOverlay() }
                         }
                         if (careOpen) {
                             BackHandler { toggleCareSheet(false) }
@@ -661,10 +753,12 @@ class MainActivity : ComponentActivity() {
     private fun AppContent(vm: InputMethodViewModel, chat: CommunicationViewModel, bleState: NaoyunBleManager.State) {
         val assistantState = rememberSaveableStateHolder()
         val inputState by vm.state.collectAsState()
+        val videoState by chat.video.state.collectAsState()
+        val hasActiveCall = videoState.call != null
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
-            BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null && nurseCall == null) {
+            BackHandler(enabled = !hasActiveCall && !careOpen && adjustOverlay == null && confirmOverlay == null && speakOverlay == null && nurseCall == null) {
                 if (destination.value == AppDestination.INPUT_METHOD) {
                     inputViewModel?.handleBackPress()
                     return@BackHandler
@@ -682,6 +776,7 @@ class MainActivity : ComponentActivity() {
                     AppDestination.DOUDIZHU,
                     AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
                     AppDestination.TV, AppDestination.MUSIC -> mediaParent()
+                    AppDestination.SPEED_PRACTICE -> AppDestination.APP_SETTINGS
                     else -> AppDestination.HOME
                 }
                 navigateTo(parent)
@@ -694,7 +789,7 @@ class MainActivity : ComponentActivity() {
                 scanMode = scanMode.value,
                 scanIntervalMs = inputState.scanIntervalMs,
                 dwellRevision = dwellRevision,
-                paused = careOpen || nurseCall != null,
+                paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
                 frozen = frozen,
                 onSelect = { module ->
                     cursor = cursor.reset(newSize = homeModules.size, initial = homeModules.indexOf(module))
@@ -703,30 +798,31 @@ class MainActivity : ComponentActivity() {
             )
 
             AppDestination.ENTERTAINMENT -> EntertainmentScreen(
-                selection = entertainmentSelection.value,
+                selection = EntertainmentHubSelectionState(entCursor.index, entCursor.direction),
                 scanMode = scanMode.value,
                 scanIntervalMs = inputState.scanIntervalMs,
+                dwellRevision = dwellRevision,
+                paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
+                frozen = frozen,
+                liveMusicCount = liveMusicCount,
                 onSelect = { module ->
-                    entertainmentSelection.value = entertainmentSelection.value.copy(
-                        selectedIndex = EntertainmentHubModule.entries.indexOf(module)
+                    entCursor = entCursor.reset(
+                        newSize = EntertainmentHubModule.entries.size,
+                        initial = EntertainmentHubModule.entries.indexOf(module)
                     )
                     enterEntertainmentModule(module)
-                },
-                onAdvance = {
-                    entertainmentSelection.value = entertainmentSelection.value.advance()
                 }
             )
 
-            AppDestination.INPUT_METHOD -> InputMethodPage(vm)
+            AppDestination.INPUT_METHOD -> InputMethodPage(vm, hasActiveCall)
             AppDestination.COMMUNICATION -> {
-                val videoState by chat.video.state.collectAsState()
                 androidx.compose.runtime.DisposableEffect(vm) {
                     onDispose { vm.deactivate() }
                 }
                 CommunicationScreen(
                     chat = chat,
                     input = vm,
-                    paused = careOpen || nurseCall != null || videoState.call != null,
+                    paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
                     frozen = frozen,
                     onToast = { message, ok -> feedback.toast(message, ok) },
                     onOpenTalk = ::openTalkComposer,
@@ -735,11 +831,10 @@ class MainActivity : ComponentActivity() {
             }
 
             AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
-                val videoState by chat.video.state.collectAsState()
                 AssistantScreen(
                     scanIntervalMs = inputState.scanIntervalMs,
                     scanMode = scanMode.value,
-                    paused = careOpen || confirmOverlay != null || speakOverlay != null || nurseCall != null || videoState.call != null,
+                    paused = careOpen || adjustOverlay != null || confirmOverlay != null || speakOverlay != null || nurseCall != null || hasActiveCall,
                     frozen = frozen,
                     fakeAssistant = debugFakeAssistant,
                     onToast = { message, ok -> feedback.toast(message, ok) },
@@ -809,17 +904,42 @@ class MainActivity : ComponentActivity() {
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
                 scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
+                displayMode = displayMode,
+                floatingBallVisible = floatingBallVisible.value,
+                volumePercent = volumePercent,
+                brightnessPercent = brightnessPercent,
+                paused = careOpen || adjustOverlay != null || nurseCall != null || hasActiveCall,
+                frozen = frozen,
+                initialIndex = settingsInitialIndex,
+                onOpenAdjust = ::openAdjustOverlay,
+                onOpenSpeedPractice = { navigateTo(AppDestination.SPEED_PRACTICE) },
                 onScanModeChange = { mode ->
                     scanMode.value = ScanSettings.writeMode(applicationContext, mode)
+                    dwellRevision++
                 },
-                floatingBallVisible = floatingBallVisible.value,
-                headsetControlEnabled = headsetControlEnabled.value,
+                onDisplayModeChange = { mode ->
+                    displayMode = mode
+                    AppUiSettings.writeDisplayMode(applicationContext, mode)
+                },
                 onFloatingBallVisibleChange = { visible ->
                     floatingBallVisible.value = visible
                     AppUiSettings.writeFloatingBallVisible(applicationContext, visible)
                 },
-                onHeadsetControlEnabledChange = ::setHeadsetControlEnabled,
+                onToast = { message, ok -> feedback.toast(message, ok) },
                 onBack = { navigateTo(AppDestination.HOME) }
+            )
+
+            AppDestination.SPEED_PRACTICE -> SpeedPracticeScreen(
+                initialIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                paused = careOpen || adjustOverlay != null || confirmOverlay != null || speakOverlay != null || nurseCall != null || hasActiveCall,
+                frozen = frozen,
+                onApplyInterval = { intervalMs ->
+                    vm.setScanInterval(intervalMs)
+                    navigateTo(AppDestination.APP_SETTINGS)
+                },
+                onToast = { message, ok -> feedback.toast(message, ok) },
+                onBack = { navigateTo(AppDestination.APP_SETTINGS) }
             )
 
             AppDestination.SETTINGS -> CollectionScreen(
@@ -842,13 +962,13 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun InputMethodPage(vm: InputMethodViewModel) {
+    private fun InputMethodPage(vm: InputMethodViewModel, hasActiveCall: Boolean) {
         val state by vm.state.collectAsState()
         val phrases = remember(state.mode, state.phase, state.dwellRevision) { vm.rankedCommonPhrases(state.mode) }
         ComposerScreen(
             state = state,
             phrases = phrases,
-            paused = careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null,
+            paused = careOpen || adjustOverlay != null || nurseCall != null || speakOverlay != null || confirmOverlay != null || hasActiveCall,
             frozen = frozen,
             compactWings = false,
             onBlockClick = vm::selectBlockByTouch,
@@ -901,6 +1021,96 @@ class MainActivity : ComponentActivity() {
     private fun dismissConfirmOverlay() {
         confirmOverlay = null
         dwellRevision++
+    }
+
+    private fun readSystemVolumePercent(): Int {
+        val audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val vol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        return AppSettingsLogic.streamLevelToPercent(vol, maxVol)
+    }
+
+    private fun stepSystemVolume(delta: Int) {
+        if (frozen) {
+            volumePercent = AppSettingsLogic.stepVolumePercent(volumePercent, delta)
+            return
+        }
+        val audioManager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val beforeVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(0, maxVol)
+        val targetVol = AppSettingsLogic.nextStreamVolumeLevel(beforeVol, maxVol, delta)
+        val writeResult = runCatching {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+        }
+        val afterVol = runCatching {
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(0, maxVol)
+        }.getOrDefault(beforeVol)
+        volumePercent = AppSettingsLogic.streamLevelToPercent(afterVol, maxVol)
+        if (writeResult.isFailure || (targetVol != beforeVol && afterVol == beforeVol)) {
+            feedback.toast("系统未允许调整音量", false)
+        }
+    }
+
+    private fun applyBrightnessPercent(targetPercent: Int) {
+        val clamped = targetPercent.coerceIn(10, 100)
+        brightnessPercent = clamped
+        if (frozen) return
+        val written = AppUiSettings.writeScreenBrightness(applicationContext, clamped / 100f)
+        brightnessPercent = (written * 100f).roundToInt().coerceIn(10, 100)
+        window.attributes = window.attributes.apply {
+            screenBrightness = written
+        }
+    }
+
+    private fun refreshHardwareSettings() {
+        if (frozen) {
+            volumePercent = 60
+            brightnessPercent = 80
+        } else {
+            volumePercent = readSystemVolumePercent()
+            brightnessPercent = (AppUiSettings.readScreenBrightness(applicationContext) * 100f).roundToInt().coerceIn(10, 100)
+        }
+    }
+
+    private fun openAdjustOverlay(kind: AdjustOverlayKind) {
+        refreshHardwareSettings()
+        adjustOverlay = AdjustOverlayState(kind = kind)
+        dwellRevision++
+    }
+
+    private fun dismissAdjustOverlay() {
+        adjustOverlay = null
+        dwellRevision++
+    }
+
+    private fun chooseAdjustOption(index: Int) {
+        val current = adjustOverlay ?: return
+        when (index) {
+            0 -> stepAdjustValue(current.kind, -1)
+            1 -> stepAdjustValue(current.kind, 1)
+            else -> dismissAdjustOverlay()
+        }
+    }
+
+    private fun stepAdjustValue(kind: AdjustOverlayKind, delta: Int) {
+        when (kind) {
+            AdjustOverlayKind.VOLUME -> stepSystemVolume(delta)
+            AdjustOverlayKind.BRIGHTNESS -> applyBrightnessPercent(AppSettingsLogic.stepBrightnessPercent(brightnessPercent, delta))
+            AdjustOverlayKind.SPEED -> {
+                val cur = inputViewModel?.state?.value?.scanIntervalMs ?: ScanSettings.read(applicationContext)
+                inputViewModel?.setScanInterval(AppSettingsLogic.stepScanIntervalMs(cur, delta))
+            }
+        }
+        dwellRevision++
+    }
+
+    private fun advanceAdjustOverlay() {
+        val current = adjustOverlay ?: return
+        adjustOverlay = current.copy(cursor = current.cursor.advance(SystemClock.elapsedRealtime(), scanMode.value))
+    }
+
+    private fun advanceEntertainment() {
+        entCursor = entCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
     }
 
     private fun advanceSpeakOverlay() {
@@ -981,9 +1191,18 @@ class MainActivity : ComponentActivity() {
         dwellRevision++
     }
 
+    private fun resetCursorsForPauseBoundary() {
+        adjustOverlay = adjustOverlay?.let { it.copy(cursor = it.cursor.reset()) }
+        speakOverlay = speakOverlay?.let { it.copy(cursor = it.cursor.reset()) }
+        confirmOverlay = confirmOverlay?.let { (spec, c) -> spec to c.copy(previousIndex = -1, advancedAtMs = 0L, direction = 1) }
+        entCursor = entCursor.reset()
+        cursor = cursor.reset()
+    }
+
     private fun toggleCareSheet(open: Boolean) {
         if (careOpen == open) return
         careOpen = open
+        resetCursorsForPauseBoundary()
         bciController?.invalidatePendingCommands()
         updateBciCommandDelivery()
         if (!open) dwellRevision++
@@ -1084,6 +1303,9 @@ class MainActivity : ComponentActivity() {
             confirmOverlay = null
             speechOutput.stop()
         }
+        if (target != AppDestination.APP_SETTINGS) {
+            adjustOverlay = null
+        }
         bciController?.invalidatePendingCommands()
         val previous = destination.value
         val homeFocus = if (target == AppDestination.HOME) {
@@ -1109,10 +1331,20 @@ class MainActivity : ComponentActivity() {
             AssistantInputBus.resetFocusToInput()
         }
         if (target == AppDestination.ENTERTAINMENT) {
-            val moduleIndex = EntertainmentHubModule.entries.indexOfFirst { it.destination == previous }
-            if (moduleIndex >= 0) {
-                entertainmentSelection.value = entertainmentSelection.value.copy(selectedIndex = moduleIndex, scanDirection = 1)
+            entCursor = ScanCursor(
+                size = EntertainmentHubModule.entries.size,
+                index = EntertainmentHubModule.initialIndexForEntry(previous),
+                direction = 1
+            )
+        }
+        if (target == AppDestination.APP_SETTINGS) {
+            settingsInitialIndex = if (previous == AppDestination.SPEED_PRACTICE) {
+                AppSettingItem.SPEED_PRACTICE.ordinal
+            } else {
+                AppSettingsLogic.INITIAL_INDEX
             }
+            refreshHardwareSettings()
+            AppSettingsInputBus.resetFocus(settingsInitialIndex)
         }
         updateBciCommandDelivery()
     }
@@ -1145,6 +1377,7 @@ class MainActivity : ComponentActivity() {
         nurseCallAlarm.stop()
         speakOverlay = null
         confirmOverlay = null
+        adjustOverlay = null
         speechOutput.stop()
         communicationViewModel?.video?.clear()
         hadActiveCall = false
@@ -1192,6 +1425,24 @@ class MainActivity : ComponentActivity() {
                 clearTransientOverlaysForNav()
                 navigateTo(AppDestination.LIFE_ASSISTANT)
             }
+            "nav ent" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.ENTERTAINMENT)
+                entCursor = ScanCursor(
+                    size = EntertainmentHubModule.entries.size,
+                    index = EntertainmentHubModule.MAZE.ordinal,
+                    direction = 1
+                )
+                dwellRevision++
+            }
+            "nav settings" -> {
+                clearTransientOverlaysForNav()
+                settingsInitialIndex = AppSettingsLogic.INITIAL_INDEX
+                navigateTo(AppDestination.APP_SETTINGS)
+                refreshHardwareSettings()
+                AppSettingsInputBus.resetFocus(AppSettingsLogic.INITIAL_INDEX)
+                dwellRevision++
+            }
             "fake contacts" -> {
                 communicationViewModel?.injectFakeContacts()
                 dwellRevision++
@@ -1213,10 +1464,15 @@ class MainActivity : ComponentActivity() {
             "freeze on", "freeze off" -> {
                 frozen = cmd.endsWith("on")
                 if (frozen) nurseCallAlarm.stop()
+                refreshHardwareSettings()
                 cursor = cursor.reset()
                 dwellRevision++
             }
-            "scan auto", "scan manual" -> { scanMode.value = if (cmd.endsWith("auto")) ScanMode.AUTO else ScanMode.MANUAL; cursor = cursor.reset() }
+            "scan auto", "scan manual" -> {
+                scanMode.value = if (cmd.endsWith("auto")) ScanMode.AUTO else ScanMode.MANUAL
+                cursor = cursor.reset()
+                dwellRevision++
+            }
             "mode auto", "mode light", "mode dark" -> displayMode = AppUiSettings.DisplayMode.valueOf(cmd.substringAfter(' ').uppercase())
             "signal L" -> if (foreground) routeSignal(ControlSignal.LEFT_LOOK) else return "inactive"
             "signal R" -> if (foreground) routeSignal(ControlSignal.RIGHT_LOOK) else return "inactive"
@@ -1230,7 +1486,11 @@ class MainActivity : ComponentActivity() {
                     confirmOverlay != null -> advanceConfirmOverlay()
                     speakOverlay != null -> advanceSpeakOverlay()
                     nurseCall != null -> return "pending: page cursor"
+                    adjustOverlay != null -> advanceAdjustOverlay()
                     destination.value == AppDestination.HOME -> advanceHome()
+                    destination.value == AppDestination.ENTERTAINMENT -> advanceEntertainment()
+                    destination.value == AppDestination.APP_SETTINGS -> AppSettingsInputBus.debugTick()
+                    destination.value == AppDestination.SPEED_PRACTICE -> SpeedPracticeInputBus.debugTick()
                     destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
                     destination.value == AppDestination.COMMUNICATION -> {
                         val chat = communicationViewModel
@@ -1407,6 +1667,29 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
+        val activeAdjust = adjustOverlay
+        if (activeAdjust != null) {
+            when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    adjustOverlay = activeAdjust.copy(cursor = activeAdjust.cursor.look(step, scanMode.value))
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val chosen = activeAdjust.cursor.selected(
+                        SystemClock.elapsedRealtime(),
+                        if (frozen) 0 else AppUiSettings.graceMs(this),
+                        scanMode.value
+                    )
+                    if (chosen != activeAdjust.cursor.index && !frozen) {
+                        feedback.toast("已按上一项执行（延迟补偿）")
+                    }
+                    chooseAdjustOption(chosen)
+                }
+                else -> Unit
+            }
+            return
+        }
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
                 ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
@@ -1424,13 +1707,22 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.ENTERTAINMENT -> when (signal) {
-                ControlSignal.LEFT_LOOK -> entertainmentSelection.value =
-                    entertainmentSelection.value.onDirection(-1, scanMode.value)
-                ControlSignal.RIGHT_LOOK -> entertainmentSelection.value =
-                    entertainmentSelection.value.onDirection(1, scanMode.value)
-                ControlSignal.BITE -> enterEntertainmentModule(
-                    entertainmentSelection.value.selectedModule
-                )
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    entCursor = entCursor.look(if (signal == ControlSignal.LEFT_LOOK) -1 else 1, scanMode.value)
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val selected = entCursor.selected(
+                        SystemClock.elapsedRealtime(),
+                        if (frozen) 0 else AppUiSettings.graceMs(this),
+                        scanMode.value
+                    )
+                    if (selected != entCursor.index) {
+                        entCursor = entCursor.copy(index = selected)
+                        if (!frozen) feedback.toast("已按上一项执行（延迟补偿）")
+                    }
+                    enterEntertainmentModule(EntertainmentHubModule.entries[selected])
+                }
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
@@ -1477,6 +1769,9 @@ class MainActivity : ComponentActivity() {
             }
             AppDestination.APP_SETTINGS -> {
                 AppSettingsInputBus.dispatch(signal)
+            }
+            AppDestination.SPEED_PRACTICE -> {
+                SpeedPracticeInputBus.dispatch(signal)
             }
             AppDestination.SETTINGS -> Unit
             AppDestination.DEVICE_STATUS, AppDestination.COLLECTION -> Unit
@@ -1582,6 +1877,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         foreground = false
+        resetCursorsForPauseBoundary()
         bciController?.setCommandDeliveryEnabled(false)
         bciController?.invalidatePendingCommands()
         super.onPause()
@@ -1590,6 +1886,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         foreground = true
+        resetCursorsForPauseBoundary()
+        refreshHardwareSettings()
         updateBciCommandDelivery()
         dwellRevision++
     }

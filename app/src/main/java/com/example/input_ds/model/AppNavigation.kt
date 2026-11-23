@@ -15,6 +15,7 @@ enum class AppDestination {
     TV,
     MUSIC,
     APP_SETTINGS,
+    SPEED_PRACTICE,
     SETTINGS,
     DEVICE_STATUS,
     COLLECTION
@@ -60,38 +61,57 @@ data class HomeSelectionState(
         }
 }
 
-enum class EntertainmentHubModule(val destination: AppDestination, val displayName: String, val symbol: String) {
-    MAZE(AppDestination.ASYNC_MAZE, "迷宫游戏", "▦"),
-    SNAKE_CLIMB(AppDestination.SNAKE_CLIMB, "向上贪吃蛇", "蛇"),
-    WIZARD_GAME(AppDestination.WIZARD_GAME, "魔法师游戏", "✦"),
-    CHINESE_CHESS(AppDestination.CHINESE_CHESS, "中国象棋", "楚"),
-    DOUDIZHU(AppDestination.DOUDIZHU, "斗地主", "斗"),
-    MAHJONG(AppDestination.MAHJONG, "打麻将", "麻"),
-    TELEVISION(AppDestination.TV, "看电视", "视"),
-    MUSIC(AppDestination.MUSIC, "音乐", "♪"),
-    BACK(AppDestination.HOME, "返回主页", "←")
+enum class EntertainmentHubModule(
+    val id: String,
+    val destination: AppDestination,
+    val displayName: String,
+    val subtitle: String,
+    val hue: Float,
+    val isNavigation: Boolean = false
+) {
+    BACK("back", AppDestination.HOME, "返回主页", "回到主页选择其他功能", 220f, isNavigation = true),
+    MAZE("maze", AppDestination.ASYNC_MAZE, "迷宫", "左 · 右 · 上 直接控制", 198f),
+    SNAKE_CLIMB("snake", AppDestination.SNAKE_CLIMB, "向上贪吃蛇", "左右转向，向上爬", 132f),
+    WIZARD_GAME("wizard", AppDestination.WIZARD_GAME, "魔法师", "冒险游戏", 262f),
+    CHINESE_CHESS("chess", AppDestination.CHINESE_CHESS, "中国象棋", "人机对弈", 12f),
+    DOUDIZHU("ddz", AppDestination.DOUDIZHU, "斗地主", "三人牌局", 345f),
+    MAHJONG("mj", AppDestination.MAHJONG, "麻将", "四人牌局", 165f),
+    TELEVISION("tv", AppDestination.TV, "看电视", "CCTV 直播 13 个频道", 214f),
+    MUSIC("music", AppDestination.MUSIC, "音乐", "本地 10 首", 34f);
+
+    companion object {
+        fun initialIndexForEntry(previous: AppDestination): Int =
+            entries.indexOfFirst { !it.isNavigation && it.destination == previous }
+                .takeIf { it >= 0 } ?: MAZE.ordinal
+    }
 }
 
 data class EntertainmentHubSelectionState(
-    val selectedIndex: Int = 0,
+    val selectedIndex: Int = EntertainmentHubModule.MAZE.ordinal,
     val scanDirection: Int = 1
 ) {
     val selectedModule: EntertainmentHubModule
         get() = EntertainmentHubModule.entries[selectedIndex.coerceIn(EntertainmentHubModule.entries.indices)]
 
-    fun moveLeft(): EntertainmentHubSelectionState =
-        copy(selectedIndex = (selectedIndex - 1 + EntertainmentHubModule.entries.size) % EntertainmentHubModule.entries.size)
+    private fun cursor(): ScanCursor =
+        ScanCursor(
+            EntertainmentHubModule.entries.size,
+            selectedIndex.coerceIn(EntertainmentHubModule.entries.indices),
+            scanDirection
+        )
 
-    fun moveRight(): EntertainmentHubSelectionState =
-        copy(selectedIndex = (selectedIndex + 1) % EntertainmentHubModule.entries.size)
+    fun moveLeft(): EntertainmentHubSelectionState = onDirection(-1, ScanMode.MANUAL)
 
-    fun advance(): EntertainmentHubSelectionState = if (scanDirection < 0) moveLeft() else moveRight()
+    fun moveRight(): EntertainmentHubSelectionState = onDirection(1, ScanMode.MANUAL)
 
-    fun changeDirection(direction: Int): EntertainmentHubSelectionState =
-        copy(scanDirection = if (direction < 0) -1 else 1)
-
-    fun onDirection(direction: Int, mode: ScanMode): EntertainmentHubSelectionState = when (mode) {
-        ScanMode.MANUAL -> if (direction < 0) moveLeft() else moveRight()
-        ScanMode.AUTO -> changeDirection(direction)
+    fun advance(): EntertainmentHubSelectionState = cursor().advance(0L, ScanMode.AUTO).let {
+        copy(selectedIndex = it.index, scanDirection = it.direction)
     }
+
+    fun changeDirection(direction: Int): EntertainmentHubSelectionState = onDirection(direction, ScanMode.AUTO)
+
+    fun onDirection(direction: Int, mode: ScanMode): EntertainmentHubSelectionState =
+        cursor().look(if (direction < 0) -1 else 1, mode).let {
+            copy(selectedIndex = it.index, scanDirection = it.direction)
+        }
 }
