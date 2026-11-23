@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -24,34 +25,49 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import com.example.input_ds.communication.CommunicationStage
 import com.example.input_ds.communication.CommunicationViewModel
+import com.example.input_ds.model.InputMode
 import com.example.input_ds.model.InputPhase
 import com.example.input_ds.personalization.ConversationTurn
-import com.example.input_ds.ui.components.MainScreen
 import com.example.input_ds.ui.theme.AuroraBackground
 import com.example.input_ds.viewmodel.InputMethodViewModel
 
 @Composable
-fun CommunicationScreen(chat: CommunicationViewModel, input: InputMethodViewModel, onHome: () -> Unit) {
+fun CommunicationScreen(
+    chat: CommunicationViewModel,
+    input: InputMethodViewModel,
+    paused: Boolean = false,
+    frozen: Boolean = false,
+    onToast: (String, Boolean) -> Unit = { _, _ -> },
+    onHome: () -> Unit
+) {
     val state by chat.state.collectAsState()
     val draft by input.state.collectAsState()
     val clipboard = LocalClipboardManager.current
     LaunchedEffect(draft.scanIntervalMs) { chat.setScanInterval(draft.scanIntervalMs) }
-    LaunchedEffect(state.contact?.conversationId) {
-        input.clearChatInput()
-    }
     LaunchedEffect(state.contact?.conversationId, state.messages) {
         input.updateConversationContext(state.messages.takeLast(8).map { message ->
             ConversationTurn(if (message.senderId == state.myPrincipalId) "user" else "assistant", message.text)
         })
     }
     LaunchedEffect(state.stage, state.contact?.conversationId) {
-        input.setChatAction(if (state.stage == CommunicationStage.CHAT_INPUT) { action ->
-            when (action) {
-                0 -> { chat.back(); true }
-                1 -> if (chat.queue(input.state.value.outputText)) { input.clearChatInput(); true } else false
-                else -> { input.deleteChatCodePoint(); true }
-            }
-        } else null)
+        val contact = state.contact
+        if (state.stage == CommunicationStage.CHAT_INPUT && contact != null) {
+            input.openMode(
+                mode = InputMode.Chat(contact.conversationId, contact.name),
+                onSend = { text ->
+                    val trimmed = text.trim()
+                    if (trimmed.isEmpty()) {
+                        onToast("还没有要发的内容", false)
+                    } else if (chat.queue(trimmed)) {
+                        input.clearOutputAndReset()
+                        onToast("已发送给${contact.name}", true)
+                    }
+                },
+                onBack = { chat.back() }
+            )
+        } else {
+            input.deactivate()
+        }
     }
     AuroraBackground {
         Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
@@ -131,28 +147,25 @@ fun CommunicationScreen(chat: CommunicationViewModel, input: InputMethodViewMode
                                     message.senderId == state.myPrincipalId)
                             }
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("返回", "发送", "删除").forEachIndexed { index, label ->
-                                OutlinedButton(onClick = {
-                                    when (index) {
-                                        0 -> chat.back()
-                                        1 -> if (chat.queue(draft.outputText)) input.clearChatInput()
-                                        else -> input.deleteChatCodePoint()
-                                    }
-                                }, enabled = when (index) {
-                                    1 -> draft.outputText.isNotBlank()
-                                    2 -> draft.outputText.isNotEmpty()
-                                    else -> true
-                                }, modifier = Modifier.border(
-                                    if (draft.phase == InputPhase.LEVEL_1_SCANNING && draft.highlightedBlockIndex == index + 4) 2.dp else 0.dp,
-                                    MaterialTheme.colorScheme.primary, RoundedCornerShape(24.dp))) { Text(label) }
+                        Box(Modifier.fillMaxWidth().weight(1.35f)) {
+                            val phrases = remember(draft.mode, draft.phase, draft.dwellRevision) {
+                                input.rankedCommonPhrases(draft.mode)
                             }
-                        }
-                        Box(Modifier.fillMaxWidth().weight(1.15f)) {
-                            MainScreen(draft, input::selectBlockByTouch, input::selectPinyinByTouch,
-                                input::selectPinyinNavigationByTouch, input::selectCharacterByTouch,
-                                input::selectCommonPhraseByTouch, input::selectPredictionByTouch,
-                                input::selectInitialPredictionByTouch)
+                            ComposerScreen(
+                                state = draft,
+                                phrases = phrases,
+                                paused = paused,
+                                frozen = frozen,
+                                compactWings = true,
+                                onBlockClick = input::selectBlockByTouch,
+                                onPinyinClick = input::selectPinyinByTouch,
+                                onPinyinNavigationClick = input::selectPinyinNavigationByTouch,
+                                onCharacterClick = input::selectCharacterByTouch,
+                                onCharacterItemClick = input::selectCharacterItemByTouch,
+                                onCommonPhraseClick = input::selectCommonPhraseByTouch,
+                                onPredictionClick = input::selectPredictionByTouch,
+                                onInitialPredictionClick = input::selectInitialPredictionByTouch
+                            )
                         }
                     }
                     CommunicationStage.PAIRING -> {

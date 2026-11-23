@@ -9,8 +9,11 @@ import android.os.SystemClock
 import com.example.input_ds.alert.NurseCallAlarm
 import com.example.input_ds.alert.NurseCallState
 import com.example.input_ds.assistant.AssistantCareStore
+import com.example.input_ds.model.InputMode
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.runScanTimer
+import com.example.input_ds.speech.SpeechOutput
+import com.example.input_ds.ui.communication.ComposerScreen
 import com.example.input_ds.ui.design.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -86,7 +89,6 @@ import com.example.input_ds.wizard.WizardGameActivity
 import com.example.input_ds.wizard.WizardGameInputBus
 import com.example.input_ds.ui.game.SnakeClimbScreen
 import com.example.input_ds.ui.components.FloatingControlBall
-import com.example.input_ds.ui.components.MainScreen
 import com.example.input_ds.ui.communication.CommunicationScreen
 import com.example.input_ds.communication.CommunicationViewModel
 import com.example.input_ds.ui.game.MazeScreen
@@ -104,6 +106,7 @@ import kotlinx.coroutines.delay
 class MainActivity : ComponentActivity() {
     private lateinit var bleManager: NaoyunBleManager
     private lateinit var nurseCallAlarm: NurseCallAlarm
+    private lateinit var speechOutput: SpeechOutput
     private var bciController: BciController? = null
     private var activeBciController by mutableStateOf<BciController?>(null)
     private var inputViewModel: InputMethodViewModel? = null
@@ -131,6 +134,9 @@ class MainActivity : ComponentActivity() {
     private var frozen by mutableStateOf(false)
     private var displayMode by mutableStateOf(AppUiSettings.DisplayMode.AUTO)
     private var nurseCall by mutableStateOf<NurseCallState?>(null)
+    private var speakOverlay by mutableStateOf<SpeakOverlayState?>(null)
+    private var confirmOverlay by mutableStateOf<Pair<ConfirmOverlaySpec, ScanCursor>?>(null)
+    private var assistantEditing by mutableStateOf(false)
     private var careOpen by mutableStateOf(false)
     private var feedbackSound by mutableStateOf(true)
     private var floatingEegVisible by mutableStateOf(false)
@@ -170,6 +176,7 @@ class MainActivity : ComponentActivity() {
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
         nurseCallAlarm = NurseCallAlarm(applicationContext)
+        speechOutput = SpeechOutput(applicationContext)
         FloatingEegSignalSource.attach(bleManager)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
         floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
@@ -219,7 +226,7 @@ class MainActivity : ComponentActivity() {
                                 val binding = repository.deviceServerBinding()
                                 val identity = "${binding?.serverUserId}:${user?.profileId}:${user?.profileEnabled}"
                                 if (identity != previous) {
-                                    if (previous != null) vm.clearChatInput()
+                                    if (previous != null) vm.clearOutputAndReset()
                                     previous = identity
                                     chat.open()
                                 }
@@ -249,7 +256,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                LaunchedEffect(vm) { vm.setStandaloneInputActive(false) }
+                LaunchedEffect(vm) {
+                    vm.setOnToast { message, ok -> feedback.toast(message, ok) }
+                    vm.setGraceMs(AppUiSettings.graceMs(applicationContext))
+                    vm.deactivate()
+                }
+                LaunchedEffect(vm, scanMode.value) { vm.setScanMode(scanMode.value) }
+                LaunchedEffect(vm, frozen) { vm.setFrozen(frozen) }
+                LaunchedEffect(vm, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, call != null) {
+                    vm.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || call != null)
+                }
                 val bleState by bleManager.state.collectAsState()
 
                 LaunchedEffect(bleState) {
@@ -335,8 +351,32 @@ class MainActivity : ComponentActivity() {
                     else controller.show(WindowInsetsCompat.Type.systemBars())
                     controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
-                LaunchedEffect(destination.value, call?.id, nurseCall != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
-                    if (destination.value == AppDestination.HOME && call == null && nurseCall == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                LaunchedEffect(confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    val active = confirmOverlay
+                    if (active != null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            runScanTimer(
+                                interval = {
+                                    (confirmOverlay?.second ?: active.second).dwell(state.scanIntervalMs, confirmation = true)
+                                },
+                                onFailure = { android.util.Log.e("ScanCursor", "Confirm tick failed", it) }
+                            ) {
+                                advanceConfirmOverlay()
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(speakOverlay != null, confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (speakOverlay != null && confirmOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Speak tick failed", it) }) {
+                                advanceSpeakOverlay()
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(destination.value, call?.id, nurseCall != null, speakOverlay != null, confirmOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.HOME && call == null && nurseCall == null && speakOverlay == null && confirmOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                             cursor = cursor.copy(previousIndex = -1)
                             runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Home tick failed", it) }) {
@@ -345,13 +385,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                val path = patientPath(destination.value, conversation, video, mediaParent())
+                val path = if (destination.value == AppDestination.LIFE_ASSISTANT && assistantEditing && call == null) {
+                    listOf("生活助手", "输入")
+                } else {
+                    patientPath(destination.value, conversation, video, mediaParent(), state.mode)
+                }
                 androidx.compose.runtime.SideEffect { statusPath = path }
-                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, careOpen) {
+                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, speakOverlay != null, confirmOverlay != null, careOpen) {
                     bciController?.invalidatePendingCommands()
                 }
                 BackHandler(enabled = careOpen) { toggleCareSheet(false) }
-                BackHandler(enabled = !careOpen && nurseCall != null) { dismissNurseCall() }
+                BackHandler(enabled = !careOpen && confirmOverlay != null) { dismissConfirmOverlay() }
+                BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay != null) { dismissSpeakOverlay() }
+                BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null && nurseCall != null) { dismissNurseCall() }
                 Box(Modifier.fillMaxSize()) {
                     if (patient) {
                         val connection = when (bleState) {
@@ -364,19 +410,32 @@ class MainActivity : ComponentActivity() {
                         val status = PatientStatus(path, connection, battery?.leftBatteryPercent, battery?.rightBatteryPercent,
                             scanMode.value, state.scanIntervalMs, display)
                         val activeNurseCall = nurseCall
+                        val activeSpeak = speakOverlay
+                        val activeConfirm = confirmOverlay
+                        val hasTopOverlay = activeNurseCall != null || activeSpeak != null || activeConfirm != null
                         val baseHints = when {
-                            call != null -> ActionHints.list(chat.video.actions(::askVideoPermissions).getOrNull(videoSelection)?.label.orEmpty(),scanMode.value,videoScanDirection)
+                            call != null -> ActionHints.list(chat.video.actions(::askVideoPermissions).getOrNull(videoSelection)?.label.orEmpty(), scanMode.value, videoScanDirection)
+                            activeConfirm != null -> {
+                                val (spec, confirmCursor) = activeConfirm
+                                val label = if (confirmCursor.index == 0) spec.cancelLabel else spec.confirmLabel
+                                confirmHints(label, scanMode.value)
+                            }
+                            activeSpeak != null -> ActionHints.list(
+                                SpeakOverlayState.LABELS.getOrElse(activeSpeak.cursor.index) { "" },
+                                scanMode.value,
+                                activeSpeak.cursor.direction
+                            )
                             activeNurseCall != null -> if (activeNurseCall.sent) {
                                 ActionHints("关闭", "关闭", "关闭")
                             } else {
                                 ActionHints("取消呼叫", "立即呼叫", "立即呼叫")
                             }
-                            destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName,scanMode.value,cursor.direction)
-                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(entertainmentSelection.value.selectedModule.displayName,scanMode.value,entertainmentSelection.value.scanDirection,true)
+                            destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName, scanMode.value, cursor.direction)
+                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(entertainmentSelection.value.selectedModule.displayName, scanMode.value, entertainmentSelection.value.scanDirection, true)
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
                             destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
-                            destination.value == AppDestination.TV -> ActionHints("上一台","打开菜单","下一台")
-                            else -> ActionHints("游戏内 · 向左","离开游戏…","游戏内 · 向右")
+                            destination.value == AppDestination.TV -> ActionHints("上一台", "打开菜单", "下一台")
+                            else -> ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
                         }
                         var pageHints by remember(destination.value) { mutableStateOf<ActionHints?>(null) }
                         val careInfo = remember(bleState, connectedDevice, telemetry, activeBciController, careOpen) {
@@ -384,18 +443,43 @@ class MainActivity : ComponentActivity() {
                         }
                         PatientScaffold(
                             status = status,
-                            hints = if (call == null && activeNurseCall == null) pageHints ?: baseHints else baseHints,
+                            hints = if (call == null && !hasTopOverlay) pageHints ?: baseHints else baseHints,
                             feedback = feedback,
                             readiness = effectiveReadiness,
                             onCare = { toggleCareSheet(true) },
-                            overlay = activeNurseCall?.let { currentCall ->
+                            overlay = if (hasTopOverlay) {
                                 {
-                                    NurseCallOverlay(
-                                        state = currentCall,
-                                        onDismissWhenSent = ::dismissNurseCall
-                                    )
+                                    activeSpeak?.let { speak ->
+                                        SpeakOverlay(
+                                            state = speak,
+                                            scanMode = scanMode.value,
+                                            scanIntervalMs = state.scanIntervalMs,
+                                            dwellRevision = dwellRevision,
+                                            paused = careOpen || activeConfirm != null,
+                                            frozen = frozen,
+                                            onChoose = ::chooseSpeakOption
+                                        )
+                                    }
+                                    activeConfirm?.let { (spec, confirmCursor) ->
+                                        ConfirmOverlay(
+                                            spec = spec,
+                                            cursor = confirmCursor,
+                                            scanMode = scanMode.value,
+                                            scanIntervalMs = state.scanIntervalMs,
+                                            dwellRevision = dwellRevision,
+                                            paused = careOpen,
+                                            frozen = frozen,
+                                            onChoose = ::chooseConfirmOption
+                                        )
+                                    }
+                                    activeNurseCall?.let { currentCall ->
+                                        NurseCallOverlay(
+                                            state = currentCall,
+                                            onDismissWhenSent = ::dismissNurseCall
+                                        )
+                                    }
                                 }
-                            },
+                            } else null,
                             drawer = {
                                 CaregiverSheet(
                                     open = careOpen,
@@ -481,6 +565,10 @@ class MainActivity : ComponentActivity() {
             destination.value != AppDestination.DEVICE_STATUS
         ) {
             BackHandler {
+                if (destination.value == AppDestination.INPUT_METHOD) {
+                    inputViewModel?.handleBackPress()
+                    return@BackHandler
+                }
                 if (destination.value == AppDestination.COMMUNICATION) {
                     if (!chat.back()) navigateTo(AppDestination.HOME)
                     return@BackHandler
@@ -532,16 +620,32 @@ class MainActivity : ComponentActivity() {
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
             AppDestination.COMMUNICATION -> {
                 androidx.compose.runtime.DisposableEffect(vm) {
-                    onDispose { vm.setChatAction(null) }
+                    onDispose { vm.deactivate() }
                 }
-                CommunicationScreen(chat, vm) { navigateTo(AppDestination.HOME) }
+                CommunicationScreen(
+                    chat = chat,
+                    input = vm,
+                    paused = careOpen || nurseCall != null,
+                    frozen = frozen,
+                    onToast = { message, ok -> feedback.toast(message, ok) },
+                    onHome = { navigateTo(AppDestination.HOME) }
+                )
             }
 
             AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
                 AssistantScreen(
                     scanIntervalMs = inputState.scanIntervalMs,
-                    onBack = { navigateTo(AppDestination.HOME) },
+                    scanMode = scanMode.value,
+                    paused = careOpen || nurseCall != null,
+                    frozen = frozen,
+                    onToast = { message, ok -> feedback.toast(message, ok) },
+                    onEditingChange = { assistantEditing = it },
+                    onBack = {
+                        assistantEditing = false
+                        navigateTo(AppDestination.HOME)
+                    },
                     onOpenMedia = { target, id ->
+                        assistantEditing = false
                         assistantMediaId = id
                         navigateTo(target)
                     }
@@ -634,27 +738,123 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun InputMethodPage(vm: InputMethodViewModel) {
         val state by vm.state.collectAsState()
-        AuroraBackground {
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-                Text(
-                    "实时沟通",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.headlineMedium
-                )
-                Box(Modifier.weight(1f)) {
-                    MainScreen(
-                        state = state,
-                        onBlockClick = vm::selectBlockByTouch,
-                        onPinyinClick = vm::selectPinyinByTouch,
-                        onPinyinNavigationClick = vm::selectPinyinNavigationByTouch,
-                        onCharacterClick = vm::selectCharacterByTouch,
-                        onCommonPhraseClick = vm::selectCommonPhraseByTouch,
-                        onPredictionClick = vm::selectPredictionByTouch,
-                        onInitialPredictionClick = vm::selectInitialPredictionByTouch
-                    )
+        val phrases = remember(state.mode, state.phase, state.dwellRevision) { vm.rankedCommonPhrases(state.mode) }
+        ComposerScreen(
+            state = state,
+            phrases = phrases,
+            paused = careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null,
+            frozen = frozen,
+            compactWings = false,
+            onBlockClick = vm::selectBlockByTouch,
+            onPinyinClick = vm::selectPinyinByTouch,
+            onPinyinNavigationClick = vm::selectPinyinNavigationByTouch,
+            onCharacterClick = vm::selectCharacterByTouch,
+            onCharacterItemClick = vm::selectCharacterItemByTouch,
+            onCommonPhraseClick = vm::selectCommonPhraseByTouch,
+            onPredictionClick = vm::selectPredictionByTouch,
+            onInitialPredictionClick = vm::selectInitialPredictionByTouch
+        )
+    }
+
+    private fun openTalkComposer() {
+        speakOverlay = null
+        confirmOverlay = null
+        nurseCall = null
+        nurseCallAlarm.stop()
+        toggleCareSheet(false)
+        navigateTo(AppDestination.INPUT_METHOD)
+        inputViewModel?.openMode(
+            mode = InputMode.Talk,
+            onSend = ::openSpeakOverlay,
+            onBack = {
+                inputViewModel?.deactivate()
+                navigateTo(AppDestination.COMMUNICATION)
+            }
+        )
+    }
+
+    private fun openSpeakOverlay(text: String) {
+        if (text.isBlank()) {
+            if (!frozen) feedback.toast("还没有要说的话")
+            return
+        }
+        speakOverlay = SpeakOverlayState(text = text)
+        dwellRevision++
+        if (!frozen) {
+            speechOutput.speak(text) { feedback.toast("朗读不可用") }
+        }
+    }
+
+    private fun dismissSpeakOverlay() {
+        speakOverlay = null
+        speechOutput.stop()
+        dwellRevision++
+    }
+
+    private fun dismissConfirmOverlay() {
+        confirmOverlay = null
+        dwellRevision++
+    }
+
+    private fun advanceSpeakOverlay() {
+        val current = speakOverlay ?: return
+        speakOverlay = current.copy(cursor = current.cursor.advance(SystemClock.elapsedRealtime(), scanMode.value))
+    }
+
+    private fun advanceConfirmOverlay() {
+        val (spec, currentCursor) = confirmOverlay ?: return
+        val next = currentCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
+        if (next.timedOut(confirmation = true)) {
+            confirmOverlay = null
+            if (!frozen) feedback.toast("三轮都没有选择，已按「${spec.cancelLabel}」处理")
+            spec.onCancel()
+            dwellRevision++
+        } else {
+            confirmOverlay = spec to next
+        }
+    }
+
+    private fun chooseSpeakOption(index: Int) {
+        val current = speakOverlay ?: return
+        when (index) {
+            0 -> dismissSpeakOverlay()
+            1 -> {
+                if (!frozen) {
+                    speechOutput.speak(current.text) { feedback.toast("朗读不可用") }
+                    feedback.toast("再说一遍")
                 }
+                dwellRevision++
+            }
+            2 -> {
+                val spec = ConfirmOverlaySpec(
+                    title = "清空这句话？",
+                    description = "清空后不能恢复。",
+                    cancelLabel = "取消",
+                    cancelSub = "保留这句话",
+                    confirmLabel = "清空",
+                    confirmSub = "开始新的一句",
+                    onConfirm = {
+                        confirmOverlay = null
+                        speakOverlay = null
+                        speechOutput.stop()
+                        inputViewModel?.clearOutputAndReset()
+                        if (!frozen) feedback.toast("已清空", true)
+                        dwellRevision++
+                    },
+                    onCancel = {
+                        confirmOverlay = null
+                        dwellRevision++
+                    }
+                )
+                confirmOverlay = spec to ScanCursor(size = 2, index = 0, direction = 1)
+                dwellRevision++
             }
         }
+    }
+
+    private fun chooseConfirmOption(index: Int) {
+        val (spec, _) = confirmOverlay ?: return
+        if (index == 1) spec.onConfirm() else spec.onCancel()
     }
 
     private fun enterModule(module: HomeModule) {
@@ -767,9 +967,15 @@ class MainActivity : ComponentActivity() {
 
     private fun navigateTo(target: AppDestination) {
         if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
+        if (target != AppDestination.LIFE_ASSISTANT) assistantEditing = false
         if (target != AppDestination.HOME) {
             nurseCall = null
             nurseCallAlarm.stop()
+        }
+        if (target != AppDestination.INPUT_METHOD) {
+            speakOverlay = null
+            confirmOverlay = null
+            speechOutput.stop()
         }
         bciController?.invalidatePendingCommands()
         val previous = destination.value
@@ -786,7 +992,9 @@ class MainActivity : ComponentActivity() {
         }
         cursor = cursor.reset(newSize = homeModules.size, initial = homeFocus)
         destination.value = target
-        inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
+        if (target != AppDestination.INPUT_METHOD && target != AppDestination.COMMUNICATION) {
+            inputViewModel?.deactivate()
+        }
         updateBciCommandDelivery()
     }
 
@@ -799,10 +1007,22 @@ class MainActivity : ComponentActivity() {
             "nav home" -> {
                 nurseCall = null
                 nurseCallAlarm.stop()
+                speakOverlay = null
+                confirmOverlay = null
+                speechOutput.stop()
                 toggleCareSheet(false)
                 navigateTo(AppDestination.HOME)
                 cursor = cursor.reset(newSize = homeModules.size, initial = 0)
                 dwellRevision++
+            }
+            "nav talk" -> openTalkComposer()
+            "nav asst" -> {
+                nurseCall = null
+                nurseCallAlarm.stop()
+                speakOverlay = null
+                confirmOverlay = null
+                toggleCareSheet(false)
+                navigateTo(AppDestination.LIFE_ASSISTANT)
             }
             "care on", "care off" -> toggleCareSheet(cmd.endsWith("on"))
             "freeze on", "freeze off" -> {
@@ -816,7 +1036,16 @@ class MainActivity : ComponentActivity() {
             "signal L" -> if (foreground) routeSignal(ControlSignal.LEFT_LOOK) else return "inactive"
             "signal R" -> if (foreground) routeSignal(ControlSignal.RIGHT_LOOK) else return "inactive"
             "signal B" -> if (foreground) routeSignal(ControlSignal.BITE) else return "inactive"
-            "tick" -> if (destination.value == AppDestination.HOME && nurseCall == null && !careOpen && communicationViewModel?.video?.state?.value?.call == null) advanceHome() else return "pending: page cursor"
+            "tick" -> when {
+                careOpen || communicationViewModel?.video?.state?.value?.call != null -> return "pending: page cursor"
+                confirmOverlay != null -> advanceConfirmOverlay()
+                speakOverlay != null -> advanceSpeakOverlay()
+                nurseCall != null -> return "pending: page cursor"
+                destination.value == AppDestination.HOME -> advanceHome()
+                destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
+                destination.value == AppDestination.LIFE_ASSISTANT -> AssistantInputBus.debugTick()
+                else -> return "pending: page cursor"
+            }
             else -> return "pending: page integration"
         }
         return "ok"
@@ -873,6 +1102,53 @@ class MainActivity : ComponentActivity() {
                     else videoSelection = (videoSelection + step).mod(actions.size)
                 }
                 ControlSignal.BITE -> actions[videoSelection.coerceIn(0, actions.lastIndex)].invoke()
+                else -> Unit
+            }
+            return
+        }
+        val activeConfirm = confirmOverlay
+        if (activeConfirm != null) {
+            val (spec, confirmCursor) = activeConfirm
+            when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    confirmOverlay = spec to confirmCursor.look(step, scanMode.value, hold = true)
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val chosen = confirmCursor.selected(
+                        SystemClock.elapsedRealtime(),
+                        if (frozen) 0 else AppUiSettings.graceMs(this),
+                        scanMode.value
+                    )
+                    if (chosen != confirmCursor.index && !frozen) {
+                        feedback.toast("已按上一项执行（延迟补偿）")
+                    }
+                    chooseConfirmOption(chosen)
+                }
+                else -> Unit
+            }
+            return
+        }
+        val activeSpeak = speakOverlay
+        if (activeSpeak != null) {
+            when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    speakOverlay = activeSpeak.copy(cursor = activeSpeak.cursor.look(step, scanMode.value))
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val chosen = activeSpeak.cursor.selected(
+                        SystemClock.elapsedRealtime(),
+                        if (frozen) 0 else AppUiSettings.graceMs(this),
+                        scanMode.value
+                    )
+                    if (chosen != activeSpeak.cursor.index && !frozen) {
+                        feedback.toast("已按上一项执行（延迟补偿）")
+                    }
+                    chooseSpeakOption(chosen)
+                }
                 else -> Unit
             }
             return
@@ -1079,6 +1355,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         unregisterDebug()
         nurseCallAlarm.release()
+        speechOutput.release()
         feedback.release()
         FloatingEegSignalSource.detach(bleManager)
         communicationViewModel?.requestVideoPermissions = {}

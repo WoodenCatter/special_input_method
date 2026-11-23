@@ -1,9 +1,9 @@
 package com.example.input_ds.data
 
 /**
- * T9 键盘映射：数字键 → 对应字母块
- * 如文档描述：
- * 2=ABC, 3=DEF, 4=GHI, 5=JKL, 6=MNO, 7=PQRS, 8=TUV, 9=WXYZ
+ * T9 键盘映射：数字键 → 对应字母块，及双翼 6 块布局
+ * LEFT  = [2 ABC, 3 DEF, 4 GHI, 5 JKL, DELETE 删除, BACK 返回]
+ * RIGHT = [6 MNO, 7 PQRS, 8 TUV, 9 WXYZ, SEND 发送|说出, PHRASES 常用语]
  */
 object LetterBlockMapping {
 
@@ -28,11 +28,13 @@ object LetterBlockMapping {
         map
     }
 
-    /** 特殊块 ID */
-    const val SEND_BLOCK = 1
+    /** 功能块 ID */
     const val DELETE_BLOCK = 0
+    const val SEND_BLOCK = 1
+    const val BACK_BLOCK = -1
+    const val PHRASES_BLOCK = -2
 
-    /** 数字块的显示标签 */
+    /** 块的默认显示标签 */
     val DIGIT_LABELS: Map<Int, String> = mapOf(
         2 to "ABC",
         3 to "DEF",
@@ -42,16 +44,23 @@ object LetterBlockMapping {
         7 to "PQRS",
         8 to "TUV",
         9 to "WXYZ",
+        DELETE_BLOCK to "删除",
+        BACK_BLOCK to "返回",
         SEND_BLOCK to "发送",
-        DELETE_BLOCK to "删除"
+        PHRASES_BLOCK to "常用语"
     )
 
-    /** 左侧五个块 */
-    val LEFT_BLOCKS = listOf(2, 3, 4, 5, SEND_BLOCK)  // ABC, DEF, GHI, JKL, 发送
+    /** 左侧 6 块 */
+    val LEFT_BLOCKS = listOf(2, 3, 4, 5, DELETE_BLOCK, BACK_BLOCK)
 
-    /** 右侧五个块 */
-    val RIGHT_BLOCKS = listOf(6, 7, 8, 9, DELETE_BLOCK)  // MNO, PQRS, TUV, WXYZ, 删除
+    /** 右侧 6 块 */
+    val RIGHT_BLOCKS = listOf(6, 7, 8, 9, SEND_BLOCK, PHRASES_BLOCK)
 
     /** 所有字母块（2-9） */
     val ALL_BLOCKS = (2..9).toList()
+
+    fun isFunctionBlock(block: Int): Boolean = block !in 2..9
+
+    fun labelFor(block: Int, talkMode: Boolean = false): String =
+        if (block == SEND_BLOCK && talkMode) "说出" else DIGIT_LABELS[block].orEmpty()
 }

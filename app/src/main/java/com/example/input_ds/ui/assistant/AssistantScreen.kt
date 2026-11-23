@@ -70,8 +70,10 @@ import com.example.input_ds.assistant.HomeAction
 import com.example.input_ds.assistant.SimulatedHome
 import com.example.input_ds.model.AppDestination
 import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.model.InputMode
+import com.example.input_ds.model.ScanMode
 import com.example.input_ds.music.MusicLibrary
-import com.example.input_ds.ui.components.MainScreen
+import com.example.input_ds.ui.communication.ComposerScreen
 import com.example.input_ds.ui.theme.AuroraBackground
 import com.example.input_ds.ui.theme.AuroraDarkAccentSoft
 import com.example.input_ds.ui.theme.AuroraDarkBorder
@@ -119,29 +121,43 @@ private val ChatTurnsSaver = listSaver<List<ChatTurn>, String>(
 
 internal object AssistantInputBus {
     private var handler: ((ControlSignal) -> Unit)? = null
+    private var ticker: (() -> Unit)? = null
 
-    fun attach(onSignal: (ControlSignal) -> Unit) {
+    fun attach(onSignal: (ControlSignal) -> Unit, onTick: () -> Unit = {}) {
         handler = onSignal
+        ticker = onTick
     }
 
     fun detach(onSignal: (ControlSignal) -> Unit) {
-        if (handler === onSignal) handler = null
+        if (handler === onSignal) {
+            handler = null
+            ticker = null
+        }
     }
 
     fun dispatch(signal: ControlSignal) {
         handler?.invoke(signal)
+    }
+
+    fun debugTick() {
+        ticker?.invoke()
     }
 }
 
 @Composable
 internal fun AssistantScreen(
     scanIntervalMs: Long,
+    scanMode: ScanMode = ScanMode.AUTO,
+    paused: Boolean = false,
+    frozen: Boolean = false,
+    onToast: (String, Boolean) -> Unit = { _, _ -> },
+    onEditingChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     onOpenMedia: (AppDestination, String) -> Unit
 ) {
     val context = LocalContext.current.applicationContext as Application
     val input: InputMethodViewModel = viewModel(key = "assistant_input") {
-        InputMethodViewModel(context, remotePredictionsEnabled = false, priorityPhrases = ASSISTANT_PHRASES)
+        InputMethodViewModel(context, remotePredictionsEnabled = false)
     }
     val inputState by input.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -236,10 +252,24 @@ internal fun AssistantScreen(
         }
     }
 
-    fun finishInput() {
-        draft = input.state.value.outputText
+    fun finishInput(submitNow: Boolean = false) {
+        val text = input.state.value.outputText
+        draft = text
+        AssistantCareStore.setDebugDraft(text)
+        input.deactivate()
         editing = false
-        selected = AssistantAction.INPUT.ordinal
+        onEditingChange(false)
+        if (submitNow) {
+            if (text.trim().isEmpty()) {
+                onToast("还没有要发的内容", false)
+                selected = AssistantAction.INPUT.ordinal
+            } else {
+                selected = AssistantAction.INPUT.ordinal
+                submit()
+            }
+        } else {
+            selected = if (text.isNotBlank()) AssistantAction.SEND.ordinal else AssistantAction.INPUT.ordinal
+        }
     }
 
     fun choose(action: AssistantAction) {
@@ -247,8 +277,15 @@ internal fun AssistantScreen(
         if (action != AssistantAction.CLEAR) focusManager.clearFocus()
         when (action) {
             AssistantAction.INPUT -> {
-                input.loadDraft(draft)
+                input.setOnToast(onToast)
+                input.openMode(
+                    mode = InputMode.Assistant,
+                    initialDraft = draft,
+                    onSend = { finishInput(submitNow = true) },
+                    onBack = { finishInput(submitNow = false) }
+                )
                 editing = true
+                onEditingChange(true)
             }
             AssistantAction.CLEAR -> draft = ""
             AssistantAction.SEND -> submit()
@@ -282,7 +319,7 @@ internal fun AssistantScreen(
     val currentSignalHandler by rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
         when {
             showSetup -> Unit
-            editing -> input.handleSignal(signal, ::finishInput)
+            editing -> input.handleSignal(signal)
             else -> when (signal) {
                 ControlSignal.LEFT_LOOK -> direction = -1
                 ControlSignal.RIGHT_LOOK -> direction = 1
@@ -294,18 +331,24 @@ internal fun AssistantScreen(
             }
         }
     }
+    val currentTickHandler by rememberUpdatedState<() -> Unit> {
+        if (editing) input.debugTick()
+    }
     DisposableEffect(Unit) {
         val handler: (ControlSignal) -> Unit = { currentSignalHandler(it) }
-        AssistantInputBus.attach(handler)
+        AssistantInputBus.attach(handler, onTick = { currentTickHandler() })
         onDispose {
             AssistantInputBus.detach(handler)
-            input.setStandaloneInputActive(false)
+            input.deactivate()
+            onEditingChange(false)
         }
     }
-    LaunchedEffect(editing) { input.setStandaloneInputActive(editing) }
+    LaunchedEffect(scanMode) { input.setScanMode(scanMode) }
+    LaunchedEffect(paused) { input.setPaused(paused) }
+    LaunchedEffect(frozen) { input.setFrozen(frozen) }
     LaunchedEffect(scanIntervalMs) { input.setScanInterval(scanIntervalMs) }
-    LaunchedEffect(editing, showSetup, selected, direction, scanIntervalMs, confirmation) {
-        if (!editing && !showSetup) {
+    LaunchedEffect(editing, showSetup, selected, direction, scanIntervalMs, confirmation, paused, frozen) {
+        if (!editing && !showSetup && !paused && !frozen) {
             delay(scanIntervalMs)
             val count = confirmation?.let { it.options.size + 1 } ?: AssistantAction.entries.size
             selected = (selected + direction + count) % count
@@ -335,11 +378,31 @@ internal fun AssistantScreen(
         }
     })
 
-    BackHandler(enabled = editing) { finishInput() }
+    BackHandler(enabled = editing) { input.handleBackPress() }
     BackHandler(enabled = confirmation != null) {
         confirmation?.let { confirmHome(it.options.size) }
     }
 
+    if (editing) {
+        val phrases = remember(inputState.mode, inputState.phase, inputState.dwellRevision) {
+            input.rankedCommonPhrases(inputState.mode)
+        }
+        ComposerScreen(
+            state = inputState,
+            phrases = phrases,
+            paused = paused,
+            frozen = frozen,
+            compactWings = false,
+            onBlockClick = input::selectBlockByTouch,
+            onPinyinClick = input::selectPinyinByTouch,
+            onPinyinNavigationClick = input::selectPinyinNavigationByTouch,
+            onCharacterClick = input::selectCharacterByTouch,
+            onCharacterItemClick = input::selectCharacterItemByTouch,
+            onCommonPhraseClick = input::selectCommonPhraseByTouch,
+            onPredictionClick = input::selectPredictionByTouch,
+            onInitialPredictionClick = input::selectInitialPredictionByTouch
+        )
+    } else {
     AuroraBackground {
         Column(
             Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()
@@ -351,31 +414,15 @@ internal fun AssistantScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (editing) "输入内容" else "生活助手", style = MaterialTheme.typography.headlineSmall)
-                if (!editing) {
-                    TextButton(
-                        onClick = { showSetup = true },
-                        enabled = pendingPrompt == null && confirmation == null
-                    ) {
-                        Text("设置")
-                    }
+                Text("生活助手", style = MaterialTheme.typography.headlineSmall)
+                TextButton(
+                    onClick = { showSetup = true },
+                    enabled = pendingPrompt == null && confirmation == null
+                ) {
+                    Text("设置")
                 }
             }
-            if (editing) {
-                MainScreen(
-                    state = inputState,
-                    onBlockClick = { input.selectBlockByTouch(it, ::finishInput) },
-                    onPinyinClick = input::selectPinyinByTouch,
-                    onPinyinNavigationClick = input::selectPinyinNavigationByTouch,
-                    onCharacterClick = input::selectCharacterByTouch,
-                    onCommonPhraseClick = input::selectCommonPhraseByTouch,
-                    onPredictionClick = input::selectPredictionByTouch,
-                    onInitialPredictionClick = input::selectInitialPredictionByTouch,
-                    sendLabel = "完成",
-                    commonPhrases = input::rankedCommonPhrases
-                )
-            } else {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val showSidePanel = maxWidth >= 720.dp
                     val sending = pendingPrompt != null
                     val question = confirmation

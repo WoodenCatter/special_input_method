@@ -25,7 +25,16 @@ fun Modifier.scanItem(
     enabled: Boolean = true,
     grow: Boolean = true,
     cornerRadius: Dp = 16.dp,
-    alarm: Boolean = false
+    alarm: Boolean = false,
+    borderWidth: Dp = 2.dp,
+    customBorderColor: Color? = null,
+    customFillColor: Color? = null,
+    urgentBar: Boolean = false,
+    unfocusedAlpha: Float = 1f,
+    dwellInset: Dp = 14.dp,
+    dwellBottom: Dp = 8.dp,
+    dwellHeight: Dp = 5.dp,
+    showShadow: Boolean = !navigation
 ): Modifier = composed {
     val c = LocalBciColors.current
     val shape = RoundedCornerShape(cornerRadius)
@@ -39,19 +48,27 @@ fun Modifier.scanItem(
     val stroke = when {
         picked -> c.ok
         alarm -> c.alarm
+        urgentBar -> c.alarm
         focused -> c.focus
+        customBorderColor != null -> customBorderColor
         else -> c.line
     }
     val fill = when {
         picked -> c.okTint.compositeOver(c.panel)
         alarm -> c.alarm
         focused -> c.focusTint.compositeOver(c.panel2)
+        customFillColor != null -> customFillColor
         navigation -> Color.Transparent
         else -> c.panel
     }
     val barColor = if (alarm) c.onAlarm else c.focus
+    val effectiveAlpha = when {
+        !enabled -> .32f
+        !focused -> unfocusedAlpha
+        else -> 1f
+    }
     this.zIndex(if (focused) 1f else 0f)
-        .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else .32f }
+        .graphicsLayer { scaleX = scale; scaleY = scale; alpha = effectiveAlpha }
         .drawBehind {
             if (focused) {
                 if (alarm) {
@@ -80,17 +97,26 @@ fun Modifier.scanItem(
                 }
             }
         }
-        .shadow(if (!navigation && !focused && c.bg.luminance() > .5f) 2.dp else 0.dp, shape, clip = false)
+        .shadow(if (showShadow && !focused && c.bg.luminance() > .5f) 2.dp else 0.dp, shape, clip = false)
         .background(fill, shape)
         .drawWithContent {
+            if (urgentBar) {
+                val clipPath = Path().apply {
+                    addRoundRect(RoundRect(Rect(Offset.Zero, size), CornerRadius(cornerRadius.toPx())))
+                }
+                drawContext.canvas.save()
+                drawContext.canvas.clipPath(clipPath)
+                drawRect(c.alarm, Offset.Zero, Size(8.dp.toPx(), size.height))
+                drawContext.canvas.restore()
+            }
             drawContent()
-            val border = 2.dp.toPx()
+            val border = borderWidth.toPx()
             val dash = if (navigation && !focused) PathEffect.dashPathEffect(floatArrayOf(border * 3, border * 2)) else null
             drawRoundRect(
                 stroke,
                 Offset(border / 2, border / 2),
                 Size(size.width - border, size.height - border),
-                CornerRadius((cornerRadius - 1.dp).toPx()),
+                CornerRadius((cornerRadius - borderWidth / 2).coerceAtLeast(0.dp).toPx()),
                 style = Stroke(border, pathEffect = dash)
             )
             if (focused && direction != 0) {
@@ -98,13 +124,14 @@ fun Modifier.scanItem(
             }
             val fraction = progress?.invoke()
             if (focused && fraction != null) {
-                val inset = 14.dp.toPx()
+                val inset = dwellInset.toPx()
+                val h = dwellHeight.toPx()
                 val width = (size.width - 2 * inset).coerceAtLeast(0f) * fraction.coerceIn(0f, 1f)
                 drawRoundRect(
                     barColor,
-                    Offset(if (direction < 0) size.width - inset - width else inset, size.height - 13.dp.toPx()),
-                    Size(width, 5.dp.toPx()),
-                    CornerRadius(3.dp.toPx())
+                    Offset(if (direction < 0) size.width - inset - width else inset, size.height - dwellBottom.toPx() - h),
+                    Size(width, h),
+                    CornerRadius((h / 2f).coerceAtLeast(2.dp.toPx()))
                 )
             }
         }
