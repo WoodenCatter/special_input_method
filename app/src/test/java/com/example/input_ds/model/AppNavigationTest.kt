@@ -1,25 +1,36 @@
 package com.example.input_ds.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class AppNavigationTest {
     @Test
-    fun demoLaunchesStandaloneInputAndProductionLaunchesContacts() {
-        val entry = HomeModule.REALTIME_COMMUNICATION
-        assertEquals(AppDestination.INPUT_METHOD, entry.resolveDestination(demoCommunication = true))
-        assertEquals(AppDestination.COMMUNICATION, entry.resolveDestination(demoCommunication = false))
+    fun homeHasFiveModulesAndDemoAlsoEntersContacts() {
+        assertEquals(
+            listOf(
+                HomeModule.COMMUNICATION,
+                HomeModule.LIFE_ASSISTANT,
+                HomeModule.ENTERTAINMENT,
+                HomeModule.APP_SETTINGS,
+                HomeModule.CALL_NURSE
+            ),
+            HomeModule.entries
+        )
+        assertEquals(AppDestination.COMMUNICATION, HomeModule.COMMUNICATION.resolveDestination(demoCommunication = true))
+        assertEquals(AppDestination.COMMUNICATION, HomeModule.COMMUNICATION.resolveDestination(demoCommunication = false))
         assertEquals(AppDestination.LIFE_ASSISTANT, HomeModule.LIFE_ASSISTANT.resolveDestination(true))
     }
+
     @Test
-    fun manualHomeMovesAndSkipsHeadsetSettings() {
+    fun manualHomeWrapsAcrossAllFiveModules() {
         val initial = HomeSelectionState()
-        assertEquals(HomeModule.APP_SETTINGS, initial.selectedModule)
-        assertEquals(HomeModule.LIFE_ASSISTANT, initial.onDirection(-1, ScanMode.MANUAL).selectedModule)
-        assertEquals(HomeModule.REALTIME_COMMUNICATION, initial.onDirection(1, ScanMode.MANUAL).selectedModule)
-        assertEquals(HomeModule.APP_SETTINGS, initial.moveRight().moveRight().moveRight().moveRight().selectedModule)
-        assertFalse(HomeModule.HEADSET_SETTINGS.scanEnabled)
+        assertEquals(HomeModule.COMMUNICATION, initial.selectedModule)
+        assertEquals(HomeModule.CALL_NURSE, initial.onDirection(-1, ScanMode.MANUAL).selectedModule)
+        assertEquals(HomeModule.LIFE_ASSISTANT, initial.onDirection(1, ScanMode.MANUAL).selectedModule)
+        assertEquals(
+            HomeModule.COMMUNICATION,
+            initial.moveRight().moveRight().moveRight().moveRight().moveRight().selectedModule
+        )
     }
 
     @Test
@@ -28,7 +39,7 @@ class AppNavigationTest {
         val left = initial.onDirection(-1, ScanMode.AUTO)
         assertEquals(initial.selectedIndex, left.selectedIndex)
         assertEquals(-1, left.scanDirection)
-        assertEquals(HomeModule.LIFE_ASSISTANT, left.advance().selectedModule)
+        assertEquals(HomeModule.CALL_NURSE, left.advance().selectedModule)
     }
 
     @Test

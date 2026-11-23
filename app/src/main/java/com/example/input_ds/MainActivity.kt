@@ -1,13 +1,19 @@
 package com.example.input_ds
 
 import android.Manifest
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import com.example.input_ds.alert.NurseCallAlarm
+import com.example.input_ds.alert.NurseCallState
+import com.example.input_ds.assistant.AssistantCareStore
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.runScanTimer
 import com.example.input_ds.ui.design.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.activity.ComponentActivity
@@ -97,7 +103,9 @@ import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private lateinit var bleManager: NaoyunBleManager
+    private lateinit var nurseCallAlarm: NurseCallAlarm
     private var bciController: BciController? = null
+    private var activeBciController by mutableStateOf<BciController?>(null)
     private var inputViewModel: InputMethodViewModel? = null
     private var communicationViewModel: CommunicationViewModel? = null
     private var videoSelection by mutableStateOf(0)
@@ -117,11 +125,17 @@ class MainActivity : ComponentActivity() {
     private val destination = mutableStateOf(AppDestination.HOME)
     private val snakeState = mutableStateOf(SnakeClimbGame.create())
     private var assistantMediaId: String? = null
-    private val homeModules = HomeModule.entries.filter { it.scanEnabled }
+    private val homeModules = HomeModule.entries
     private var cursor by mutableStateOf(ScanCursor(homeModules.size))
     private var dwellRevision by mutableIntStateOf(0)
     private var frozen by mutableStateOf(false)
     private var displayMode by mutableStateOf(AppUiSettings.DisplayMode.AUTO)
+    private var nurseCall by mutableStateOf<NurseCallState?>(null)
+    private var careOpen by mutableStateOf(false)
+    private var feedbackSound by mutableStateOf(true)
+    private var floatingEegVisible by mutableStateOf(false)
+    private var debugNoContacts by mutableStateOf(false)
+    private var bluetoothPermissionRequested = false
     private var statusPath = listOf("主页")
     private val feedback = GazeFeedback()
     private var foreground = false
@@ -155,9 +169,13 @@ class MainActivity : ComponentActivity() {
         LanguageModel.init(applicationContext)
         UserDictionary.init(applicationContext)
         bleManager = NaoyunBleManager(applicationContext)
+        nurseCallAlarm = NurseCallAlarm(applicationContext)
         FloatingEegSignalSource.attach(bleManager)
         TrainingWorkScheduler.resumeIncomplete(applicationContext)
         floatingBallVisible.value = AppUiSettings.readFloatingBallVisible(applicationContext)
+        feedbackSound = AppUiSettings.feedbackSound(applicationContext)
+        floatingEegVisible = AppUiSettings.floatingEegVisible(applicationContext)
+        AssistantCareStore.load(applicationContext)
         scanMode.value = ScanSettings.readMode(applicationContext)
         window.attributes = window.attributes.apply {
             screenBrightness = AppUiSettings.readScreenBrightness(applicationContext)
@@ -263,6 +281,53 @@ class MainActivity : ComponentActivity() {
                 val state by vm.state.collectAsState()
                 val conversation by chat.state.collectAsState()
                 val telemetry by bleManager.deviceTelemetry.collectAsState()
+                val connectedDevice by bleManager.connectedDevice.collectAsState()
+                val assistantConfig by AssistantCareStore.config.collectAsState()
+                val assistantDraft by AssistantCareStore.debugDraft.collectAsState()
+                val allowHttpAssistant = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+                val fallbackReadiness = remember { MutableStateFlow(BciController.Readiness()) }
+                val rawReadiness by (activeBciController?.readiness ?: fallbackReadiness).collectAsState()
+                val effectiveReadiness = if (bleState == NaoyunBleManager.State.READY && headsetControlEnabled.value) {
+                    rawReadiness
+                } else {
+                    BciController.Readiness()
+                }
+                LaunchedEffect(bleState, connectedDevice, frozen) {
+                    if (!frozen && connectedDevice == null && bleState in setOf(
+                            NaoyunBleManager.State.IDLE,
+                            NaoyunBleManager.State.DISCONNECTED,
+                            NaoyunBleManager.State.ERROR
+                        )
+                    ) {
+                        if (bleManager.hasPermissions()) {
+                            bleManager.startScan()
+                        } else if (!bluetoothPermissionRequested) {
+                            bluetoothPermissionRequested = true
+                            requestBluetoothPermissions()
+                        }
+                    }
+                }
+                LaunchedEffect(nurseCall != null, nurseCall?.sent, frozen, careOpen) {
+                    val current = nurseCall
+                    if (current == null || !current.sent || frozen) {
+                        nurseCallAlarm.stop()
+                    } else {
+                        nurseCallAlarm.start()
+                    }
+                    if (current != null && !current.sent && !frozen && !careOpen) {
+                        while (true) {
+                            delay(1_000L)
+                            val latest = nurseCall ?: break
+                            if (latest.sent) break
+                            val next = latest.tick()
+                            nurseCall = next
+                            if (next.sent) {
+                                if (!frozen) nurseCallAlarm.start()
+                                break
+                            }
+                        }
+                    }
+                }
                 val patient = call != null || destination.value !in caregiverPages
                 LaunchedEffect(patient) {
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -270,8 +335,8 @@ class MainActivity : ComponentActivity() {
                     else controller.show(WindowInsetsCompat.Type.systemBars())
                     controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
-                LaunchedEffect(destination.value, call?.id, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
-                    if (destination.value == AppDestination.HOME && call == null && !frozen && scanMode.value == ScanMode.AUTO) {
+                LaunchedEffect(destination.value, call?.id, nurseCall != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.HOME && call == null && nurseCall == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
                         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                             cursor = cursor.copy(previousIndex = -1)
                             runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Home tick failed", it) }) {
@@ -282,9 +347,11 @@ class MainActivity : ComponentActivity() {
                 }
                 val path = patientPath(destination.value, conversation, video, mediaParent())
                 androidx.compose.runtime.SideEffect { statusPath = path }
-                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd) {
+                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, careOpen) {
                     bciController?.invalidatePendingCommands()
                 }
+                BackHandler(enabled = careOpen) { toggleCareSheet(false) }
+                BackHandler(enabled = !careOpen && nurseCall != null) { dismissNurseCall() }
                 Box(Modifier.fillMaxSize()) {
                     if (patient) {
                         val connection = when (bleState) {
@@ -296,8 +363,14 @@ class MainActivity : ComponentActivity() {
                         val battery = telemetry.takeIf { connection != "耳机未连接" }
                         val status = PatientStatus(path, connection, battery?.leftBatteryPercent, battery?.rightBatteryPercent,
                             scanMode.value, state.scanIntervalMs, display)
+                        val activeNurseCall = nurseCall
                         val baseHints = when {
                             call != null -> ActionHints.list(chat.video.actions(::askVideoPermissions).getOrNull(videoSelection)?.label.orEmpty(),scanMode.value,videoScanDirection)
+                            activeNurseCall != null -> if (activeNurseCall.sent) {
+                                ActionHints("关闭", "关闭", "关闭")
+                            } else {
+                                ActionHints("取消呼叫", "立即呼叫", "立即呼叫")
+                            }
                             destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName,scanMode.value,cursor.direction)
                             destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(entertainmentSelection.value.selectedModule.displayName,scanMode.value,entertainmentSelection.value.scanDirection,true)
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
@@ -306,7 +379,75 @@ class MainActivity : ComponentActivity() {
                             else -> ActionHints("游戏内 · 向左","离开游戏…","游戏内 · 向右")
                         }
                         var pageHints by remember(destination.value) { mutableStateOf<ActionHints?>(null) }
-                        PatientScaffold(status, if (call == null) pageHints ?: baseHints else baseHints, feedback) {
+                        val careInfo = remember(bleState, connectedDevice, telemetry, activeBciController, careOpen) {
+                            buildCaregiverInfo(bleState, connectedDevice, telemetry)
+                        }
+                        PatientScaffold(
+                            status = status,
+                            hints = if (call == null && activeNurseCall == null) pageHints ?: baseHints else baseHints,
+                            feedback = feedback,
+                            readiness = effectiveReadiness,
+                            onCare = { toggleCareSheet(true) },
+                            overlay = activeNurseCall?.let { currentCall ->
+                                {
+                                    NurseCallOverlay(
+                                        state = currentCall,
+                                        onDismissWhenSent = ::dismissNurseCall
+                                    )
+                                }
+                            },
+                            drawer = {
+                                CaregiverSheet(
+                                    open = careOpen,
+                                    frozen = frozen,
+                                    headsetControlEnabled = headsetControlEnabled.value,
+                                    feedbackSound = feedbackSound,
+                                    floatingEegVisible = floatingEegVisible,
+                                    info = careInfo,
+                                    assistantConfig = assistantConfig,
+                                    assistantDraft = assistantDraft,
+                                    allowHttpAssistant = allowHttpAssistant,
+                                    debugNoContacts = debugNoContacts,
+                                    bleManager = bleManager,
+                                    actionLog = feedback.log,
+                                    onClose = { toggleCareSheet(false) },
+                                    onHeadsetControlChange = { enabled ->
+                                        if (enabled && bleManager.state.value != NaoyunBleManager.State.READY) {
+                                            feedback.toast("请先连接耳机后再启用耳机控制")
+                                        } else {
+                                            setHeadsetControlEnabled(enabled)
+                                            feedback.toast(if (enabled) "耳机控制已启用" else "耳机控制已停用，仅模拟输入")
+                                        }
+                                    },
+                                    onFeedbackSoundChange = { enabled ->
+                                        feedbackSound = enabled
+                                        AppUiSettings.writeFeedbackSound(applicationContext, enabled)
+                                    },
+                                    onFloatingEegVisibleChange = { visible ->
+                                        floatingEegVisible = visible
+                                        AppUiSettings.writeFloatingEegVisible(applicationContext, visible)
+                                        feedback.toast(if (visible) "悬浮波形窗口已显示" else "悬浮波形窗口已隐藏")
+                                    },
+                                    onSaveAssistantConfig = { connection ->
+                                        AssistantCareStore.save(applicationContext, connection)
+                                    },
+                                    onAssistantDraftChange = AssistantCareStore::setDebugDraft,
+                                    onAssistantNotice = { message, ok -> feedback.toast(message, ok) },
+                                    onDebugNoContactsChange = { enabled ->
+                                        debugNoContacts = enabled
+                                        feedback.toast(if (enabled) "已模拟：还没有绑定家属" else "已恢复示例联系人")
+                                    },
+                                    onDebugIncomingCall = {
+                                        val result = debugCommand("fake incoming")
+                                        if (result != "ok") feedback.toast("来电模拟将在 P4 接入")
+                                    },
+                                    onOpenDeviceAndModel = {
+                                        toggleCareSheet(false)
+                                        navigateTo(AppDestination.SETTINGS)
+                                    }
+                                )
+                            }
+                        ) {
                             androidx.compose.runtime.CompositionLocalProvider(LocalActionHints provides { pageHints = it }) {
                                 AppContent(vm = vm, chat = chat, bleState = bleState)
                             }
@@ -318,11 +459,11 @@ class MainActivity : ComponentActivity() {
                     } else AppContent(vm = vm, chat = chat, bleState = bleState)
                     FloatingEegSignalWindow(
                         bleManager = bleManager,
-                        visible = floatingBallVisible.value && call == null &&
-                            destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB)
+                        visible = floatingEegVisible && call == null && !careOpen &&
+                            destination.value !in caregiverPages
                     )
                     FloatingControlBall(
-                        visible = floatingBallVisible.value,
+                        visible = floatingBallVisible.value && !careOpen,
                         onLeftLook = { routeSignal(ControlSignal.LEFT_LOOK) },
                         onRightLook = { routeSignal(ControlSignal.RIGHT_LOOK) },
                         onBite = { routeSignal(ControlSignal.BITE) }
@@ -361,17 +502,14 @@ class MainActivity : ComponentActivity() {
 
         when (destination.value) {
             AppDestination.HOME -> HomeScreen(
-                selection = HomeSelectionState(HomeModule.entries.indexOf(homeModules[cursor.index]), cursor.direction),
+                selection = HomeSelectionState(cursor.index, cursor.direction),
                 scanMode = scanMode.value,
                 scanIntervalMs = inputState.scanIntervalMs,
                 dwellRevision = dwellRevision,
+                paused = careOpen || nurseCall != null,
                 frozen = frozen,
-                bleManager = bleManager,
-                onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
-                    if (module.scanEnabled) {
-                        cursor = cursor.reset(initial = homeModules.indexOf(module))
-                    }
+                    cursor = cursor.reset(newSize = homeModules.size, initial = homeModules.indexOf(module))
                     enterModule(module)
                 }
             )
@@ -520,7 +658,78 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterModule(module: HomeModule) {
+        if (module == HomeModule.CALL_NURSE) {
+            bciController?.invalidatePendingCommands()
+            nurseCall = NurseCallState()
+            return
+        }
         navigateTo(module.resolveDestination(BuildConfig.DEMO_COMMUNICATION))
+    }
+
+    private fun dismissNurseCall() {
+        val wasSent = nurseCall?.sent == true
+        nurseCall = null
+        nurseCallAlarm.stop()
+        if (!wasSent && !frozen) feedback.toast("已取消呼叫")
+        dwellRevision++
+    }
+
+    private fun toggleCareSheet(open: Boolean) {
+        if (careOpen == open) return
+        careOpen = open
+        bciController?.invalidatePendingCommands()
+        updateBciCommandDelivery()
+        if (!open) dwellRevision++
+    }
+
+    private fun buildCaregiverInfo(
+        bleState: NaoyunBleManager.State,
+        connectedDevice: NaoyunBleManager.ConnectedDevice?,
+        telemetry: NaoyunBleManager.DeviceTelemetry?
+    ): CaregiverInfo {
+        val connected = bleState in setOf(
+            NaoyunBleManager.State.READY,
+            NaoyunBleManager.State.STREAM_STALLED,
+            NaoyunBleManager.State.RECOVERING
+        )
+        val deviceName = connectedDevice?.name ?: "Naoyun Pods BLE"
+        val deviceSummary = when (bleState) {
+            NaoyunBleManager.State.READY -> "$deviceName · 已连接"
+            NaoyunBleManager.State.STREAM_STALLED, NaoyunBleManager.State.RECOVERING -> "$deviceName · 信号中断"
+            NaoyunBleManager.State.CONNECTING, NaoyunBleManager.State.INITIALIZING -> "正在连接…"
+            NaoyunBleManager.State.SCANNING -> "正在扫描…"
+            else -> "未连接"
+        }
+        val batteryWearingSummary = if (connected && telemetry != null) {
+            val worn = if (telemetry.leftWorn && telemetry.rightWorn) "佩戴正常" else "请检查佩戴"
+            "L ${telemetry.leftBatteryPercent}% R ${telemetry.rightBatteryPercent}% · $worn"
+        } else {
+            "L -- R -- · 未连接"
+        }
+        val repository = PersonalizationRepository(applicationContext)
+        val activeUserId = repository.activeUserId()
+        val activeModel = activeUserId?.let { UserModelManager.activeModel(applicationContext, it) }
+        val modelSummary = when {
+            activeModel != null -> {
+                val proto = if (activeModel.protocol == ClassificationProtocol.SIX_ACTION) "六分类" else "四分类"
+                "个性化 ${activeModel.modelKey} $proto"
+            }
+            activeBciController?.loadedProtocol == ClassificationProtocol.SIX_ACTION -> "内置六分类模型"
+            else -> "内置四分类模型"
+        }
+        val host = BuildConfig.BACKNET_URL.toHttpUrlOrNull()?.host
+            ?: BuildConfig.BACKNET_URL.removePrefix("https://").removePrefix("http://").trimEnd('/')
+        val commSuffix = when {
+            BuildConfig.DEMO_COMMUNICATION -> "演示模式"
+            repository.deviceServerBinding() != null -> "已绑定"
+            else -> "未配置"
+        }
+        return CaregiverInfo(
+            deviceSummary = deviceSummary,
+            batteryWearingSummary = batteryWearingSummary,
+            modelSummary = modelSummary,
+            communicationSummary = "$host · $commSuffix"
+        )
     }
 
     private fun mediaParent(): AppDestination =
@@ -558,8 +767,24 @@ class MainActivity : ComponentActivity() {
 
     private fun navigateTo(target: AppDestination) {
         if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
+        if (target != AppDestination.HOME) {
+            nurseCall = null
+            nurseCallAlarm.stop()
+        }
         bciController?.invalidatePendingCommands()
-        cursor = cursor.reset()
+        val previous = destination.value
+        val homeFocus = if (target == AppDestination.HOME) {
+            when (previous) {
+                AppDestination.COMMUNICATION, AppDestination.INPUT_METHOD -> HomeModule.COMMUNICATION.ordinal
+                AppDestination.LIFE_ASSISTANT -> HomeModule.LIFE_ASSISTANT.ordinal
+                AppDestination.ENTERTAINMENT -> HomeModule.ENTERTAINMENT.ordinal
+                AppDestination.APP_SETTINGS -> HomeModule.APP_SETTINGS.ordinal
+                else -> cursor.index
+            }
+        } else {
+            cursor.index
+        }
+        cursor = cursor.reset(newSize = homeModules.size, initial = homeFocus)
         destination.value = target
         inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
         updateBciCommandDelivery()
@@ -571,14 +796,27 @@ class MainActivity : ComponentActivity() {
 
     private fun debugCommand(cmd: String): String {
         when (cmd) {
-            "nav home" -> { navigateTo(AppDestination.HOME); cursor = cursor.reset(initial = 0); dwellRevision++ }
-            "freeze on", "freeze off" -> { frozen = cmd.endsWith("on"); cursor = cursor.reset(); dwellRevision++ }
+            "nav home" -> {
+                nurseCall = null
+                nurseCallAlarm.stop()
+                toggleCareSheet(false)
+                navigateTo(AppDestination.HOME)
+                cursor = cursor.reset(newSize = homeModules.size, initial = 0)
+                dwellRevision++
+            }
+            "care on", "care off" -> toggleCareSheet(cmd.endsWith("on"))
+            "freeze on", "freeze off" -> {
+                frozen = cmd.endsWith("on")
+                if (frozen) nurseCallAlarm.stop()
+                cursor = cursor.reset()
+                dwellRevision++
+            }
             "scan auto", "scan manual" -> { scanMode.value = if (cmd.endsWith("auto")) ScanMode.AUTO else ScanMode.MANUAL; cursor = cursor.reset() }
             "mode auto", "mode light", "mode dark" -> displayMode = AppUiSettings.DisplayMode.valueOf(cmd.substringAfter(' ').uppercase())
             "signal L" -> if (foreground) routeSignal(ControlSignal.LEFT_LOOK) else return "inactive"
             "signal R" -> if (foreground) routeSignal(ControlSignal.RIGHT_LOOK) else return "inactive"
             "signal B" -> if (foreground) routeSignal(ControlSignal.BITE) else return "inactive"
-            "tick" -> if (destination.value == AppDestination.HOME && communicationViewModel?.video?.state?.value?.call == null) advanceHome() else return "pending: page cursor"
+            "tick" -> if (destination.value == AppDestination.HOME && nurseCall == null && !careOpen && communicationViewModel?.video?.state?.value?.call == null) advanceHome() else return "pending: page cursor"
             else -> return "pending: page integration"
         }
         return "ok"
@@ -603,19 +841,23 @@ class MainActivity : ComponentActivity() {
             (destination.value != AppDestination.DEVICE_STATUS &&
                 destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS)
         bciController?.setCommandDeliveryEnabled(
-            foreground && headsetControlEnabled.value && targetAcceptsCommands
+            foreground && !careOpen && headsetControlEnabled.value && targetAcceptsCommands
         )
     }
 
     private fun routeHeadsetSignal(signal: ControlSignal) {
         val inCall = communicationViewModel?.video?.state?.value?.call != null
-        if (headsetControlEnabled.value && (inCall || (destination.value != AppDestination.DEVICE_STATUS &&
+        if (!careOpen && headsetControlEnabled.value && (inCall || (destination.value != AppDestination.DEVICE_STATUS &&
                 destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS))
         ) routeSignal(signal)
     }
 
     private fun routeSignal(signal: ControlSignal) {
-        if (!frozen && destination.value !in caregiverPages) feedback.emit(signal, statusPath.joinToString(" › "), AppUiSettings.feedbackSound(this))
+        if (careOpen) {
+            if (!frozen) feedback.toast("照护面板打开中，患者指令已暂停")
+            return
+        }
+        if (!frozen && destination.value !in caregiverPages) feedback.emit(signal, statusPath.joinToString(" › "), feedbackSound)
         if (destination.value == AppDestination.WIZARD_GAME) {
             WizardGameInputBus.dispatch(signal)
             return
@@ -635,6 +877,24 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
+        val activeNurseCall = nurseCall
+        if (activeNurseCall != null) {
+            when (val action = activeNurseCall.onSignal(signal)) {
+                NurseCallState.Action.Stay -> Unit
+                NurseCallState.Action.Cancel -> {
+                    nurseCall = null
+                    nurseCallAlarm.stop()
+                    if (!frozen) feedback.toast("已取消呼叫")
+                    dwellRevision++
+                }
+                is NurseCallState.Action.Trigger -> {
+                    nurseCall = action.state
+                    if (!frozen) nurseCallAlarm.start()
+                }
+                NurseCallState.Action.Dismiss -> dismissNurseCall()
+            }
+            return
+        }
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
                 ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
@@ -643,7 +903,10 @@ class MainActivity : ComponentActivity() {
                 }
                 ControlSignal.BITE -> {
                     val selected = cursor.selected(SystemClock.elapsedRealtime(), if (frozen) 0 else AppUiSettings.graceMs(this), scanMode.value)
-                    if (selected != cursor.index) feedback.toast("已按上一项执行（延迟补偿）")
+                    if (selected != cursor.index) {
+                        cursor = cursor.copy(index = selected)
+                        feedback.toast("已按上一项执行（延迟补偿）")
+                    }
                     enterModule(homeModules[selected])
                 }
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
@@ -707,11 +970,13 @@ class MainActivity : ComponentActivity() {
         attemptedModelIdentity = activeModelIdentity()
         val controller = BciController(applicationContext, bleManager, ::routeHeadsetSignal)
         bciController = controller
+        activeBciController = controller
         updateBciCommandDelivery()
         if (!controller.loadModel()) {
             bciStatus.value = "耳机已连接，控制模型不可用"
             controller.stop()
             bciController = null
+            activeBciController = null
             bciActive.value = false
             headsetControlEnabled.value = false
             return
@@ -738,6 +1003,7 @@ class MainActivity : ComponentActivity() {
     private fun stopBciController() {
         bciController?.stop()
         bciController = null
+        activeBciController = null
         bciActive.value = false
         if (bleManager.state.value != NaoyunBleManager.State.READY) {
             bciStatus.value = "耳机未连接"
@@ -812,6 +1078,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         unregisterDebug()
+        nurseCallAlarm.release()
         feedback.release()
         FloatingEegSignalSource.detach(bleManager)
         communicationViewModel?.requestVideoPermissions = {}

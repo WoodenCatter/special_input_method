@@ -19,8 +19,17 @@ object AppUiSettings {
     fun displayMode(context: Context) = DisplayMode.entries.firstOrNull {
         it.name == preferences(context).getString("display_mode", null)
     } ?: DisplayMode.AUTO
+    fun writeDisplayMode(context: Context, mode: DisplayMode) {
+        preferences(context).edit().putString("display_mode", mode.name).apply()
+    }
     fun feedbackSound(context: Context) = preferences(context).getBoolean("feedback_sound", true)
-    fun floatingEegVisible(context: Context) = preferences(context).getBoolean("floating_eeg_visible", true)
+    fun writeFeedbackSound(context: Context, enabled: Boolean) {
+        preferences(context).edit().putBoolean("feedback_sound", enabled).apply()
+    }
+    fun floatingEegVisible(context: Context) = preferences(context).getBoolean("floating_eeg_visible", false)
+    fun writeFloatingEegVisible(context: Context, visible: Boolean) {
+        preferences(context).edit().putBoolean("floating_eeg_visible", visible).apply()
+    }
     fun graceMs(context: Context) = preferences(context).getLong("grace_ms", 400L)
 
     fun readFloatingBallVisible(context: Context): Boolean = context

@@ -71,6 +71,32 @@ class SixActionDetectorTest {
         assertNull(detector.update(probabilities(left = 0.99f), leftWave, FloatArray(500), 300L).eventClass)
     }
 
+    @Test
+    fun sixDetectorResultExposesReadOnlyReadinessProgress() {
+        val detector = SixActionDetector(calibration())
+        var trigger: SixDetectorResult? = null
+        repeat(4) { index ->
+            trigger = detector.update(probabilities(sequenceLeftRight = 0.99f), leftRightWave, FloatArray(500), index * 100L)
+        }
+        assertEquals(TemporalEvidenceAccumulator.Type.COMMAND, trigger?.temporalType)
+        assertEquals(SixActionDetector.LEFT_RIGHT_CLASS, trigger?.lockedClass)
+        assertEquals(0, trigger?.restStreak)
+
+        val rest1 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 400L)
+        assertEquals(TemporalEvidenceAccumulator.Type.LOCKED, rest1.temporalType)
+        assertEquals(SixActionDetector.LEFT_RIGHT_CLASS, rest1.lockedClass)
+        assertEquals(1, rest1.restStreak)
+
+        val rest2 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 500L)
+        assertEquals(TemporalEvidenceAccumulator.Type.LOCKED, rest2.temporalType)
+        assertEquals(2, rest2.restStreak)
+
+        val rest3 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 600L)
+        assertEquals(TemporalEvidenceAccumulator.Type.REARMED, rest3.temporalType)
+        assertNull(rest3.lockedClass)
+        assertEquals(0, rest3.restStreak)
+    }
+
     private fun calibration(
         directionThreshold: Float = 1f,
         spanThreshold: Float = 20f

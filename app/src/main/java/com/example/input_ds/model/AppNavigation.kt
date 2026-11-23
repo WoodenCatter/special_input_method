@@ -23,16 +23,15 @@ enum class AppDestination {
 enum class HomeModule(
     val destination: AppDestination,
     val displayName: String,
-    val scanEnabled: Boolean = true
+    val subtitle: String
 ) {
-    APP_SETTINGS(AppDestination.APP_SETTINGS, "设置"),
-    REALTIME_COMMUNICATION(AppDestination.COMMUNICATION, "实时沟通"),
-    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐"),
-    LIFE_ASSISTANT(AppDestination.LIFE_ASSISTANT, "生活助手"),
-    HEADSET_SETTINGS(AppDestination.SETTINGS, "耳机设置", scanEnabled = false);
+    COMMUNICATION(AppDestination.COMMUNICATION, "沟通", "家属消息 · 视频 · 当面说"),
+    LIFE_ASSISTANT(AppDestination.LIFE_ASSISTANT, "生活助手", "问答 · 点播 · 家居"),
+    ENTERTAINMENT(AppDestination.ENTERTAINMENT, "娱乐", "游戏 · 音乐 · 电视"),
+    APP_SETTINGS(AppDestination.APP_SETTINGS, "设置", "音量 · 亮度 · 扫描"),
+    CALL_NURSE(AppDestination.HOME, "呼叫护士", "选中后 5 秒内可取消");
 
-    fun resolveDestination(demoCommunication: Boolean): AppDestination =
-        if (this == REALTIME_COMMUNICATION && demoCommunication) AppDestination.INPUT_METHOD else destination
+    fun resolveDestination(@Suppress("UNUSED_PARAMETER") demoCommunication: Boolean): AppDestination = destination
 }
 
 data class HomeSelectionState(
@@ -42,26 +41,23 @@ data class HomeSelectionState(
     val selectedModule: HomeModule
         get() = HomeModule.entries[selectedIndex.coerceIn(HomeModule.entries.indices)]
 
-    private fun move(offset: Int): HomeSelectionState {
-        val candidates = HomeModule.entries.indices.filter { HomeModule.entries[it].scanEnabled }
-        val position = candidates.indexOf(selectedIndex).takeIf { it >= 0 } ?: 0
-        val nextPosition = (position + offset + candidates.size) % candidates.size
-        return copy(selectedIndex = candidates[nextPosition])
+    private fun cursor(): ScanCursor =
+        ScanCursor(HomeModule.entries.size, selectedIndex.coerceIn(HomeModule.entries.indices), scanDirection)
+
+    fun moveLeft(): HomeSelectionState = onDirection(-1, ScanMode.MANUAL)
+
+    fun moveRight(): HomeSelectionState = onDirection(1, ScanMode.MANUAL)
+
+    fun advance(): HomeSelectionState = cursor().advance(0L, ScanMode.AUTO).let {
+        copy(selectedIndex = it.index, scanDirection = it.direction)
     }
 
-    fun moveLeft(): HomeSelectionState = move(-1)
+    fun changeDirection(direction: Int): HomeSelectionState = onDirection(direction, ScanMode.AUTO)
 
-    fun moveRight(): HomeSelectionState = move(1)
-
-    fun advance(): HomeSelectionState = if (scanDirection < 0) moveLeft() else moveRight()
-
-    fun changeDirection(direction: Int): HomeSelectionState =
-        copy(scanDirection = if (direction < 0) -1 else 1)
-
-    fun onDirection(direction: Int, mode: ScanMode): HomeSelectionState = when (mode) {
-        ScanMode.MANUAL -> if (direction < 0) moveLeft() else moveRight()
-        ScanMode.AUTO -> changeDirection(direction)
-    }
+    fun onDirection(direction: Int, mode: ScanMode): HomeSelectionState =
+        cursor().look(if (direction < 0) -1 else 1, mode).let {
+            copy(selectedIndex = it.index, scanDirection = it.direction)
+        }
 }
 
 enum class EntertainmentHubModule(val destination: AppDestination, val displayName: String, val symbol: String) {

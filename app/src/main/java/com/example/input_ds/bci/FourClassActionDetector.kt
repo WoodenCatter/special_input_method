@@ -29,7 +29,10 @@ data class DetectorResult(
     val features: WindowFeatures,
     val state: FourClassActionDetector.State,
     val strongBite: Boolean,
-    val strongDirection: Boolean
+    val strongDirection: Boolean,
+    val temporalType: TemporalEvidenceAccumulator.Type = TemporalEvidenceAccumulator.Type.NO_COMMAND,
+    val lockedClass: Int? = null,
+    val restStreak: Int = 0
 )
 
 class FourClassActionDetector(
@@ -101,7 +104,10 @@ class FourClassActionDetector(
             features,
             state,
             strongBite,
-            strongDirection
+            strongDirection,
+            temporal.type,
+            temporal.lockedClass,
+            temporal.restStreak
         )
     }
 

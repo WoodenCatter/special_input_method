@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.*
+import com.example.input_ds.bci.BciController
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.ScanMode
 import com.example.input_ds.ui.theme.*
@@ -43,19 +44,33 @@ data class PatientStatus(
 )
 
 @Composable
-fun PatientScaffold(status: PatientStatus, hints: ActionHints, feedback: GazeFeedback,
-                    onCare: (() -> Unit)? = null, content: @Composable () -> Unit) {
+fun PatientScaffold(
+    status: PatientStatus,
+    hints: ActionHints,
+    feedback: GazeFeedback,
+    readiness: BciController.Readiness = BciController.Readiness(),
+    onCare: (() -> Unit)? = null,
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
+    drawer: (@Composable BoxScope.() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
     val c = LocalBciColors.current
     val density = LocalDensity.current.density
     CompositionLocalProvider(LocalDensity provides Density(density, 1f)) {
         Box(Modifier.fillMaxSize().background(c.bg)) {
             Column {
                 StatusBar(status, onCare)
-                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 28.dp, vertical = 20.dp)) { content() }
-                ActionBar(hints, feedback.hit)
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) { content() }
+                    if (overlay != null) {
+                        Box(Modifier.fillMaxSize()) { overlay() }
+                    }
+                }
+                ActionBar(hints, feedback.hit, readiness)
             }
             FeedbackOverlay(feedback)
             BciToast(feedback, Modifier.align(Alignment.BottomCenter).padding(bottom = 128.dp))
+            drawer?.invoke(this)
         }
     }
 }
@@ -102,8 +117,11 @@ private fun Pill(value: String, modifier: Modifier = Modifier, dot: Color? = nul
 }
 
 @Composable
-private fun ActionBar(h: ActionHints, hit: ControlSignal?, locked: Boolean = false, rest: Int = 0) {
+private fun ActionBar(h: ActionHints, hit: ControlSignal?, readiness: BciController.Readiness) {
     val c = LocalBciColors.current
+    val locked = readiness.locked
+    val rest = readiness.restStreak
+    val required = readiness.required.coerceAtLeast(1)
     Column(Modifier.height(112.dp).fillMaxWidth().background(c.bar)) {
         Spacer(Modifier.fillMaxWidth().height(1.dp).background(c.line))
         Row(Modifier.fillMaxSize()) {
@@ -122,7 +140,7 @@ private fun ActionBar(h: ActionHints, hit: ControlSignal?, locked: Boolean = fal
                         if (i == 0) DirectionIcon("◀", active)
                         if (middle) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                repeat(3) { n ->
+                                repeat(required) { n ->
                                     val filled = !locked || n < rest
                                     Spacer(Modifier.size(12.dp).border(2.dp, if (filled) c.ok else c.dim, CircleShape)
                                         .background(if (filled) c.ok else Color.Transparent, CircleShape))
@@ -133,9 +151,9 @@ private fun ActionBar(h: ActionHints, hit: ControlSignal?, locked: Boolean = fal
                         Column(Modifier.widthIn(max = 300.dp), horizontalAlignment = if (i == 2) Alignment.End else Alignment.Start) {
                             Box(Modifier.height(18.dp).wrapContentHeight(unbounded = true)) {
                                 Text(buildAnnotatedString {
-                                append(listOf("左看","咬牙","右看")[i])
-                                if (active) withStyle(SpanStyle(color = c.focus)) { append(" · 当前方向") }
-                            }, color = c.muted, fontFamily = BciType.chinese, fontSize = 15.sp, lineHeight = 22.sp, letterSpacing = 0.sp)
+                                    append(listOf("左看","咬牙","右看")[i])
+                                    if (active) withStyle(SpanStyle(color = c.focus)) { append(" · 当前方向") }
+                                }, color = c.muted, fontFamily = BciType.chinese, fontSize = 15.sp, lineHeight = 22.sp, letterSpacing = 0.sp)
                             }
                             Spacer(Modifier.height(2.dp))
                             Box(Modifier.height(30.dp).wrapContentHeight(unbounded = true)) {

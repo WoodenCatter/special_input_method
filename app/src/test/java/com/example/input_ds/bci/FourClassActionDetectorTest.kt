@@ -101,6 +101,33 @@ class FourClassActionDetectorTest {
         assertNull(detector.update(probabilities(left = 0.99f), active, FloatArray(500), 300L).eventClass)
     }
 
+    @Test
+    fun detectorResultExposesReadOnlyReadinessProgress() {
+        val detector = FourClassActionDetector(calibration)
+        val active = directionWave(leftDirection = true)
+        var trigger: DetectorResult? = null
+        repeat(4) { index ->
+            trigger = detector.update(probabilities(left = 0.99f), active, FloatArray(500), index * 100L)
+        }
+        assertEquals(TemporalEvidenceAccumulator.Type.COMMAND, trigger?.temporalType)
+        assertEquals(FourClassActionDetector.LEFT_CLASS, trigger?.lockedClass)
+        assertEquals(0, trigger?.restStreak)
+
+        val rest1 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 400L)
+        assertEquals(TemporalEvidenceAccumulator.Type.LOCKED, rest1.temporalType)
+        assertEquals(FourClassActionDetector.LEFT_CLASS, rest1.lockedClass)
+        assertEquals(1, rest1.restStreak)
+
+        val rest2 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 500L)
+        assertEquals(TemporalEvidenceAccumulator.Type.LOCKED, rest2.temporalType)
+        assertEquals(2, rest2.restStreak)
+
+        val rest3 = detector.update(probabilities(rest = 0.99f), FloatArray(500), FloatArray(500), 600L)
+        assertEquals(TemporalEvidenceAccumulator.Type.REARMED, rest3.temporalType)
+        assertNull(rest3.lockedClass)
+        assertEquals(0, rest3.restStreak)
+    }
+
     private fun probabilities(
         rest: Float = 0.01f,
         bite: Float = 0.01f,

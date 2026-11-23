@@ -34,7 +34,10 @@ data class SixDetectorResult(
     val features: SixMotionFeatures,
     val singleWindowClasses: Set<Int>,
     val strongBite: Boolean,
-    val snapshot: SixDetectorSnapshot
+    val snapshot: SixDetectorSnapshot,
+    val temporalType: TemporalEvidenceAccumulator.Type = TemporalEvidenceAccumulator.Type.NO_COMMAND,
+    val lockedClass: Int? = null,
+    val restStreak: Int = 0
 )
 
 /**
@@ -133,7 +136,10 @@ class SixActionDetector(
             features = features,
             singleWindowClasses = singleWindowClasses,
             strongBite = strongBite,
-            snapshot = snapshot()
+            snapshot = snapshot(),
+            temporalType = temporal.type,
+            lockedClass = temporal.lockedClass,
+            restStreak = temporal.restStreak
         )
     }
 

@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.input_ds.assistant.AssistantCareStore
 import com.example.input_ds.assistant.AssistantCatalogItem
 import com.example.input_ds.assistant.AssistantConnection
 import com.example.input_ds.assistant.AssistantResult
@@ -155,13 +156,22 @@ internal fun AssistantScreen(
             .map { AssistantCatalogItem(it.id, it.name) }
     }
 
-    var address by remember { mutableStateOf(preferences.getString("address", "").orEmpty()) }
-    var accessCode by remember { mutableStateOf(preferences.getString("access_code", "").orEmpty()) }
+    val sharedConfig by AssistantCareStore.config.collectAsState()
+    val sharedDraft by AssistantCareStore.debugDraft.collectAsState()
+    LaunchedEffect(context) { AssistantCareStore.load(context) }
+    var address by remember(sharedConfig.address) { mutableStateOf(sharedConfig.address) }
+    var accessCode by remember(sharedConfig.accessCode) { mutableStateOf(sharedConfig.accessCode) }
     var showSetup by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(0) }
     var direction by remember { mutableIntStateOf(1) }
     var draft by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(sharedDraft) {
+        if (sharedDraft != draft) draft = sharedDraft
+    }
+    LaunchedEffect(draft) {
+        if (draft != sharedDraft) AssistantCareStore.setDebugDraft(draft)
+    }
     var turns by rememberSaveable(stateSaver = ChatTurnsSaver) { mutableStateOf(emptyList<ChatTurn>()) }
     var pendingPrompt by remember { mutableStateOf<String?>(null) }
     var home by rememberSaveable { mutableStateOf(SimulatedHome()) }
@@ -430,9 +440,9 @@ internal fun AssistantScreen(
             allowHttp = allowHttp,
             onClose = { showSetup = false },
             onSave = { connection ->
+                AssistantCareStore.save(context, connection)
                 address = connection.address.toString()
                 accessCode = connection.accessCode
-                preferences.edit().putString("address", address).putString("access_code", accessCode).apply()
                 showSetup = false
             }
         )

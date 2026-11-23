@@ -72,6 +72,12 @@ class BciController(
     }.asCoroutineDispatcher()
     private val scope = CoroutineScope(inferenceDispatcher + SupervisorJob())
 
+    data class Readiness(
+        val locked: Boolean = false,
+        val restStreak: Int = 0,
+        val required: Int = AsyncWindowPolicy.REST_RESET_REQUIRED
+    )
+
     private val _prediction = MutableStateFlow("等待启动…")
     val prediction: StateFlow<String> = _prediction
     private val _classId = MutableStateFlow(-1)
@@ -80,6 +86,8 @@ class BciController(
     val confidence: StateFlow<Float> = _confidence
     private val _status = MutableStateFlow("未启动")
     val status: StateFlow<String> = _status
+    private val _readiness = MutableStateFlow(Readiness())
+    val readiness: StateFlow<Readiness> = _readiness
 
     private var modelInference: ModelInference? = null
     private var calibration: AsyncCalibration? = null
@@ -98,6 +106,7 @@ class BciController(
      */
     fun setCommandDeliveryEnabled(enabled: Boolean) {
         if (!commandGate.setEnabled(enabled)) return
+        if (!enabled) _readiness.value = Readiness()
         _status.value = if (enabled) {
             "控制命令已开启，等待新完整窗口"
         } else {
@@ -179,6 +188,7 @@ class BciController(
         _classId.value = -1
         _confidence.value = 0f
         _prediction.value = "异步监听中…"
+        _readiness.value = Readiness()
         _status.value = "异步控制已启动：100ms步长 · 5窗证据；${calibration?.source}"
         Log.d(TAG, "异步控制已启动 modelPoints=${modelInference?.inputPoints} calibration=$calibration")
         startAsynchronousLoop()
@@ -219,6 +229,7 @@ class BciController(
                 val windowEpoch = commandGate.snapshot(acquisitionEpoch)
                 if (windowEpoch == null) {
                     activeEpoch = null
+                    _readiness.value = Readiness()
                     delay(ASYNC_POLL_INTERVAL_MS)
                     continue
                 }
@@ -226,6 +237,7 @@ class BciController(
                 if (windowEpoch != activeEpoch) {
                     fourDetector?.reset()
                     sixDetector?.reset()
+                    _readiness.value = Readiness()
                     activeEpoch = windowEpoch
                     epochStartTimeUs = SystemClock.elapsedRealtimeNanos() / 1_000L
                     nextWindowEndUs = null
@@ -348,6 +360,19 @@ class BciController(
                     timestampMs
                 )
                 val eventClass = fourDecision?.eventClass ?: sixDecision?.eventClass
+                _readiness.value = when {
+                    fourDecision != null -> Readiness(
+                        locked = fourDecision.lockedClass != null,
+                        restStreak = fourDecision.restStreak.coerceIn(0, AsyncWindowPolicy.REST_RESET_REQUIRED),
+                        required = AsyncWindowPolicy.REST_RESET_REQUIRED
+                    )
+                    sixDecision != null -> Readiness(
+                        locked = sixDecision.lockedClass != null,
+                        restStreak = sixDecision.restStreak.coerceIn(0, AsyncWindowPolicy.REST_RESET_REQUIRED),
+                        required = AsyncWindowPolicy.REST_RESET_REQUIRED
+                    )
+                    else -> Readiness()
+                }
                 val label = modelInference?.labelNames?.getOrNull(result.classId) ?: "unknown"
                 val className = CollectionSettings.LABEL_DISPLAY[label] ?: label
                 _classId.value = result.classId
@@ -427,6 +452,7 @@ class BciController(
         calibration = null
         scope.cancel()
         inferenceDispatcher.close()
+        _readiness.value = Readiness()
         _status.value = "已停止"
     }
 
