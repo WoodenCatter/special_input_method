@@ -29,6 +29,7 @@ fun Modifier.scanItem(
     borderWidth: Dp = 2.dp,
     customBorderColor: Color? = null,
     customFillColor: Color? = null,
+    customFocusedFillColor: Color? = null,
     urgentBar: Boolean = false,
     unfocusedAlpha: Float = 1f,
     dwellInset: Dp = 14.dp,
@@ -56,6 +57,7 @@ fun Modifier.scanItem(
     val fill = when {
         picked -> c.okTint.compositeOver(c.panel)
         alarm -> c.alarm
+        focused && customFocusedFillColor != null -> customFocusedFillColor
         focused -> c.focusTint.compositeOver(c.panel2)
         customFillColor != null -> customFillColor
         navigation -> Color.Transparent

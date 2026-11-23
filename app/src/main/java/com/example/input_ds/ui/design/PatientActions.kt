@@ -50,9 +50,24 @@ internal fun patientPath(
 }
 
 internal fun communicationHints(chat: CommunicationState, input: InputState): ActionHints = when (chat.stage) {
-    CommunicationStage.CONTACT_LIST -> ActionHints.list(chat.contact?.name ?: "返回主页", ScanMode.MANUAL, 0)
-    CommunicationStage.CONTACT_ACTIONS -> ActionHints("", "选「" + listOf("返回", "输入法", "视频通话")[chat.actionIndex] + "」", "")
-    CommunicationStage.PAIRING -> ActionHints("", "", "")
+    CommunicationStage.CONTACT_LIST -> {
+        val label = when {
+            chat.isSelfFocused -> "当面说话"
+            chat.isInviteFocused -> "邀请家属"
+            chat.isHomeFocused -> "返回主页"
+            else -> chat.contact?.name.orEmpty()
+        }
+        ActionHints.list(label, chat.scanMode, chat.listDirection)
+    }
+    CommunicationStage.CONTACT_ACTIONS -> {
+        val label = listOf("文字消息", "视频通话", "返回联系人").getOrElse(chat.actionIndex) { "" }
+        ActionHints.list(label, chat.scanMode, chat.actionDirection)
+    }
+    CommunicationStage.PAIRING -> {
+        val items = if (chat.canRegenerateInvite) listOf("返回联系人", "换一个邀请码") else listOf("返回联系人")
+        val label = items.getOrElse(chat.pairingIndex) { items.first() }
+        ActionHints.list(label, chat.scanMode, chat.pairingDirection)
+    }
     CommunicationStage.CHAT_INPUT -> inputHints(input)
 }
 

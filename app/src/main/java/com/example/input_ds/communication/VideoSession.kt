@@ -59,10 +59,18 @@ internal data class VideoState(
     val room: Room? = null,
     val activeSince: Long? = null,
     val pending: Boolean = false,
-    val confirmEnd: Boolean = false
+    val confirmEnd: Boolean = false,
+    val avatarHue: Float = 12f,
+    val fake: Boolean = false
 )
 
-internal data class VideoAction(val label: String, val invoke: () -> Unit)
+internal enum class VideoActionStyle { NORMAL, ACCEPT, HANG }
+
+internal data class VideoAction(
+    val label: String,
+    val style: VideoActionStyle = VideoActionStyle.NORMAL,
+    val invoke: () -> Unit
+)
 
 /** Single owner for foreground call state, media, and signaling recovery. */
 internal class VideoSession(
@@ -124,6 +132,8 @@ internal class VideoSession(
     }
 
     fun clear() {
+        fakeRingingJob?.cancel()
+        fakeRingingJob = null
         account = null
         permissionAction = null
         waitingCreate = null
@@ -238,39 +248,161 @@ internal class VideoSession(
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
+    private var fakeRingingJob: Job? = null
+
+    fun injectFakeCall(
+        incoming: Boolean,
+        peerName: String,
+        active: Boolean,
+        hue: Float = 12f,
+        online: Boolean = true,
+        frozen: Boolean = false
+    ) {
+        fakeRingingJob?.cancel()
+        fakeRingingJob = null
+        val id = "fake-${UUID.randomUUID()}"
+        val status = if (active) "ACTIVE" else "RINGING"
+        mutable.value = VideoState(
+            call = VideoCall(
+                id = id,
+                caller = if (incoming) "fake-peer" else "fake-me",
+                callerName = peerName,
+                status = status,
+                revision = 1L,
+                endReason = ""
+            ),
+            incoming = incoming,
+            peerName = peerName,
+            connected = active,
+            camera = true,
+            mic = true,
+            activeSince = if (active) SystemClock.elapsedRealtime() - (if (frozen) 83_000L else 0L) else null,
+            pending = false,
+            confirmEnd = false,
+            avatarHue = hue,
+            fake = true
+        )
+        if (!incoming && !active && !frozen) {
+            fakeRingingJob = scope.launch {
+                delay(if (online) 2_500L else 6_000L)
+                val current = state.value
+                if (!current.fake || current.call?.id != id || current.call.status != "RINGING") return@launch
+                if (online) {
+                    mutable.value = current.copy(
+                        call = current.call.copy(status = "ACTIVE", revision = current.call.revision + 1),
+                        connected = true,
+                        activeSince = SystemClock.elapsedRealtime()
+                    )
+                } else {
+                    endFakeCall("无人接听")
+                }
+            }
+        }
+    }
+
+    private fun endFakeCall(message: String) {
+        fakeRingingJob?.cancel()
+        fakeRingingJob = null
+        mutable.value = VideoState()
+        notice(message)
+    }
+
+    fun cancelEndConfirm() {
+        if (state.value.confirmEnd) {
+            mutable.value = state.value.copy(confirmEnd = false)
+        }
+    }
+
+    fun confirmEndCall(frozen: Boolean = false) {
+        val current = state.value
+        if (current.call == null) return
+        if (current.fake) {
+            val sec = if (frozen) 83L else current.activeSince?.let {
+                ((SystemClock.elapsedRealtime() - it) / 1000L).coerceAtLeast(0L)
+            } ?: 0L
+            val dur = "%02d:%02d".format(sec / 60, sec % 60)
+            endFakeCall("通话已结束 · $dur")
+        } else {
+            command("end")
+        }
+    }
+
     fun actions(ask: () -> Unit): List<VideoAction> {
         val current = state.value
         val call = current.call ?: return emptyList()
         if (call.status == "RINGING") {
             return if (current.incoming) listOf(
-                VideoAction("接听") { withPermissions(call.id, ask) { command("accept") } },
-                VideoAction("拒绝") { command("reject") }
-            ) else listOf(VideoAction("取消呼叫") { command("cancel") })
+                VideoAction("接听", VideoActionStyle.ACCEPT) {
+                    if (current.fake) {
+                        mutable.value = state.value.copy(
+                            call = call.copy(status = "ACTIVE", revision = call.revision + 1),
+                            connected = true,
+                            activeSince = SystemClock.elapsedRealtime()
+                        )
+                        notice("已接通")
+                    } else {
+                        withPermissions(call.id, ask) { command("accept") }
+                    }
+                },
+                VideoAction("拒绝", VideoActionStyle.HANG) {
+                    if (current.fake) endFakeCall("已拒绝来电") else command("reject")
+                }
+            ) else listOf(
+                VideoAction("取消呼叫", VideoActionStyle.HANG) {
+                    if (current.fake) endFakeCall("已取消呼叫") else command("cancel")
+                }
+            )
         }
         if (current.confirmEnd) return listOf(
-            VideoAction("继续通话") { mutable.value = state.value.copy(confirmEnd = false) },
-            VideoAction("确认挂断") { command("end") }
+            VideoAction("继续通话") { cancelEndConfirm() },
+            VideoAction("挂断", VideoActionStyle.HANG) { confirmEndCall() }
         )
         return buildList {
             if (current.connected) {
-                add(VideoAction(if (current.mic) "静音" else "取消静音") { toggle(Track.Source.MICROPHONE) })
-                add(VideoAction(if (current.camera) "关闭摄像头" else "打开摄像头") { toggle(Track.Source.CAMERA) })
-                if (canSwitch && current.camera) {
+                add(VideoAction(if (current.mic) "静音" else "取消静音") {
+                    if (current.fake) {
+                        val nextMic = !state.value.mic
+                        mutable.value = state.value.copy(mic = nextMic)
+                        notice(if (nextMic) "已取消静音" else "已静音")
+                    } else {
+                        toggle(Track.Source.MICROPHONE)
+                    }
+                })
+                add(VideoAction(if (current.camera) "关闭摄像头" else "打开摄像头") {
+                    if (current.fake) {
+                        val nextCam = !state.value.camera
+                        mutable.value = state.value.copy(camera = nextCam)
+                        notice(if (nextCam) "摄像头已打开" else "摄像头已关闭")
+                    } else {
+                        toggle(Track.Source.CAMERA)
+                    }
+                })
+                if ((current.fake || canSwitch) && current.camera) {
                     add(VideoAction("切换摄像头") {
-                        runCatching { (state.value.localVideo as? LocalVideoTrack)?.switchCamera() }
-                            .onFailure { notice("无法切换摄像头") }
+                        if (current.fake) {
+                            notice("已切换摄像头")
+                        } else {
+                            runCatching { (state.value.localVideo as? LocalVideoTrack)?.switchCamera() }
+                                .onFailure { notice("无法切换摄像头") }
+                        }
                     })
                 }
             }
-            add(VideoAction("挂断") { mutable.value = state.value.copy(confirmEnd = true) })
+            add(VideoAction("挂断", VideoActionStyle.HANG) {
+                mutable.value = state.value.copy(confirmEnd = true)
+            })
         }
     }
 
     fun back() {
         val current = state.value
         val call = current.call ?: return
-        if (call.status == "RINGING") command(if (current.incoming) "reject" else "cancel")
-        else mutable.value = current.copy(confirmEnd = !current.confirmEnd)
+        if (call.status == "RINGING") {
+            if (current.fake) endFakeCall(if (current.incoming) "已拒绝来电" else "已取消呼叫")
+            else command(if (current.incoming) "reject" else "cancel")
+        } else {
+            mutable.value = current.copy(confirmEnd = !current.confirmEnd)
+        }
     }
 
     private fun command(action: String) {

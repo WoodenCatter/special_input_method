@@ -8,13 +8,19 @@ data class ChatContact(
     val conversationId: String,
     val online: Boolean,
     val unread: Int,
-    val lastMessage: String?
+    val lastMessage: String?,
+    val relation: String? = null,
+    val avatarHue: Float? = null
 ) {
     companion object {
         fun fromJson(json: JSONObject): ChatContact = ChatContact(
-            json.getString("principal_id"), json.optString("display_name", "联系人"),
-            json.getString("conversation_id"), json.optBoolean("online"),
-            json.optInt("unread_count"), json.optJSONObject("last_message")?.optString("text")
+            principalId = json.getString("principal_id"),
+            name = json.optString("display_name", "联系人"),
+            conversationId = json.getString("conversation_id"),
+            online = json.optBoolean("online"),
+            unread = json.optInt("unread_count"),
+            lastMessage = json.optJSONObject("last_message")?.optString("text"),
+            relation = json.optString("relation").takeIf { it.isNotBlank() }
         )
     }
 }
@@ -40,4 +46,9 @@ data class ChatMessage(
 
 enum class CommunicationStage { CONTACT_LIST, CONTACT_ACTIONS, CHAT_INPUT, PAIRING }
 
-data class PendingMessage(val conversationId: String, val clientId: String, val text: String)
+data class PendingMessage(
+    val conversationId: String,
+    val clientId: String,
+    val text: String,
+    val createdAt: String = ""
+)

@@ -51,6 +51,7 @@ fun PatientScaffold(
     readiness: BciController.Readiness = BciController.Readiness(),
     onCare: (() -> Unit)? = null,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
+    videoLayer: (@Composable BoxScope.() -> Unit)? = null,
     drawer: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -64,6 +65,9 @@ fun PatientScaffold(
                     Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) { content() }
                     if (overlay != null) {
                         Box(Modifier.fillMaxSize()) { overlay() }
+                    }
+                    if (videoLayer != null) {
+                        Box(Modifier.fillMaxSize().background(c.bg)) { videoLayer() }
                     }
                 }
                 ActionBar(hints, feedback.hit, readiness)

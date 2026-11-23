@@ -90,7 +90,10 @@ import com.example.input_ds.wizard.WizardGameInputBus
 import com.example.input_ds.ui.game.SnakeClimbScreen
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.communication.CommunicationScreen
+import com.example.input_ds.communication.CommunicationSignalOutcome
+import com.example.input_ds.communication.CommunicationStage
 import com.example.input_ds.communication.CommunicationViewModel
+import com.example.input_ds.communication.ContactSelectionPolicy
 import com.example.input_ds.ui.game.MazeScreen
 import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
@@ -111,8 +114,10 @@ class MainActivity : ComponentActivity() {
     private var activeBciController by mutableStateOf<BciController?>(null)
     private var inputViewModel: InputMethodViewModel? = null
     private var communicationViewModel: CommunicationViewModel? = null
-    private var videoSelection by mutableStateOf(0)
-    private var videoScanDirection by mutableStateOf(1)
+    private var videoCursor by mutableStateOf(ScanCursor(1))
+    private var videoConfirmCursor by mutableStateOf(ScanCursor(2))
+    private var lastCallWasIncoming = false
+    private var hadActiveCall = false
     private val videoPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { communicationViewModel?.video?.permissionResult() }
@@ -238,20 +243,53 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 LaunchedEffect(chat) {
+                    chat.setOnToast { message, ok -> feedback.toast(message, ok) }
+                    chat.setGraceMs(AppUiSettings.graceMs(applicationContext))
                     chat.videoNotices.collect { feedback.toast(it) }
                 }
-                LaunchedEffect(call?.id, call?.status, video.confirmEnd) {
-                    videoSelection = 0
-                    videoScanDirection = 1
+                LaunchedEffect(chat, scanMode.value) { chat.setScanMode(scanMode.value) }
+                LaunchedEffect(chat, frozen) { chat.setFrozen(frozen) }
+                LaunchedEffect(chat, destination.value) {
+                    chat.setScreenActive(destination.value == AppDestination.COMMUNICATION)
+                }
+                LaunchedEffect(chat, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, call != null) {
+                    chat.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || call != null)
+                }
+                LaunchedEffect(call?.id, call?.status, video.connected, video.camera, video.confirmEnd) {
+                    if (call != null) {
+                        if (!hadActiveCall && video.incoming && careOpen) toggleCareSheet(false)
+                        hadActiveCall = true
+                        lastCallWasIncoming = video.incoming
+                        val actionsCount = chat.video.actions(::askVideoPermissions).size.coerceAtLeast(1)
+                        videoCursor = ScanCursor(size = actionsCount, index = 0, direction = 1)
+                        if (video.confirmEnd) {
+                            videoConfirmCursor = ScanCursor(size = 2, index = 0, direction = 1)
+                        }
+                        dwellRevision++
+                    } else if (hadActiveCall) {
+                        hadActiveCall = false
+                        chat.onVideoCallEnded(lastCallWasIncoming)
+                        dwellRevision++
+                    }
                     updateBciCommandDelivery()
                 }
-                LaunchedEffect(call?.id, scanMode.value) {
-                    if (call != null && scanMode.value == ScanMode.AUTO) {
-                        while (true) {
-                            delay(ScanSettings.read(applicationContext))
-                            val actions = chat.video.actions(::askVideoPermissions)
-                            if (actions.isNotEmpty()) {
-                                videoSelection = (videoSelection + videoScanDirection).mod(actions.size)
+                LaunchedEffect(call?.id, video.confirmEnd, careOpen, frozen, scanMode.value, dwellRevision) {
+                    if (call != null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            if (video.confirmEnd) {
+                                runScanTimer(
+                                    interval = { videoConfirmCursor.dwell(vm.state.value.scanIntervalMs, confirmation = true) },
+                                    onFailure = { android.util.Log.e("ScanCursor", "Video confirm tick failed", it) }
+                                ) {
+                                    advanceVideoConfirm()
+                                }
+                            } else {
+                                runScanTimer(
+                                    interval = { vm.state.value.scanIntervalMs },
+                                    onFailure = { android.util.Log.e("ScanCursor", "Video tick failed", it) }
+                                ) {
+                                    advanceVideoCursor()
+                                }
                             }
                         }
                     }
@@ -414,7 +452,13 @@ class MainActivity : ComponentActivity() {
                         val activeConfirm = confirmOverlay
                         val hasTopOverlay = activeNurseCall != null || activeSpeak != null || activeConfirm != null
                         val baseHints = when {
-                            call != null -> ActionHints.list(chat.video.actions(::askVideoPermissions).getOrNull(videoSelection)?.label.orEmpty(), scanMode.value, videoScanDirection)
+                            call != null && video.confirmEnd ->
+                                confirmHints(if (videoConfirmCursor.index == 0) "继续通话" else "挂断", scanMode.value)
+                            call != null -> ActionHints.list(
+                                chat.video.actions(::askVideoPermissions).getOrNull(videoCursor.index)?.label.orEmpty(),
+                                scanMode.value,
+                                videoCursor.direction
+                            )
                             activeConfirm != null -> {
                                 val (spec, confirmCursor) = activeConfirm
                                 val label = if (confirmCursor.index == 0) spec.cancelLabel else spec.confirmLabel
@@ -480,6 +524,51 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             } else null,
+                            videoLayer = if (call != null) {
+                                {
+                                    PadVideoScreen(
+                                        session = chat.video,
+                                        state = video,
+                                        cursor = videoCursor,
+                                        scanMode = scanMode.value,
+                                        scanIntervalMs = state.scanIntervalMs,
+                                        dwellRevision = dwellRevision,
+                                        paused = careOpen || video.confirmEnd,
+                                        frozen = frozen,
+                                        ask = ::askVideoPermissions
+                                    )
+                                    if (video.confirmEnd) {
+                                        ConfirmOverlay(
+                                            spec = ConfirmOverlaySpec(
+                                                title = "挂断和${video.peerName}的视频？",
+                                                description = "通话会立即结束。",
+                                                cancelLabel = "继续通话",
+                                                cancelSub = "回到通话",
+                                                confirmLabel = "挂断",
+                                                confirmSub = "结束视频",
+                                                onConfirm = { chat.video.confirmEndCall(frozen) },
+                                                onCancel = {
+                                                    chat.video.cancelEndConfirm()
+                                                    dwellRevision++
+                                                }
+                                            ),
+                                            cursor = videoConfirmCursor,
+                                            scanMode = scanMode.value,
+                                            scanIntervalMs = state.scanIntervalMs,
+                                            dwellRevision = dwellRevision,
+                                            paused = careOpen,
+                                            frozen = frozen,
+                                            onChoose = { idx ->
+                                                if (idx == 1) chat.video.confirmEndCall(frozen)
+                                                else {
+                                                    chat.video.cancelEndConfirm()
+                                                    dwellRevision++
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            } else null,
                             drawer = {
                                 CaregiverSheet(
                                     open = careOpen,
@@ -519,11 +608,14 @@ class MainActivity : ComponentActivity() {
                                     onAssistantNotice = { message, ok -> feedback.toast(message, ok) },
                                     onDebugNoContactsChange = { enabled ->
                                         debugNoContacts = enabled
+                                        chat.setFakeNoContacts(enabled)
                                         feedback.toast(if (enabled) "已模拟：还没有绑定家属" else "已恢复示例联系人")
+                                        if (destination.value == AppDestination.COMMUNICATION) {
+                                            toggleCareSheet(false)
+                                        }
                                     },
                                     onDebugIncomingCall = {
-                                        val result = debugCommand("fake incoming")
-                                        if (result != "ok") feedback.toast("来电模拟将在 P4 接入")
+                                        debugCommand("fake incoming")
                                     },
                                     onOpenDeviceAndModel = {
                                         toggleCareSheet(false)
@@ -534,10 +626,6 @@ class MainActivity : ComponentActivity() {
                         ) {
                             androidx.compose.runtime.CompositionLocalProvider(LocalActionHints provides { pageHints = it }) {
                                 AppContent(vm = vm, chat = chat, bleState = bleState)
-                            }
-                            if (call != null) {
-                                val actions = chat.video.actions(::askVideoPermissions)
-                                PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)), ::askVideoPermissions)
                             }
                         }
                     } else AppContent(vm = vm, chat = chat, bleState = bleState)
@@ -619,15 +707,17 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm)
             AppDestination.COMMUNICATION -> {
+                val videoState by chat.video.state.collectAsState()
                 androidx.compose.runtime.DisposableEffect(vm) {
                     onDispose { vm.deactivate() }
                 }
                 CommunicationScreen(
                     chat = chat,
                     input = vm,
-                    paused = careOpen || nurseCall != null,
+                    paused = careOpen || nurseCall != null || videoState.call != null,
                     frozen = frozen,
                     onToast = { message, ok -> feedback.toast(message, ok) },
+                    onOpenTalk = ::openTalkComposer,
                     onHome = { navigateTo(AppDestination.HOME) }
                 )
             }
@@ -769,6 +859,7 @@ class MainActivity : ComponentActivity() {
             onBack = {
                 inputViewModel?.deactivate()
                 navigateTo(AppDestination.COMMUNICATION)
+                communicationViewModel?.enterContactList(focusRow = ContactSelectionPolicy.SELF_INDEX)
             }
         )
     }
@@ -995,6 +1086,9 @@ class MainActivity : ComponentActivity() {
         if (target != AppDestination.INPUT_METHOD && target != AppDestination.COMMUNICATION) {
             inputViewModel?.deactivate()
         }
+        if (target == AppDestination.COMMUNICATION && previous != AppDestination.INPUT_METHOD && previous != AppDestination.COMMUNICATION) {
+            communicationViewModel?.enterContactList()
+        }
         updateBciCommandDelivery()
     }
 
@@ -1002,27 +1096,85 @@ class MainActivity : ComponentActivity() {
         cursor = cursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
     }
 
+    private fun advanceVideoCursor() {
+        val video = communicationViewModel?.video ?: return
+        val size = video.actions(::askVideoPermissions).size.coerceAtLeast(1)
+        val synced = if (videoCursor.size != size) videoCursor.reset(newSize = size) else videoCursor
+        videoCursor = synced.advance(SystemClock.elapsedRealtime(), scanMode.value)
+    }
+
+    private fun advanceVideoConfirm() {
+        val video = communicationViewModel?.video ?: return
+        val next = videoConfirmCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
+        if (next.timedOut(confirmation = true)) {
+            video.cancelEndConfirm()
+            if (!frozen) feedback.toast("三轮都没有选择，已按「继续通话」处理")
+            dwellRevision++
+        } else {
+            videoConfirmCursor = next
+        }
+    }
+
+    private fun clearTransientOverlaysForNav() {
+        nurseCall = null
+        nurseCallAlarm.stop()
+        speakOverlay = null
+        confirmOverlay = null
+        speechOutput.stop()
+        communicationViewModel?.video?.clear()
+        hadActiveCall = false
+        toggleCareSheet(false)
+    }
+
     private fun debugCommand(cmd: String): String {
         when (cmd) {
             "nav home" -> {
-                nurseCall = null
-                nurseCallAlarm.stop()
-                speakOverlay = null
-                confirmOverlay = null
-                speechOutput.stop()
-                toggleCareSheet(false)
+                clearTransientOverlaysForNav()
                 navigateTo(AppDestination.HOME)
                 cursor = cursor.reset(newSize = homeModules.size, initial = 0)
                 dwellRevision++
             }
-            "nav talk" -> openTalkComposer()
+            "nav contacts" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.COMMUNICATION)
+                communicationViewModel?.enterContactList()
+                dwellRevision++
+            }
+            "nav cact" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.COMMUNICATION)
+                communicationViewModel?.debugOpenFirstContactActions()
+                dwellRevision++
+            }
+            "nav chat" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.COMMUNICATION)
+                communicationViewModel?.debugOpenFirstContactChat()
+                dwellRevision++
+            }
+            "nav invite" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.COMMUNICATION)
+                communicationViewModel?.debugOpenInvite()
+                dwellRevision++
+            }
+            "nav talk" -> {
+                communicationViewModel?.video?.clear()
+                hadActiveCall = false
+                openTalkComposer()
+            }
             "nav asst" -> {
-                nurseCall = null
-                nurseCallAlarm.stop()
-                speakOverlay = null
-                confirmOverlay = null
-                toggleCareSheet(false)
+                clearTransientOverlaysForNav()
                 navigateTo(AppDestination.LIFE_ASSISTANT)
+            }
+            "fake contacts" -> {
+                communicationViewModel?.injectFakeContacts()
+                dwellRevision++
+            }
+            "fake incoming" -> {
+                toggleCareSheet(false)
+                communicationViewModel?.injectFakeIncomingCall()
+                dwellRevision++
             }
             "care on", "care off" -> toggleCareSheet(cmd.endsWith("on"))
             "freeze on", "freeze off" -> {
@@ -1036,15 +1188,28 @@ class MainActivity : ComponentActivity() {
             "signal L" -> if (foreground) routeSignal(ControlSignal.LEFT_LOOK) else return "inactive"
             "signal R" -> if (foreground) routeSignal(ControlSignal.RIGHT_LOOK) else return "inactive"
             "signal B" -> if (foreground) routeSignal(ControlSignal.BITE) else return "inactive"
-            "tick" -> when {
-                careOpen || communicationViewModel?.video?.state?.value?.call != null -> return "pending: page cursor"
-                confirmOverlay != null -> advanceConfirmOverlay()
-                speakOverlay != null -> advanceSpeakOverlay()
-                nurseCall != null -> return "pending: page cursor"
-                destination.value == AppDestination.HOME -> advanceHome()
-                destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
-                destination.value == AppDestination.LIFE_ASSISTANT -> AssistantInputBus.debugTick()
-                else -> return "pending: page cursor"
+            "tick" -> {
+                val videoState = communicationViewModel?.video?.state?.value
+                when {
+                    careOpen -> return "pending: page cursor"
+                    videoState?.call != null && videoState.confirmEnd -> advanceVideoConfirm()
+                    videoState?.call != null -> advanceVideoCursor()
+                    confirmOverlay != null -> advanceConfirmOverlay()
+                    speakOverlay != null -> advanceSpeakOverlay()
+                    nurseCall != null -> return "pending: page cursor"
+                    destination.value == AppDestination.HOME -> advanceHome()
+                    destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
+                    destination.value == AppDestination.COMMUNICATION -> {
+                        val chat = communicationViewModel
+                        if (chat?.state?.value?.stage == CommunicationStage.CHAT_INPUT) {
+                            inputViewModel?.debugTick()
+                        } else {
+                            chat?.debugTick()
+                        }
+                    }
+                    destination.value == AppDestination.LIFE_ASSISTANT -> AssistantInputBus.debugTick()
+                    else -> return "pending: page cursor"
+                }
             }
             else -> return "pending: page integration"
         }
@@ -1093,15 +1258,53 @@ class MainActivity : ComponentActivity() {
         }
         val video = communicationViewModel?.video
         if (video?.state?.value?.call != null) {
+            val vState = video.state.value
+            if (vState.confirmEnd) {
+                when (signal) {
+                    ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                        val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                        videoConfirmCursor = videoConfirmCursor.look(step, scanMode.value, hold = true)
+                        dwellRevision++
+                    }
+                    ControlSignal.BITE -> {
+                        val chosen = videoConfirmCursor.selected(
+                            SystemClock.elapsedRealtime(),
+                            if (frozen) 0L else AppUiSettings.graceMs(this),
+                            scanMode.value
+                        )
+                        if (chosen != videoConfirmCursor.index && !frozen) {
+                            feedback.toast("已按上一项执行（延迟补偿）")
+                        }
+                        if (chosen == 1) video.confirmEndCall(frozen)
+                        else {
+                            video.cancelEndConfirm()
+                            dwellRevision++
+                        }
+                    }
+                    else -> Unit
+                }
+                return
+            }
             val actions = video.actions(::askVideoPermissions)
-            if (actions.isEmpty() || video.state.value.pending) return
+            if (actions.isEmpty() || vState.pending) return
+            val synced = if (videoCursor.size != actions.size) videoCursor.reset(newSize = actions.size) else videoCursor
             when (signal) {
                 ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
                     val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
-                    if (scanMode.value == ScanMode.AUTO) videoScanDirection = step
-                    else videoSelection = (videoSelection + step).mod(actions.size)
+                    videoCursor = synced.look(step, scanMode.value)
+                    dwellRevision++
                 }
-                ControlSignal.BITE -> actions[videoSelection.coerceIn(0, actions.lastIndex)].invoke()
+                ControlSignal.BITE -> {
+                    val chosen = synced.selected(
+                        SystemClock.elapsedRealtime(),
+                        if (frozen) 0L else AppUiSettings.graceMs(this),
+                        scanMode.value
+                    )
+                    if (chosen != synced.index && !frozen) {
+                        feedback.toast("已按上一项执行（延迟补偿）")
+                    }
+                    actions[chosen.coerceIn(0, actions.lastIndex)].invoke()
+                }
                 else -> Unit
             }
             return
@@ -1211,11 +1414,17 @@ class MainActivity : ComponentActivity() {
             }
             AppDestination.COMMUNICATION -> {
                 val chat = communicationViewModel ?: return
-                if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
-                    signal == ControlSignal.BITE) inputViewModel?.handleSignal(signal)
-                else if (chat.state.value.stage == com.example.input_ds.communication.CommunicationStage.CHAT_INPUT &&
-                    signal in setOf(ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK)) inputViewModel?.handleSignal(signal)
-                else if (!chat.onSignal(signal)) navigateTo(AppDestination.HOME)
+                if (chat.state.value.stage == CommunicationStage.CHAT_INPUT) {
+                    if (signal in setOf(ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK, ControlSignal.BITE)) {
+                        inputViewModel?.handleSignal(signal)
+                    }
+                } else {
+                    when (chat.onSignal(signal)) {
+                        CommunicationSignalOutcome.OPEN_TALK -> openTalkComposer()
+                        CommunicationSignalOutcome.EXIT_HOME -> navigateTo(AppDestination.HOME)
+                        CommunicationSignalOutcome.HANDLED -> Unit
+                    }
+                }
             }
             AppDestination.ASYNC_MAZE -> {
                 val action = when (signal) {
