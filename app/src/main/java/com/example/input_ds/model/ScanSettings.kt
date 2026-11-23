@@ -11,10 +11,12 @@ object ScanSettings {
     private const val KEY_INTERVAL_MS = "scan_interval_ms"
     private const val KEY_MODE = "page_scan_mode"
 
-    fun readMode(context: Context): ScanMode = runCatching {
-        ScanMode.valueOf(context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-            .getString(KEY_MODE, ScanMode.MANUAL.name) ?: ScanMode.MANUAL.name)
-    }.getOrDefault(ScanMode.MANUAL)
+    internal fun decodeMode(saved: String?): ScanMode =
+        ScanMode.entries.firstOrNull { it.name == saved } ?: ScanMode.AUTO
+
+    fun readMode(context: Context): ScanMode = decodeMode(
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).getString(KEY_MODE, null)
+    )
 
     fun writeMode(context: Context, mode: ScanMode): ScanMode {
         context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)

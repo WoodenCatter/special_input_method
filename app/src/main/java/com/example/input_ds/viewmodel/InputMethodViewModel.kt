@@ -8,7 +8,6 @@ import com.example.input_ds.data.CharacterDictionary
 import com.example.input_ds.data.CommonPhraseUsage
 import com.example.input_ds.data.LetterBlockMapping
 import com.example.input_ds.data.UserDictionary
-import com.example.input_ds.communication.ScanInputPolicy
 import com.example.input_ds.engine.CharacterLookupEngine
 import com.example.input_ds.engine.ConversationContext
 import com.example.input_ds.engine.InitialPhraseIndex
@@ -117,26 +116,31 @@ class InputMethodViewModel(
     fun handleSignal(signal: ControlSignal) = handleSignal(signal, ::sendText)
 
     fun handleSignal(signal: ControlSignal, onSubmit: () -> Unit) {
-        if (chatAction != null && _state.value.phase != InputPhase.LEVEL_1_SCANNING &&
-            ScanInputPolicy.shouldSkip(signal, _state.value.charScanDirection)) {
-            when (_state.value.phase) {
-                InputPhase.LEVEL_2_LETTER_SELECT -> if (_state.value.isCharFocused) advanceCharHighlight() else advancePinyinHighlight()
-                InputPhase.LEVEL_3_CHAR_SELECT -> advanceCharHighlight()
-                InputPhase.PREDICTION, InputPhase.INITIAL_PREDICTION -> advancePredictionHighlight()
-                else -> Unit
-            }
+        val current = _state.value
+        if (current.phase == InputPhase.LEVEL_1_SCANNING) {
+            handleLevel1Signal(signal, onSubmit)
             return
         }
-        when (_state.value.phase) {
-            InputPhase.LEVEL_1_SCANNING -> handleLevel1Signal(signal, onSubmit)
-            InputPhase.LEVEL_2_LETTER_SELECT -> handleLevel2Signal(signal)
-            InputPhase.LEVEL_3_CHAR_SELECT -> handleLevel3Signal(signal)
-            InputPhase.PREDICTION -> handlePredictionSignal(signal)
-            InputPhase.INITIAL_PREDICTION -> handleInitialPredictionSignal(signal)
+        val redirected = redirectCandidateScan(current, signal)
+        if (redirected != null) {
+            _state.value = redirected
+            // A repeated look also grants a full dwell on the current candidate.
+            when (current.phase) {
+                InputPhase.LEVEL_2_LETTER_SELECT -> if (current.isCharFocused) startCharScanning() else startPinyinScanning()
+                InputPhase.LEVEL_3_CHAR_SELECT -> startCharScanning()
+                InputPhase.PREDICTION, InputPhase.INITIAL_PREDICTION -> startPredScanning()
+                InputPhase.LEVEL_1_SCANNING -> Unit
+            }
+        } else if (signal == ControlSignal.BITE) {
+            when (current.phase) {
+                InputPhase.LEVEL_2_LETTER_SELECT -> if (current.isCharFocused) confirmCharacter() else confirmPinyin(current)
+                InputPhase.LEVEL_3_CHAR_SELECT -> confirmCharacter()
+                InputPhase.PREDICTION -> confirmPrediction()
+                InputPhase.INITIAL_PREDICTION -> confirmInitialPrediction()
+                InputPhase.LEVEL_1_SCANNING -> Unit
+            }
         }
     }
-
-    // ==================== Level 1 ====================
 
     private fun handleLevel1Signal(signal: ControlSignal, onSubmit: () -> Unit) {
         if (chatAction != null && _state.value.highlightedBlockIndex >= 4 && signal == ControlSignal.BITE) {
@@ -345,35 +349,11 @@ class InputMethodViewModel(
 
     // ==================== Level 2 ====================
 
-    private fun handleLevel2Signal(signal: ControlSignal) {
-        if (!_state.value.isCharFocused) handlePinyinSelection(signal)
-        else handleCharSelection(signal)
-    }
-
-    private fun handlePinyinSelection(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK ->
-                _state.value = _state.value.copy(charScanDirection = -1)
-            ControlSignal.RIGHT_LOOK ->
-                _state.value = _state.value.copy(charScanDirection = 1)
-            ControlSignal.BITE -> {
-                val state = _state.value
-                when (state.highlightedPinyinIndex) {
-                    0 -> returnToLevel1()
-                    state.pinyinCombinations.size + 1 -> enterInitialPrediction()
-                    else -> focusOnChars()
-                }
-            }
-            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-        }
-    }
-
-    private fun handleCharSelection(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
-            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
-            ControlSignal.BITE -> confirmCharacter()
-            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+    private fun confirmPinyin(state: InputState) {
+        when (state.highlightedPinyinIndex) {
+            0 -> returnToLevel1()
+            state.pinyinCombinations.size + 1 -> enterInitialPrediction()
+            else -> focusOnChars()
         }
     }
 
@@ -434,15 +414,6 @@ class InputMethodViewModel(
 
     // ==================== Level 3 ====================
 
-    private fun handleLevel3Signal(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
-            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
-            ControlSignal.BITE -> confirmCharacter()
-            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-        }
-    }
-
     private fun advanceCharHighlight() {
         val s = _state.value
         if (s.phase != InputPhase.LEVEL_2_LETTER_SELECT && s.phase != InputPhase.LEVEL_3_CHAR_SELECT) return
@@ -485,15 +456,6 @@ class InputMethodViewModel(
     }
 
     // ==================== Prediction ====================
-
-    private fun handlePredictionSignal(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
-            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
-            ControlSignal.BITE -> confirmPrediction()
-            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-        }
-    }
 
     private fun startPredScanning() {
         predScanJob?.cancel()
@@ -881,15 +843,6 @@ class InputMethodViewModel(
         startPredScanning()
     }
 
-    private fun handleInitialPredictionSignal(signal: ControlSignal) {
-        when (signal) {
-            ControlSignal.LEFT_LOOK -> _state.value = _state.value.copy(charScanDirection = -1)
-            ControlSignal.RIGHT_LOOK -> _state.value = _state.value.copy(charScanDirection = 1)
-            ControlSignal.BITE -> confirmInitialPrediction()
-            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-        }
-    }
-
     private fun confirmInitialPrediction() {
         val state = _state.value
         val item = SelectionPaging.initialSentenceItems(state.initialCandidates, state.initialPage)
@@ -1093,5 +1046,14 @@ class InputMethodViewModel(
         const val MAX_INITIAL_LOCAL_CANDIDATE_CODE_POINTS = 40
         const val MAX_PREDICTION_CODE_POINTS = 8
         const val PREDICTION_DEBUG_FALLBACK_CLEAR_MS = 4_500L
+    }
+}
+
+internal fun redirectCandidateScan(current: InputState, signal: ControlSignal): InputState? {
+    if (current.phase == InputPhase.LEVEL_1_SCANNING) return null
+    return when (signal) {
+        ControlSignal.LEFT_LOOK -> current.copy(charScanDirection = -1)
+        ControlSignal.RIGHT_LOOK -> current.copy(charScanDirection = 1)
+        else -> null
     }
 }

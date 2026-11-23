@@ -4,7 +4,12 @@ import android.Manifest
 import android.os.Build
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
+import android.os.SystemClock
+import com.example.input_ds.model.ScanCursor
+import com.example.input_ds.model.runScanTimer
+import com.example.input_ds.ui.design.*
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -18,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -111,12 +117,22 @@ class MainActivity : ComponentActivity() {
     private val destination = mutableStateOf(AppDestination.HOME)
     private val snakeState = mutableStateOf(SnakeClimbGame.create())
     private var assistantMediaId: String? = null
-    private val homeSelection = mutableStateOf(HomeSelectionState())
+    private val homeModules = HomeModule.entries.filter { it.scanEnabled }
+    private var cursor by mutableStateOf(ScanCursor(homeModules.size))
+    private var dwellRevision by mutableIntStateOf(0)
+    private var frozen by mutableStateOf(false)
+    private var displayMode by mutableStateOf(AppUiSettings.DisplayMode.AUTO)
+    private var statusPath = listOf("主页")
+    private val feedback = GazeFeedback()
+    private var foreground = false
+    private var unregisterDebug: () -> Unit = {}
+    private val caregiverPages = setOf(AppDestination.SETTINGS, AppDestination.COLLECTION, AppDestination.DEVICE_STATUS)
+
     private val entertainmentSelection = mutableStateOf(EntertainmentHubSelectionState())
     private val mazeState = mutableStateOf(
         MazeGame.create(MazeProtocol.FOUR_CLASS)
     )
-    private val scanMode = mutableStateOf(ScanMode.MANUAL)
+    private val scanMode = mutableStateOf(ScanMode.AUTO)
     private val bciActive = mutableStateOf(false)
     private val bciStatus = mutableStateOf("耳机未连接")
     private val floatingBallVisible = mutableStateOf(true)
@@ -147,8 +163,22 @@ class MainActivity : ComponentActivity() {
             screenBrightness = AppUiSettings.readScreenBrightness(applicationContext)
         }
 
+        displayMode = AppUiSettings.displayMode(this)
+        unregisterDebug = registerRedesignDebug(this, ::debugCommand)
         setContent {
-            InputDSTheme {
+            var hour by remember { mutableIntStateOf(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    delay(60_000L - System.currentTimeMillis() % 60_000L)
+                }
+            }
+            val dark = when (displayMode) {
+                AppUiSettings.DisplayMode.AUTO -> (if (frozen) 9 else hour) !in 7..18
+                AppUiSettings.DisplayMode.DARK -> true
+                AppUiSettings.DisplayMode.LIGHT -> false
+            }
+            InputDSTheme(dark) {
                 val vm: InputMethodViewModel = viewModel {
                     InputMethodViewModel(application, remotePredictionsEnabled = !BuildConfig.DEMO_COMMUNICATION)
                 }
@@ -183,7 +213,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 LaunchedEffect(chat) {
-                    chat.videoNotices.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+                    chat.videoNotices.collect { feedback.toast(it) }
                 }
                 LaunchedEffect(call?.id, call?.status, video.confirmEnd) {
                     videoSelection = 0
@@ -230,13 +260,62 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Box(Modifier.fillMaxSize()) {
-                    AppContent(vm = vm, chat = chat, bleState = bleState)
-                    if (call != null) {
-                        val actions = chat.video.actions(::askVideoPermissions)
-                        PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)),
-                            ::askVideoPermissions)
+                val state by vm.state.collectAsState()
+                val conversation by chat.state.collectAsState()
+                val telemetry by bleManager.deviceTelemetry.collectAsState()
+                val patient = call != null || destination.value !in caregiverPages
+                LaunchedEffect(patient) {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    if (patient) controller.hide(WindowInsetsCompat.Type.systemBars())
+                    else controller.show(WindowInsetsCompat.Type.systemBars())
+                    controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+                LaunchedEffect(destination.value, call?.id, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.HOME && call == null && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            cursor = cursor.copy(previousIndex = -1)
+                            runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "Home tick failed", it) }) {
+                                advanceHome()
+                            }
+                        }
                     }
+                }
+                val path = patientPath(destination.value, conversation, video, mediaParent())
+                androidx.compose.runtime.SideEffect { statusPath = path }
+                LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd) {
+                    bciController?.invalidatePendingCommands()
+                }
+                Box(Modifier.fillMaxSize()) {
+                    if (patient) {
+                        val connection = when (bleState) {
+                            NaoyunBleManager.State.READY -> "耳机已连接"
+                            NaoyunBleManager.State.STREAM_STALLED, NaoyunBleManager.State.RECOVERING -> "信号中断"
+                            else -> "耳机未连接"
+                        }
+                        val display = (if (dark) "夜间" else "日间") + (if (displayMode == AppUiSettings.DisplayMode.AUTO) " · 自动" else "")
+                        val battery = telemetry.takeIf { connection != "耳机未连接" }
+                        val status = PatientStatus(path, connection, battery?.leftBatteryPercent, battery?.rightBatteryPercent,
+                            scanMode.value, state.scanIntervalMs, display)
+                        val baseHints = when {
+                            call != null -> ActionHints.list(chat.video.actions(::askVideoPermissions).getOrNull(videoSelection)?.label.orEmpty(),scanMode.value,videoScanDirection)
+                            destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName,scanMode.value,cursor.direction)
+                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(entertainmentSelection.value.selectedModule.displayName,scanMode.value,entertainmentSelection.value.scanDirection,true)
+                            destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
+                            destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
+                            destination.value == AppDestination.TV -> ActionHints("上一台","打开菜单","下一台")
+                            else -> ActionHints("游戏内 · 向左","离开游戏…","游戏内 · 向右")
+                        }
+                        var pageHints by remember(destination.value) { mutableStateOf<ActionHints?>(null) }
+                        PatientScaffold(status, if (call == null) pageHints ?: baseHints else baseHints, feedback) {
+                            androidx.compose.runtime.CompositionLocalProvider(LocalActionHints provides { pageHints = it }) {
+                                AppContent(vm = vm, chat = chat, bleState = bleState)
+                            }
+                            if (call != null) {
+                                val actions = chat.video.actions(::askVideoPermissions)
+                                PadVideoScreen(chat.video, video, videoSelection.coerceIn(0, actions.lastIndex.coerceAtLeast(0)), ::askVideoPermissions)
+                            }
+                        }
+                    } else AppContent(vm = vm, chat = chat, bleState = bleState)
                     FloatingEegSignalWindow(
                         bleManager = bleManager,
                         visible = floatingBallVisible.value && call == null &&
@@ -282,20 +361,19 @@ class MainActivity : ComponentActivity() {
 
         when (destination.value) {
             AppDestination.HOME -> HomeScreen(
-                selection = homeSelection.value,
+                selection = HomeSelectionState(HomeModule.entries.indexOf(homeModules[cursor.index]), cursor.direction),
                 scanMode = scanMode.value,
                 scanIntervalMs = inputState.scanIntervalMs,
+                dwellRevision = dwellRevision,
+                frozen = frozen,
                 bleManager = bleManager,
                 onRequestPermissions = ::requestBluetoothPermissions,
                 onSelect = { module ->
                     if (module.scanEnabled) {
-                        homeSelection.value = homeSelection.value.copy(
-                            selectedIndex = HomeModule.entries.indexOf(module)
-                        )
+                        cursor = cursor.reset(initial = homeModules.indexOf(module))
                     }
                     enterModule(module)
-                },
-                onAdvance = { homeSelection.value = homeSelection.value.advance() }
+                }
             )
 
             AppDestination.ENTERTAINMENT -> EntertainmentScreen(
@@ -480,9 +558,30 @@ class MainActivity : ComponentActivity() {
 
     private fun navigateTo(target: AppDestination) {
         if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
+        bciController?.invalidatePendingCommands()
+        cursor = cursor.reset()
         destination.value = target
         inputViewModel?.setStandaloneInputActive(target == AppDestination.INPUT_METHOD)
         updateBciCommandDelivery()
+    }
+
+    private fun advanceHome() {
+        cursor = cursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
+    }
+
+    private fun debugCommand(cmd: String): String {
+        when (cmd) {
+            "nav home" -> { navigateTo(AppDestination.HOME); cursor = cursor.reset(initial = 0); dwellRevision++ }
+            "freeze on", "freeze off" -> { frozen = cmd.endsWith("on"); cursor = cursor.reset(); dwellRevision++ }
+            "scan auto", "scan manual" -> { scanMode.value = if (cmd.endsWith("auto")) ScanMode.AUTO else ScanMode.MANUAL; cursor = cursor.reset() }
+            "mode auto", "mode light", "mode dark" -> displayMode = AppUiSettings.DisplayMode.valueOf(cmd.substringAfter(' ').uppercase())
+            "signal L" -> if (foreground) routeSignal(ControlSignal.LEFT_LOOK) else return "inactive"
+            "signal R" -> if (foreground) routeSignal(ControlSignal.RIGHT_LOOK) else return "inactive"
+            "signal B" -> if (foreground) routeSignal(ControlSignal.BITE) else return "inactive"
+            "tick" -> if (destination.value == AppDestination.HOME && communicationViewModel?.video?.state?.value?.call == null) advanceHome() else return "pending: page cursor"
+            else -> return "pending: page integration"
+        }
+        return "ok"
     }
 
     private fun setHeadsetControlEnabled(enabled: Boolean) {
@@ -504,7 +603,7 @@ class MainActivity : ComponentActivity() {
             (destination.value != AppDestination.DEVICE_STATUS &&
                 destination.value != AppDestination.COLLECTION && destination.value != AppDestination.SETTINGS)
         bciController?.setCommandDeliveryEnabled(
-            headsetControlEnabled.value && targetAcceptsCommands
+            foreground && headsetControlEnabled.value && targetAcceptsCommands
         )
     }
 
@@ -516,6 +615,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun routeSignal(signal: ControlSignal) {
+        if (!frozen && destination.value !in caregiverPages) feedback.emit(signal, statusPath.joinToString(" › "), AppUiSettings.feedbackSound(this))
         if (destination.value == AppDestination.WIZARD_GAME) {
             WizardGameInputBus.dispatch(signal)
             return
@@ -537,9 +637,15 @@ class MainActivity : ComponentActivity() {
         }
         when (destination.value) {
             AppDestination.HOME -> when (signal) {
-                ControlSignal.LEFT_LOOK -> homeSelection.value = homeSelection.value.onDirection(-1, scanMode.value)
-                ControlSignal.RIGHT_LOOK -> homeSelection.value = homeSelection.value.onDirection(1, scanMode.value)
-                ControlSignal.BITE -> enterModule(homeSelection.value.selectedModule)
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    cursor = cursor.look(if (signal == ControlSignal.LEFT_LOOK) -1 else 1, scanMode.value)
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val selected = cursor.selected(SystemClock.elapsedRealtime(), if (frozen) 0 else AppUiSettings.graceMs(this), scanMode.value)
+                    if (selected != cursor.index) feedback.toast("已按上一项执行（延迟补偿）")
+                    enterModule(homeModules[selected])
+                }
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.ENTERTAINMENT -> when (signal) {
@@ -690,7 +796,23 @@ class MainActivity : ComponentActivity() {
         else -> "耳机未连接"
     }
 
+    override fun onPause() {
+        foreground = false
+        bciController?.setCommandDeliveryEnabled(false)
+        bciController?.invalidatePendingCommands()
+        super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        foreground = true
+        updateBciCommandDelivery()
+        dwellRevision++
+    }
+
     override fun onDestroy() {
+        unregisterDebug()
+        feedback.release()
         FloatingEegSignalSource.detach(bleManager)
         communicationViewModel?.requestVideoPermissions = {}
         stopBciController()

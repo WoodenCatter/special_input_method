@@ -51,11 +51,11 @@ fun GlassPanel(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) AuroraDarkAccentSoft else AuroraDarkSurface
+            containerColor = if (selected) LocalBciColors.current.focusTint else LocalBciColors.current.panel
         ),
         border = BorderStroke(
             1.dp,
-            if (selected) AuroraViolet else AuroraDarkBorder
+            if (selected) LocalBciColors.current.focus else LocalBciColors.current.line
         )
     ) {
         Column(
@@ -94,24 +94,24 @@ fun AuroraButton(
 ) {
     val shape = MaterialTheme.shapes.medium
     val background = when (style) {
-        AuroraButtonStyle.PRIMARY -> Brush.linearGradient(listOf(Color(0xFF7C3AED), Color(0xFF0891B2)))
-        AuroraButtonStyle.SUCCESS -> Brush.linearGradient(listOf(Color(0xCC047857), Color(0xCC0F766E)))
-        AuroraButtonStyle.DANGER -> Brush.linearGradient(listOf(AuroraDarkBadSoft, AuroraDarkBadSoft))
+        AuroraButtonStyle.PRIMARY -> Brush.linearGradient(listOf(LocalBciColors.current.text, LocalBciColors.current.text))
+        AuroraButtonStyle.SUCCESS -> Brush.linearGradient(listOf(LocalBciColors.current.ok, LocalBciColors.current.ok))
+        AuroraButtonStyle.DANGER -> Brush.linearGradient(listOf(LocalBciColors.current.alarmTint, LocalBciColors.current.alarmTint))
         AuroraButtonStyle.GHOST -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-        AuroraButtonStyle.SECONDARY -> Brush.linearGradient(listOf(AuroraDarkSurfaceStrong, AuroraDarkSurfaceStrong))
+        AuroraButtonStyle.SECONDARY -> Brush.linearGradient(listOf(LocalBciColors.current.panel2, LocalBciColors.current.panel2))
     }
     val border = when (style) {
         AuroraButtonStyle.PRIMARY -> Color.Transparent
-        AuroraButtonStyle.DANGER -> AuroraBad.copy(alpha = .55f)
-        AuroraButtonStyle.SUCCESS -> AuroraOk.copy(alpha = .55f)
+        AuroraButtonStyle.DANGER -> LocalBciColors.current.alarm.copy(alpha = .55f)
+        AuroraButtonStyle.SUCCESS -> LocalBciColors.current.ok.copy(alpha = .55f)
         AuroraButtonStyle.GHOST -> Color.Transparent
-        AuroraButtonStyle.SECONDARY -> AuroraDarkBorderStrong
+        AuroraButtonStyle.SECONDARY -> LocalBciColors.current.dim
     }
     val foreground = when (style) {
-        AuroraButtonStyle.DANGER -> AuroraBad
-        AuroraButtonStyle.SUCCESS -> AuroraDarkText
-        AuroraButtonStyle.GHOST -> AuroraVioletBright
-        else -> AuroraDarkText
+        AuroraButtonStyle.DANGER -> LocalBciColors.current.alarm
+        AuroraButtonStyle.PRIMARY, AuroraButtonStyle.SUCCESS -> LocalBciColors.current.bg
+        AuroraButtonStyle.GHOST -> LocalBciColors.current.focus
+        else -> LocalBciColors.current.text
     }
     Box(
         modifier = modifier
@@ -143,11 +143,11 @@ fun AuroraBadge(
     style: AuroraBadgeStyle = AuroraBadgeStyle.NEUTRAL
 ) {
     val (background, foreground) = when (style) {
-        AuroraBadgeStyle.SUCCESS -> AuroraDarkOkSoft to AuroraOk
-        AuroraBadgeStyle.WARNING -> AuroraDarkWarnSoft to AuroraWarn
-        AuroraBadgeStyle.DANGER -> AuroraDarkBadSoft to AuroraBad
-        AuroraBadgeStyle.INFO -> AuroraDarkInfoSoft to AuroraInfo
-        AuroraBadgeStyle.NEUTRAL -> AuroraDarkSurfaceStrong to AuroraDarkTextSecondary
+        AuroraBadgeStyle.SUCCESS -> LocalBciColors.current.okTint to LocalBciColors.current.ok
+        AuroraBadgeStyle.WARNING -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
+        AuroraBadgeStyle.DANGER -> LocalBciColors.current.alarmTint to LocalBciColors.current.alarm
+        AuroraBadgeStyle.INFO -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
+        AuroraBadgeStyle.NEUTRAL -> LocalBciColors.current.panel2 to LocalBciColors.current.muted
     }
     Surface(
         modifier = modifier,
@@ -176,7 +176,7 @@ fun SectionHeader(
             Modifier
                 .size(width = 3.dp, height = 22.dp)
                 .clip(CircleShape)
-                .background(AuroraViolet)
+                .background(LocalBciColors.current.focus)
         )
         Spacer(Modifier.size(10.dp))
         Column(Modifier.weight(1f)) {
@@ -200,7 +200,7 @@ fun AuroraEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(symbol, color = AuroraVioletBright, style = MaterialTheme.typography.headlineMedium)
+        Text(symbol, color = LocalBciColors.current.focus, style = MaterialTheme.typography.headlineMedium)
         Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
     }
 }
@@ -226,22 +226,22 @@ fun AuroraTextField(
         singleLine = true,
         label = { Text(label) },
         supportingText = supportingText?.let { text ->
-            { Text(text, color = if (isError) AuroraBad else AuroraDarkTextTertiary) }
+            { Text(text, color = if (isError) LocalBciColors.current.alarm else LocalBciColors.current.dim) }
         },
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
         shape = MaterialTheme.shapes.small,
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = AuroraDarkSurfaceStrong,
-            unfocusedContainerColor = AuroraDarkSurface,
-            disabledContainerColor = AuroraDarkSurface,
-            focusedBorderColor = AuroraViolet,
-            unfocusedBorderColor = AuroraDarkBorderStrong,
-            cursorColor = AuroraVioletBright,
-            focusedLabelColor = AuroraVioletBright,
-            unfocusedLabelColor = AuroraDarkTextSecondary,
-            errorBorderColor = AuroraBad,
-            errorLabelColor = AuroraBad
+            focusedContainerColor = LocalBciColors.current.panel2,
+            unfocusedContainerColor = LocalBciColors.current.panel,
+            disabledContainerColor = LocalBciColors.current.panel,
+            focusedBorderColor = LocalBciColors.current.focus,
+            unfocusedBorderColor = LocalBciColors.current.dim,
+            cursorColor = LocalBciColors.current.focus,
+            focusedLabelColor = LocalBciColors.current.focus,
+            unfocusedLabelColor = LocalBciColors.current.muted,
+            errorBorderColor = LocalBciColors.current.alarm,
+            errorLabelColor = LocalBciColors.current.alarm
         )
     )
 }

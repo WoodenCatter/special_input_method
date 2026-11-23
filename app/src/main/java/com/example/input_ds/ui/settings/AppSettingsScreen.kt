@@ -1,5 +1,6 @@
 package com.example.input_ds.ui.settings
 
+import com.example.input_ds.ui.design.*
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -114,6 +115,14 @@ fun AppSettingsScreen(
         mutableFloatStateOf(AppUiSettings.readScreenBrightness(context))
     }
     val scanDelay = scanIntervalMs.coerceIn(1_100L, 3_000L)
+
+    val focusedLabel = when (focusMode) {
+        SettingsFocusMode.MENU -> PatientSetting.entries[menuIndex].title
+        SettingsFocusMode.VOLUME -> listOf("减小音量", "增大音量", "返回设置").getOrNull(optionIndex)
+        SettingsFocusMode.BRIGHTNESS -> listOf("降低亮度", "提高亮度", "返回设置").getOrNull(optionIndex)
+        SettingsFocusMode.FLOATING_BALL -> listOf(if (floatingBallVisible) "隐藏悬浮球" else "显示悬浮球", "返回设置").getOrNull(optionIndex)
+    }
+    ReportActionHints(ActionHints.list(focusedLabel.orEmpty(), scanMode, scanDirection))
 
     fun applyBrightness(value: Float) {
         brightness = AppUiSettings.writeScreenBrightness(context, value)

@@ -42,10 +42,13 @@ import com.example.input_ds.ui.theme.AuroraOk
 import com.example.input_ds.ui.theme.AuroraVioletBright
 import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.SectionHeader
-import com.example.input_ds.ui.theme.SelectableGlassPanel
 import com.example.input_ds.model.ScanMode
-import com.example.input_ds.model.ScanSettings
-import kotlinx.coroutines.delay
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.clickable
+import com.example.input_ds.ui.design.scanItem
 
 private const val REQUIRED_DEVICE_NAME = "Naoyun Pods BLE"
 
@@ -54,10 +57,11 @@ fun HomeScreen(
     selection: HomeSelectionState,
     scanMode: ScanMode,
     scanIntervalMs: Long,
+    dwellRevision: Int,
+    frozen: Boolean,
     bleManager: NaoyunBleManager,
     onRequestPermissions: () -> Unit,
-    onSelect: (HomeModule) -> Unit,
-    onAdvance: () -> Unit
+    onSelect: (HomeModule) -> Unit
 ) {
     val bleState by bleManager.state.collectAsState()
     val scanResults by bleManager.scanResults.collectAsState()
@@ -73,13 +77,6 @@ fun HomeScreen(
             )
         ) {
             if (bleManager.hasPermissions()) bleManager.startScan() else onRequestPermissions()
-        }
-    }
-
-    LaunchedEffect(scanMode, selection.selectedIndex, selection.scanDirection, scanIntervalMs) {
-        if (scanMode == ScanMode.AUTO) {
-            delay(scanIntervalMs.coerceIn(ScanSettings.MIN_INTERVAL_MS, ScanSettings.MAX_INTERVAL_MS))
-            onAdvance()
         }
     }
 
@@ -106,7 +103,13 @@ fun HomeScreen(
                 )
             }
             GlassPanel(Modifier.weight(1f).fillMaxWidth()) {
-                ModuleStrip(selection, onSelect)
+                val progress = remember { Animatable(0f) }
+                LaunchedEffect(selection, dwellRevision, scanIntervalMs, scanMode, frozen) {
+                    progress.snapTo(if (frozen) .5f else 0f)
+                    if (scanMode == ScanMode.AUTO && !frozen) progress.animateTo(1f, tween(scanIntervalMs.toInt(), easing = LinearEasing))
+                }
+                ModuleStrip(selection, if (scanMode == ScanMode.AUTO) selection.scanDirection else 0,
+                    { if (scanMode == ScanMode.AUTO) progress.value else null }, onSelect)
                 DeviceStatusLine(bleState, telemetry)
                 HomeDataArea(
                     modifier = Modifier.weight(1f),
@@ -154,7 +157,7 @@ private fun DeviceStatusLine(
 }
 
 @Composable
-private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) -> Unit) {
+private fun ModuleStrip(selection: HomeSelectionState, direction: Int, progress: () -> Float?, onSelect: (HomeModule) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val wide = maxWidth >= 720.dp
         if (wide) {
@@ -163,7 +166,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
                     ModuleCard(
                         module,
                         module.scanEnabled && index == selection.selectedIndex,
-                        { onSelect(module) },
+                        direction, progress, { onSelect(module) },
                         Modifier.weight(1f)
                     )
                 }
@@ -176,7 +179,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
                             ModuleCard(
                                 module,
                                 module.scanEnabled && HomeModule.entries.indexOf(module) == selection.selectedIndex,
-                                { onSelect(module) },
+                                direction, progress, { onSelect(module) },
                                 Modifier.weight(1f)
                             )
                         }
@@ -188,7 +191,7 @@ private fun ModuleStrip(selection: HomeSelectionState, onSelect: (HomeModule) ->
 }
 
 @Composable
-private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
+private fun ModuleCard(module: HomeModule, selected: Boolean, direction: Int, progress: () -> Float?, onClick: () -> Unit, modifier: Modifier) {
     val symbol = when (module) {
         HomeModule.APP_SETTINGS -> "⚙"
         HomeModule.REALTIME_COMMUNICATION -> "◌"
@@ -196,11 +199,8 @@ private fun ModuleCard(module: HomeModule, selected: Boolean, onClick: () -> Uni
         HomeModule.LIFE_ASSISTANT -> "✧"
         HomeModule.HEADSET_SETTINGS -> "⌁"
     }
-    SelectableGlassPanel(
-        selected = selected,
-        onClick = onClick,
-        modifier = modifier.height(132.dp)
-    ) {
+    Box(modifier.height(132.dp).scanItem(selected, direction, false, if (selected) progress else null, grow = false)
+        .clickable(onClick = onClick)) {
         Column(
             Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Center,

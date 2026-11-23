@@ -1,5 +1,6 @@
 package com.example.input_ds.ui.tv
 
+import com.example.input_ds.ui.design.*
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
 import android.net.Uri
@@ -140,6 +141,9 @@ fun TvScreen(
     val listState = rememberLazyListState()
     val channel = TV_CHANNELS[currentIndex]
     val officialPage = channel.officialPages[pageVariantIndex.coerceAtMost(channel.officialPages.lastIndex)]
+
+    ReportActionHints(if (operationVisible) ActionHints.list(TV_OPERATION_LABELS[operationIndex], scanMode, operationDirection)
+        else ActionHints.list(TV_CHANNELS[highlightedChannelIndex].name, scanMode, channelDirection))
 
     fun exitFullscreen() {
         val callback = fullscreenCallback

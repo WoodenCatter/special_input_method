@@ -1,5 +1,6 @@
 package com.example.input_ds.ui.music
 
+import com.example.input_ds.ui.design.*
 import android.content.Context
 import android.media.AudioManager
 import androidx.activity.compose.BackHandler
@@ -160,6 +161,20 @@ fun MusicScreen(
 
     val currentTrack = tracks.firstOrNull { it.id == player.currentTrackId } ?: tracks.firstOrNull()
     val scanDelay = scanIntervalMs.coerceIn(1_100L, 3_000L)
+
+    val (item, direction) = when (focusMode) {
+        MusicFocusMode.CONTROLS -> when (controlIndex) {
+            CONTROL_PLAY_PAUSE -> if (player.isPlaying) "暂停" else "播放"
+            CONTROL_MODE -> playbackMode.displayName
+            else -> CONTROL_LABELS[controlIndex]
+        } to controlDirection
+        MusicFocusMode.PLAYLIST -> tracks.getOrNull(playlistIndex)?.title.orEmpty() to playlistDirection
+        MusicFocusMode.VOLUME -> VOLUME_LABELS[volumeIndex] to volumeDirection
+        MusicFocusMode.SETTINGS -> SETTINGS_LABELS[settingsIndex] to settingsDirection
+        MusicFocusMode.DELETE_LIST -> (tracks.getOrNull(deleteIndex-1)?.title ?: "返回") to deleteDirection
+        MusicFocusMode.DELETE_CONFIRM -> (if (confirmIndex == 0) "确定删除" else "返回") to confirmDirection
+    }
+    ReportActionHints(ActionHints.list(item, scanMode, direction))
 
     fun persistOrders() {
         playbackStore.saveTrackOrder(tracks)

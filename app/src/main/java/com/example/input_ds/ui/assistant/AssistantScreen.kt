@@ -1,5 +1,6 @@
 package com.example.input_ds.ui.assistant
 
+import com.example.input_ds.ui.design.*
 import android.app.Application
 import android.content.Context
 import android.content.pm.ApplicationInfo
@@ -313,6 +314,17 @@ internal fun AssistantScreen(
             delay((remaining - 1) % 60_000L + 1)
         }
     }
+    ReportActionHints(when {
+        showSetup -> ActionHints("", "", "")
+        editing -> inputHints(inputState)
+        pendingPrompt != null && confirmation == null -> ActionHints("", "正在回复…", "")
+        else -> {
+            val item = confirmation?.let { it.options.getOrNull(selected)?.describe(home) ?: "取消" }
+                ?: AssistantAction.entries.getOrNull(selected)?.labelFor(draft).orEmpty()
+            ActionHints.list(item, com.example.input_ds.model.ScanMode.AUTO, direction)
+        }
+    })
+
     BackHandler(enabled = editing) { finishInput() }
     BackHandler(enabled = confirmation != null) {
         confirmation?.let { confirmHome(it.options.size) }

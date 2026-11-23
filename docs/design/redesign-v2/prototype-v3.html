@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-pal="coral" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BCI Agent 床旁交互 · 原型 v3（沟通 + 生活助手）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+<header class="doc-head">
+  <h1>三个动作完成所有操作：BCI Agent 床旁交互 · v3</h1>
+  <p>对照最新源码（e14c3f3）补齐了联系人沟通、视频通话、邀请码和生活助手。键盘 <kbd>←</kbd> 左看 · <kbd>空格</kbd> 咬牙 · <kbd>→</kbd> 右看，或用下方模拟按钮；照护者可直接触摸屏幕选项。</p>
+  <nav class="tabs"><button class="tab on" data-tab="proto">可操作原型</button><button class="tab" data-tab="spec">设计说明</button></nav>
+</header>
+<style>
+/* ======== palettes ======== */
+:root{--page-cjk:'Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif;--page-latin:'Archivo','Noto Sans SC',system-ui,sans-serif;--scrim:linear-gradient(to top,rgba(6,8,12,.86) 0%,rgba(6,8,12,.55) 34%,rgba(6,8,12,0) 62%)}
+html[data-mode="light"]{--ok:#138A5A;--ok-tint:rgba(19,138,90,.14);--on-alarm:#FFFFFF;--alarm:#D13A35;--alarm-tint:rgba(209,58,53,.09);--ov:rgba(246,244,240,.97);--shadow:0 1px 2px rgba(20,24,32,.05),0 2px 10px rgba(20,24,32,.04);--care-bg:#1C2230;--care-text:#EDEBE6;--care-line:rgba(255,255,255,.14);--care-btn:#EDEBE6;--care-btn-text:#1C2230;--care-off:#545C6B}
+html[data-mode="dark"]{--ok:#4CCB8A;--ok-tint:rgba(76,203,138,.16);--on-alarm:#FFFFFF;--alarm:#E5484D;--alarm-tint:rgba(255,106,92,.12);--ov:rgba(12,14,19,.97);--shadow:none;--care-bg:#ECEAE4;--care-text:#1B1E24;--care-line:rgba(0,0,0,.12);--care-btn:#1B1E24;--care-btn-text:#ECEAE4;--care-off:#A3A8B0}
+html[data-pal="cobalt"][data-mode="light"]{--outer:#E6E4DE;--frame:#CDC9C0;--bg:#F4F2EE;--panel:#FFFFFF;--panel-2:#FAF9F6;--mag:#FBFAF8;--line:#DFDBD2;--text:#1A2130;--muted:#5D6573;--dim:#A4A9B2;--focus:#2D5BE3;--focus-tint:rgba(45,91,227,.08);--focus-ring:rgba(45,91,227,.20);--bar:#FBFAF7}
+html[data-pal="cobalt"][data-mode="dark"]{--outer:#07090C;--frame:#20252E;--bg:#10141B;--panel:#171C24;--panel-2:#1D232D;--mag:#131820;--line:#283040;--text:#E8E5DE;--muted:#98A0AD;--dim:#586172;--focus:#8AA8FF;--focus-tint:rgba(138,168,255,.12);--focus-ring:rgba(138,168,255,.28);--bar:#0C1015}
+html[data-pal="wisteria"][data-mode="light"]{--outer:#E9E6EE;--frame:#D1CBDB;--bg:#F5F3F7;--panel:#FFFFFF;--panel-2:#FAF8FC;--mag:#FCFBFD;--line:#E2DDE8;--text:#211C2B;--muted:#625B6F;--dim:#A9A3B3;--focus:#6A4FD6;--focus-tint:rgba(106,79,214,.08);--focus-ring:rgba(106,79,214,.20);--bar:#FBFAFC}
+html[data-pal="wisteria"][data-mode="dark"]{--outer:#08070B;--frame:#24202D;--bg:#121019;--panel:#1A1722;--panel-2:#201C2A;--mag:#15121D;--line:#2C2738;--text:#ECE7F2;--muted:#A099AE;--dim:#5F586E;--focus:#AE9BFF;--focus-tint:rgba(174,155,255,.12);--focus-ring:rgba(174,155,255,.28);--bar:#0D0B12}
+html[data-pal="coral"][data-mode="light"]{--outer:#EAE5DE;--frame:#D5CDC2;--bg:#F6F3EF;--panel:#FFFFFF;--panel-2:#FBF9F6;--mag:#FCFAF8;--line:#E5DED5;--text:#211C18;--muted:#6A6159;--dim:#ADA59C;--focus:#D9502A;--focus-tint:rgba(217,80,42,.08);--focus-ring:rgba(217,80,42,.20);--bar:#FCFAF7;--ov:rgba(246,243,239,.97);--alarm:#C8102E;--alarm-tint:rgba(200,16,46,.10)}
+html[data-pal="coral"][data-mode="dark"]{--outer:#090806;--frame:#27221D;--bg:#14110E;--panel:#1C1915;--panel-2:#231F1A;--mag:#17140F;--line:#312B25;--text:#EFE8DF;--muted:#A79D92;--dim:#625A51;--focus:#FF8C5E;--focus-tint:rgba(255,140,94,.12);--focus-ring:rgba(255,140,94,.28);--bar:#0E0C0A;--ov:rgba(20,17,14,.97);--alarm:#E0243F;--alarm-tint:rgba(224,36,63,.16)}
+
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--outer);color:var(--text);font-family:var(--page-cjk);transition:background-color .3s}
+.doc-head{padding:28px 32px 8px;max-width:1340px;margin:0 auto}
+.doc-head h1{font-size:clamp(22px,3vw,34px);margin:0 0 8px;font-weight:900}
+.doc-head p{margin:0 0 16px;color:var(--muted);font-size:15px;line-height:1.6}
+kbd{font-family:var(--page-latin);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 7px;font-size:13px;color:var(--text)}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;color:var(--muted);font:500 16px var(--page-cjk);padding:10px 16px;cursor:pointer;border-bottom:3px solid transparent}
+.tab.on{color:var(--text);border-bottom-color:var(--focus)}
+main{max-width:1340px;margin:0 auto;padding:20px 32px 60px}
+section[hidden]{display:none}
+
+/* ======== device ======== */
+#stageWrap{position:relative;width:100%;overflow:hidden}
+#device{position:absolute;top:0;left:0;width:1280px;height:800px;transform-origin:top left;background:var(--bg);border-radius:26px;overflow:hidden;box-shadow:0 0 0 10px var(--frame),0 18px 50px rgba(0,0,0,.18);transition:background-color .3s}
+.statusbar{position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid var(--line)}
+.crumb{font-size:20px;color:var(--muted)} .crumb b{color:var(--text);font-weight:700}
+.sright{display:flex;gap:10px;align-items:center}
+.pill{font-size:15px;color:var(--muted);padding:5px 12px;border:1px solid var(--line);border-radius:999px;display:flex;gap:7px;align-items:center;font-family:var(--page-latin)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);display:inline-block}
+.care-btn{font:500 15px var(--page-cjk);background:var(--text);color:var(--bg);border:0;border-radius:999px;padding:6px 14px;cursor:pointer}
+.view{position:absolute;top:56px;bottom:112px;left:0;right:0;padding:20px 28px}
+#overlay{position:absolute;top:56px;bottom:112px;left:0;right:0;pointer-events:none}
+#overlay .ov{pointer-events:auto}
+
+/* item + focus */
+.item{position:relative;background:var(--panel);border:2px solid var(--line);border-radius:16px;color:var(--text);cursor:pointer;box-shadow:var(--shadow);transition:transform .14s ease-out,background-color .14s,border-color .14s,opacity .2s,box-shadow .14s;overflow:hidden}
+.item.f{background:linear-gradient(var(--focus-tint),var(--focus-tint)),var(--panel-2);border-color:var(--focus);box-shadow:0 0 0 5px var(--focus-ring);transform:scale(1.025);z-index:2}
+.item.f::after{content:'';position:absolute;left:14px;right:14px;bottom:8px;height:5px;border-radius:3px;background:var(--focus);transform-origin:left center;animation:dwell var(--dwell,1500ms) linear forwards}
+.dir-l .item.f::after{transform-origin:right center}
+.item.f .dirtag{display:block}
+.dirtag{display:none;position:absolute;top:8px;right:12px;font:700 16px var(--page-latin);color:var(--focus)}
+.item.pick{background:var(--ok-tint)!important;border-color:var(--ok)!important}
+@keyframes dwell{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.nav{background:transparent;border-style:dashed;color:var(--muted);box-shadow:none}
+.nav.f{color:var(--text)}
+
+/* action bar */
+.actionbar{position:absolute;left:0;right:0;bottom:0;height:112px;display:grid;grid-template-columns:1fr 1.15fr 1fr;border-top:1px solid var(--line);background:var(--bar)}
+.slot{display:flex;align-items:center;gap:18px;padding:0 30px;position:relative;transition:background-color .25s}
+.slot.r{justify-content:flex-end;text-align:right}
+.slot.m{justify-content:center;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+.slot .g{font:800 22px var(--page-latin);color:var(--dim);width:48px;height:48px;border:2px solid var(--line);border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.slot .t small{display:block;font-size:15px;color:var(--muted);margin-bottom:2px}
+.slot .t span{font-size:25px;font-weight:700;display:block;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.slot.cur .g{color:var(--bg);background:var(--focus);border-color:var(--focus)}
+.slot.cur .t small::after{content:' · 当前方向';color:var(--focus)}
+.slot.hit{background:var(--focus-tint)}
+.ready{display:flex;gap:6px;align-items:center;flex:none}
+.ready i{width:12px;height:12px;border-radius:50%;border:2px solid var(--ok);background:var(--ok)}
+.ready.wait i{background:transparent;border-color:var(--dim)}
+.ready.wait i.on{background:var(--ok);border-color:var(--ok)}
+.readytxt{font-size:15px;color:var(--ok);width:44px}
+.ready.wait + .readytxt{color:var(--muted)}
+
+/* gaze feedback */
+.edge{position:absolute;top:0;bottom:0;width:36px;opacity:0;pointer-events:none;z-index:40}
+.edge.l{left:0;background:linear-gradient(90deg,var(--focus),transparent)}
+.edge.r{right:0;background:linear-gradient(270deg,var(--focus),transparent)}
+.pulse{position:absolute;left:50%;top:50%;width:160px;height:160px;margin:-80px 0 0 -80px;border-radius:50%;border:6px solid var(--focus);opacity:0;pointer-events:none;z-index:40}
+.edge.go{animation:edge .45s ease-out}
+.pulse.go{animation:pulse .45s ease-out}
+@keyframes edge{0%{opacity:.85}100%{opacity:0}}
+@keyframes pulse{0%{opacity:.9;transform:scale(.6)}100%{opacity:0;transform:scale(1.5)}}
+.toast{position:absolute;left:50%;bottom:128px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:12px 22px;border-radius:12px;font-size:20px;opacity:0;transition:opacity .2s;z-index:50;pointer-events:none;white-space:nowrap}
+.toast.on{opacity:1} .toast.ok{background:var(--ok);color:#fff}
+
+/* home */
+.home{height:100%;display:grid;grid-template-rows:auto 1fr;gap:22px}
+.hello{display:flex;align-items:baseline;gap:22px}
+.clock{font:800 84px/1 var(--page-latin);letter-spacing:-.01em}
+.date{font-size:26px;color:var(--muted)}
+.tiles{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:18px;min-height:0;transition:grid-template-columns .3s ease-out}
+.tile.f{transform:none}
+.tile small{line-height:1.35}
+.tile{border-radius:24px;padding:28px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px}
+.tile .ic{color:var(--muted);margin-bottom:auto}
+.tile .ic svg{width:58px;height:58px;stroke-width:1.75}
+.tile.f .ic{color:var(--focus)}
+.tile b{font-size:46px;font-weight:900}
+.tile small{font-size:20px;color:var(--muted)}
+.tile{align-items:flex-start;text-align:left}
+.tile .ic{margin-bottom:auto;display:flex}
+.tile b{line-height:1.1}
+/* call: solid alarm fill — the only filled tile in the app, so it differs by treatment, not just hue */
+.tile.t-call,.tile.t-call.f{background:var(--alarm);border-color:var(--alarm);color:var(--on-alarm)}
+.tile.t-call .ic,.tile.t-call.f .ic{color:var(--on-alarm)}
+.tile.t-call small{color:var(--on-alarm);opacity:.88}
+.tile.t-call.f{box-shadow:0 0 0 4px var(--bg),0 0 0 9px var(--focus)}
+.tile.t-call.f::after{background:var(--on-alarm)}
+.tile.t-call .dirtag{color:var(--on-alarm)}
+
+/* comm */
+.comm{height:100%;display:grid;grid-template-rows:104px 1fr;gap:14px}
+.outbar{background:var(--panel);border:2px solid var(--line);border-radius:18px;display:flex;align-items:center;padding:0 26px;gap:22px;min-width:0;box-shadow:var(--shadow)}
+.outtext{flex:1;min-width:0;font-size:44px;font-weight:500;white-space:nowrap;overflow:hidden;display:flex;justify-content:flex-end;align-items:center}
+.outtext .ph{font-size:24px;color:var(--dim);margin-right:auto}
+.outtext.empty{justify-content:flex-start}
+.caret{display:inline-block;width:3px;height:48px;background:var(--focus);margin-left:4px;animation:blink 1.1s steps(1) infinite;flex:none}
+@keyframes blink{50%{opacity:0}}
+.compose{display:flex;align-items:center;gap:10px;flex:none;font-family:var(--page-latin)}
+.compose i{font-style:normal;font-size:18px;font-weight:700;padding:5px 10px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}
+.compose .py{font-size:38px;font-weight:800;color:var(--focus)}
+.compose .arrow{color:var(--dim);font-size:22px}
+.main{display:grid;grid-template-columns:270px 1fr 270px;gap:16px;min-height:0;transition:grid-template-columns .25s ease-out}
+.comm.narrow .main{grid-template-columns:132px 1fr 132px}
+.wing{display:grid;grid-template-rows:repeat(6,1fr);gap:10px;min-height:0;transition:opacity .2s}
+.wing.off{opacity:.5} .wing.sleep{opacity:.3}
+.blk{display:flex;align-items:center;justify-content:center;font:700 36px/1 var(--page-latin);letter-spacing:.14em}
+.comm.narrow .blk{font-size:20px;letter-spacing:.06em}
+.blk.fn{font:700 28px var(--page-cjk);letter-spacing:.1em;border-style:dashed;box-shadow:none}
+.blk.fn.say{color:var(--ok);border-color:var(--ok)}
+.blk.fn.exit{color:var(--muted)}
+.comm.narrow .blk.fn{font-size:18px}
+.ord{position:absolute;top:6px;left:10px;font:700 14px var(--page-latin);color:var(--focus);letter-spacing:0}
+.center{display:grid;grid-template-rows:178px 1fr;gap:14px;min-height:0;min-width:0}
+.mag{position:relative;background:var(--mag);border:2px solid var(--line);border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;min-width:0}
+.mag .tag{position:absolute;top:12px;left:18px;font-size:18px;color:var(--muted)}
+.mag .big{font:800 92px/1 var(--page-latin);color:var(--focus);letter-spacing:.18em}
+.mag .big.cjk{font-family:var(--page-cjk);font-weight:900;letter-spacing:.06em;font-size:76px}
+.mag .big.xl{font-size:118px}
+.mag .hint{font-size:20px;color:var(--muted);margin-top:10px}
+.mag .sent{font-size:50px;font-weight:500;padding:0 30px;white-space:nowrap;overflow:hidden;max-width:100%;direction:rtl;text-align:center}
+.mag .sent span{direction:ltr;unicode-bidi:isolate}
+.mag .sent em{font-style:normal;color:var(--focus);font-weight:900}
+.cands{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px;min-height:0;box-shadow:var(--shadow)}
+.cap{font-size:17px;color:var(--muted);display:flex;justify-content:space-between}
+.cgrid{display:grid;gap:10px;flex:1;min-height:0}
+.cell{display:flex;align-items:center;justify-content:center;font-size:40px;text-align:center;line-height:1.15;padding:4px;box-shadow:none;background:var(--panel-2)}
+.cell.nav{font-size:21px;background:transparent}
+.cell.urg{border-color:var(--alarm);color:var(--alarm);font-weight:700}
+.cell.urg::before{content:'';position:absolute;top:0;left:0;bottom:0;width:8px;background:var(--alarm)}
+.g-ch{grid-template-columns:repeat(6,1fr);grid-template-rows:repeat(2,1fr)}
+.g-pr{grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(2,1fr)} .g-pr .cell{font-size:34px}
+.g-ph{grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(3,1fr)} .g-ph .cell{font-size:27px}
+.g-py{grid-template-columns:repeat(5,1fr);grid-template-rows:1fr} .g-py .cell{font:700 44px var(--page-latin)} .g-py .cell.nav{font:500 21px var(--page-cjk)}
+.prevrow{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:34px;align-content:flex-start;flex:1}
+.prevrow.dim{color:var(--muted);font-size:28px;flex:none}
+.pyrow{display:flex;gap:34px;align-items:baseline;font:800 58px/1 var(--page-latin);color:var(--focus);flex:none}
+.pyrow.wait{font:500 26px var(--page-cjk);color:var(--dim)}
+.phprev{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:1}
+.phprev span{border:1px dashed var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--muted)}
+
+/* ======== entertainment gallery ======== */
+.ent{height:100%;display:grid;grid-template-rows:40px 1fr 50px;gap:10px}
+.ent-top{display:flex;align-items:baseline;gap:18px}
+.ent-top h2{margin:0;font-size:34px;font-weight:900}
+.ent-top .pos{font:700 22px var(--page-latin);color:var(--muted)}
+.ent-top .hint{margin-left:auto;font-size:18px;color:var(--muted)}
+.gal{position:relative;margin:0 -28px;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 60px,#000 calc(100% - 60px),transparent 100%);mask-image:linear-gradient(90deg,transparent 0,#000 60px,#000 calc(100% - 60px),transparent 100%)}
+.gcard{position:absolute;left:50%;top:50%;width:700px;height:438px;border-radius:26px;overflow:hidden;cursor:pointer;
+  background:linear-gradient(155deg,hsl(var(--h) var(--s,40%) 50%),hsl(var(--h) calc(var(--s,40%) + 6%) 21%));
+  transition:transform .5s cubic-bezier(.2,.75,.2,1),opacity .35s ease-out,box-shadow .2s;will-change:transform;box-shadow:0 10px 30px rgba(0,0,0,.18)}
+.gcard .img{position:absolute;inset:0;background-size:cover;background-position:center}
+.gcard .art{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:26px;color:rgba(255,255,255,.26)}
+.gcard .art svg{width:66%;height:auto;fill:none;stroke:currentColor;stroke-width:9;stroke-linecap:round;stroke-linejoin:round}
+.gcard .scrim{position:absolute;inset:0;background:var(--scrim)}
+.gcard .cap2{position:absolute;left:30px;right:30px;bottom:30px;color:#fff}
+.gcard .cap2 b{display:block;font-size:54px;font-weight:900;line-height:1.1;text-shadow:0 1px 12px rgba(0,0,0,.25)}
+.gcard .cap2 small{display:block;font-size:24px;opacity:.86;margin-top:6px}
+.gcard .bar{position:absolute;left:30px;right:30px;bottom:14px;height:6px;border-radius:3px;background:rgba(255,255,255,.22);overflow:hidden;opacity:0}
+.gcard .bar i{display:block;height:100%;background:#fff;border-radius:3px;transform:scaleX(0);transform-origin:left center}
+.gal.dir-l .gcard .bar i{transform-origin:right center}
+.gcard.f{box-shadow:0 0 0 5px var(--bg),0 0 0 10px var(--focus),0 24px 60px rgba(0,0,0,.28)}
+.gcard.f .bar{opacity:1}
+.gcard.f .bar i{animation:dwell var(--dwell,1500ms) linear forwards}
+.gcard .nexttag{position:absolute;top:28px;display:none;align-items:center;gap:10px;background:var(--focus);color:var(--bg);font-size:38px;font-weight:800;padding:12px 26px;border-radius:999px}
+.gcard.next .nexttag{display:flex}
+.gcard.next.toR .nexttag{left:28px} .gcard.next.toL .nexttag{right:28px}
+.gnext{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:var(--focus);color:var(--bg);display:flex;align-items:center;justify-content:center;font:800 30px var(--page-latin);z-index:20;box-shadow:0 0 0 6px var(--bg);transition:transform .3s cubic-bezier(.2,.75,.2,1)}
+.gcard.next{box-shadow:0 0 0 4px var(--bg),0 0 0 8px var(--focus-ring)}
+.gcard.back{--h:220;--s:6%}
+.rail{display:flex;gap:8px;align-items:center;justify-content:center}
+.rail span{font-size:17px;color:var(--muted);padding:7px 13px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;transition:all .2s}
+.rail span.on{background:var(--focus);color:var(--bg);border-color:var(--focus);font-weight:700}
+.rail span.nx{border-color:var(--focus);color:var(--text)}
+
+/* settings */
+.set{height:100%;display:grid;grid-template-columns:1.1fr 1fr;gap:22px}
+.srows{display:grid;grid-template-rows:repeat(7,1fr);gap:9px;min-height:0}
+.srow{display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:26px;font-weight:700}
+.srow .v{font:700 24px var(--page-latin);color:var(--muted)}
+.srow.f .v{color:var(--focus)}
+.srow .lab{display:flex;align-items:center;gap:16px} .srow svg{width:28px;height:28px;color:var(--muted)}
+.sdesc{background:var(--mag);border:2px solid var(--line);border-radius:20px;padding:34px;display:flex;flex-direction:column;justify-content:center;gap:16px}
+.sdesc .k{font-size:22px;color:var(--muted)} .sdesc .bigv{font:800 92px/1 var(--page-latin);color:var(--focus)} .sdesc p{font-size:24px;line-height:1.5;margin:0}
+
+/* tv / game */
+.tv{height:100%;display:grid;grid-template-rows:1fr 92px;gap:14px}
+.screen{border-radius:18px;background:radial-gradient(120% 90% at 30% 20%,#2C3A44 0%,#151B20 55%,#0B0E10 100%);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:30px;color:#F3F0E8}
+.screen .chn{font:800 64px var(--page-latin)} .screen .chs{font-size:28px;color:#A9B0B8;margin-left:16px}
+.screen .live{position:absolute;top:22px;left:26px;font-size:18px;color:#A9B0B8}
+.chstrip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.chstrip div{border:2px solid var(--line);border-radius:14px;display:flex;align-items:center;justify-content:center;font:700 22px var(--page-latin);color:var(--muted);background:var(--panel)}
+.chstrip div.on{border-color:var(--focus);color:var(--text);background:linear-gradient(var(--focus-tint),var(--focus-tint)),var(--panel)}
+.game{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;text-align:center;border:2px dashed var(--line);border-radius:20px}
+.game .thumb{width:360px;height:225px;border-radius:22px;position:relative;overflow:hidden;background:linear-gradient(155deg,hsl(var(--h) 40% 50%),hsl(var(--h) 46% 21%))}
+.game .thumb .art{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.3)} .game .thumb svg{width:70%;fill:none;stroke:currentColor;stroke-width:9;stroke-linecap:round;stroke-linejoin:round}
+.game h2{font-size:44px;margin:0} .game p{font-size:22px;color:var(--muted);max-width:760px;line-height:1.55;margin:0}
+
+/* overlays */
+.ov{position:absolute;inset:0;background:var(--ov);display:flex;flex-direction:column;padding:34px 48px;gap:22px}
+.ovtag{font-size:20px;color:var(--muted)}
+.ovrow{display:grid;gap:16px;height:118px;flex:none}
+.ovrow .item{display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700}
+.speak-text{flex:1;display:flex;align-items:center;justify-content:center;font-size:84px;font-weight:900;line-height:1.25;text-align:center;padding:0 20px}
+.confirm-q{font-size:44px;font-weight:900}
+.confirm-q small{display:block;font-size:22px;color:var(--muted);font-weight:400;margin-top:8px}
+.halves{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.half{border-width:3px;border-radius:22px;padding:34px;display:flex;flex-direction:column;justify-content:space-between;opacity:.55}
+.half.r{text-align:right}
+.half .gz{font:700 22px var(--page-latin);color:var(--muted)}
+.half b{font-size:72px;font-weight:900;display:block} .half small{font-size:24px;color:var(--muted)}
+.half.f{opacity:1;transform:none}
+.half.f .gz{color:var(--focus)}
+.half.f::after{bottom:16px;left:34px;right:34px;height:7px}
+.ov.call{align-items:center;justify-content:center;text-align:center;background:var(--alarm);color:var(--on-alarm)}
+.ring{width:210px;height:210px;border-radius:50%;border:8px solid var(--on-alarm);display:flex;align-items:center;justify-content:center;font:800 110px var(--page-latin);color:var(--on-alarm)}
+.ov.call h2{font-size:56px;margin:8px 0 0} .ov.call p{font-size:26px;color:var(--on-alarm);opacity:.9;margin:0;line-height:1.5}
+.meter{height:30px;border-radius:15px;background:var(--line);overflow:hidden;width:100%}
+.meter i{display:block;height:100%;background:var(--focus);border-radius:15px;transition:width .2s}
+.adj-v{font:800 120px/1 var(--page-latin);color:var(--focus);text-align:center;margin-top:auto}
+.adj-t{font-size:40px;font-weight:900}
+
+/* caregiver drawer — inverse surface so it never reads as patient UI */
+.care{position:absolute;top:0;right:0;bottom:0;width:480px;background:var(--care-bg);color:var(--care-text);z-index:60;transform:translateX(100%);transition:transform .28s ease-out;padding:22px 26px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.care.on{transform:none}
+.care h3{margin:0;font-size:26px;display:flex;justify-content:space-between;align-items:center}
+.care h3 button{font:500 16px var(--page-cjk);border:1px solid var(--care-line);background:transparent;color:var(--care-text);border-radius:8px;padding:6px 12px;cursor:pointer}
+.care .ban{border:1px solid var(--care-line);border-radius:10px;padding:10px 14px;font-size:15px;line-height:1.5}
+.care .row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--care-line);padding:9px 0;font-size:16px;gap:12px}
+.care .row b{font-family:var(--page-latin);text-align:right}
+.sw{width:64px;height:34px;border-radius:17px;background:var(--care-off);position:relative;cursor:pointer;border:0;flex:none}
+.sw::after{content:'';position:absolute;top:4px;left:4px;width:26px;height:26px;border-radius:50%;background:#fff;transition:left .2s}
+.sw.on{background:var(--ok)} .sw.on::after{left:34px}
+.care canvas{width:100%;height:150px;border-radius:10px;border:1px solid var(--care-line)}
+.care .log{font:14px var(--page-latin);line-height:1.7;opacity:.85}
+.care .lnk{display:block;text-align:center;background:var(--care-btn);color:var(--care-btn-text);border-radius:10px;padding:12px;font-size:16px;cursor:pointer;border:0;font-family:var(--page-cjk)}
+
+/* sim panel */
+.sim{display:flex;flex-wrap:wrap;gap:16px 26px;align-items:center;margin-top:22px;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--bg)}
+.sim-pad{display:flex;gap:8px}
+.sim button{font:500 15px var(--page-cjk);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 14px;cursor:pointer}
+.sim button.on{border-color:var(--focus);color:var(--focus);font-weight:700}
+.sim-pad button{font-size:18px;padding:12px 20px}
+.sim-pad button[data-s="B"]{border-color:var(--focus);color:var(--focus)}
+.sim label{font-size:14px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.sim-grp{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--muted)}
+.sim-grp button{padding:6px 12px;font-size:14px}
+
+/* spec */
+.spec{max-width:1100px}
+.spec h2{font-size:30px;font-weight:900;margin:46px 0 12px} .spec h2:first-child{margin-top:10px}
+.spec h3{font-size:20px;margin:26px 0 8px}
+.spec p,.spec li{font-size:16px;line-height:1.75}
+.spec .lead{font-size:19px}
+.spec table{width:100%;border-collapse:collapse;font-size:15px;margin:10px 0}
+.spec th{text-align:left;color:var(--muted);font-weight:500;padding:9px 10px;border-bottom:1px solid var(--line)}
+.spec td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.6}
+.spec .k{color:var(--focus);font-weight:700}
+.tagk{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin-right:6px}
+.tagk.new{border-color:var(--focus);color:var(--focus)} .tagk.keep{border-color:var(--ok);color:var(--ok)}
+.pal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:12px 0}
+.pal-card{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--panel)}
+.pal-card h4{margin:0;padding:12px 14px;font-size:17px;display:flex;justify-content:space-between}
+.pal-card h4 small{font-weight:400;color:var(--muted);font-size:13px}
+.pal-half{display:flex;gap:6px;padding:10px 14px;align-items:center;font:12px var(--page-latin)}
+.pal-half i{width:34px;height:34px;border-radius:8px;border:1px solid rgba(127,127,127,.25);display:block}
+.pal-half span{margin-left:auto;opacity:.75}
+.principles{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2px 34px}
+.principles div{border-top:1px solid var(--line);padding:14px 0}
+.principles b{font-size:18px;display:block;margin-bottom:4px}
+@media (max-width:900px){.pal-grid{grid-template-columns:1fr}}
+/* screenshot reference modes: #solo shows only the 1280x800 device; #freeze stops timers and animations */
+html.solo .doc-head,html.solo .sim,html.solo #proto>p,html.solo #spec{display:none!important}
+html.solo main{padding:0;max-width:none;margin:0}
+html.solo body{width:1280px;height:800px;overflow:hidden}
+html.solo #device{border-radius:0;box-shadow:none}
+html.freeze *{transition:none!important}
+html.freeze .item.f::after,html.freeze .gcard.f .bar i{animation:none!important;transform:scaleX(.5)!important}
+html.freeze .caret{animation:none}
+html.freeze .edge.go,html.freeze .pulse.go{animation:none}
+@media (prefers-reduced-motion: reduce){ .item,.main,.care,.half,.gcard{transition:none!important} .item.f::after,.gcard.f .bar i{animation:none;transform:scaleX(1);opacity:.5} .edge.go,.pulse.go{animation:none} .caret{animation:none} }
+/* ======== v3 additions ======== */
+.tile{padding:24px 24px 26px}
+.tile b{font-size:38px}
+.tile small{font-size:18px}
+.tile .ic svg{width:52px;height:52px}
+.srows{grid-template-rows:repeat(8,1fr)}
+.srow{font-size:24px}
+html.manual .item.f::after,html.manual .gcard.f .bar{display:none}
+/* contacts */
+.ct{height:100%;display:grid;grid-template-columns:500px 1fr;gap:20px;min-height:0}
+.clist{display:flex;flex-direction:column;gap:8px;min-height:0;transition:opacity .2s}
+.clist.sleep{opacity:.42}
+.crow{height:88px;flex:none;display:flex;align-items:center;gap:16px;padding:0 22px}
+.crow.sel{border-color:var(--focus)}
+.av{position:relative;width:56px;height:56px;border-radius:50%;background:hsl(var(--h,24) 42% 48%);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;flex:none}
+.av.on::after{content:'';position:absolute;right:-1px;bottom:-1px;width:16px;height:16px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--panel)}
+.av.self{background:var(--ok)}
+.cinfo{min-width:0;flex:1}
+.cname{font-size:28px;font-weight:800;line-height:1.15;display:flex;gap:10px;align-items:baseline}
+.cname small{font-size:17px;font-weight:500;color:var(--muted)}
+.csub{font-size:17px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+.badge{min-width:36px;height:36px;border-radius:18px;background:var(--focus);color:var(--bg);font:800 18px var(--page-latin);display:flex;align-items:center;justify-content:center;padding:0 10px;flex:none}
+.navrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;height:88px;flex:none;margin-top:auto}
+.navrow .item{display:flex;align-items:center;justify-content:center;gap:10px;font-size:22px}
+.navrow svg{width:24px;height:24px}
+.cside{background:var(--mag);border:2px solid var(--line);border-radius:20px;padding:26px 30px;display:flex;flex-direction:column;gap:14px;min-height:0;min-width:0;overflow:hidden}
+.chead{display:flex;align-items:center;gap:20px;flex:none}
+.chead .av{width:84px;height:84px;font-size:36px}
+.chead b{font-size:48px;font-weight:900;display:block;line-height:1.1}
+.chead span{font-size:20px;color:var(--muted)}
+.msgs{display:flex;flex-direction:column;gap:10px;flex:1;justify-content:flex-end;min-height:0;overflow:hidden}
+.bub{max-width:82%;padding:11px 18px;border-radius:18px;font-size:23px;line-height:1.45;background:var(--panel);border:1px solid var(--line);align-self:flex-start;flex:none}
+.bub.me{align-self:flex-end;background:linear-gradient(var(--focus-tint),var(--focus-tint)),var(--panel)}
+.bub .meta{display:block;font:500 14px var(--page-latin);color:var(--muted);margin-top:3px}
+.bub.me .meta{text-align:right}
+.chint{font-size:20px;color:var(--muted);flex:none;margin:0}
+.cempty{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px}
+.cempty b{font-size:40px;font-weight:900}
+.cempty p{font-size:24px;color:var(--muted);margin:0;line-height:1.55}
+.acards{display:grid;grid-template-columns:1fr 1fr;gap:16px;height:190px;flex:none}
+.acard{border-radius:20px;padding:22px 24px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
+.acard .ic{margin-bottom:auto;color:var(--muted);display:flex}
+.acard.f .ic{color:var(--focus)}
+.acard svg{width:46px;height:46px;stroke-width:1.75}
+.acard b{font-size:38px;font-weight:900}
+.acard small{font-size:19px;color:var(--muted)}
+.aback{height:68px;flex:none;display:flex;align-items:center;justify-content:center;font-size:22px}
+/* chat */
+.chatwrap{height:100%;display:grid;grid-template-columns:300px 1fr;gap:16px;min-height:0}
+.hist{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden}
+.hist h4{margin:0;font-size:24px;font-weight:900;display:flex;align-items:center;gap:10px;flex:none}
+.hist h4 small{font-size:15px;font-weight:500;color:var(--muted)}
+.hist .bub{font-size:19px;max-width:92%;padding:9px 14px}
+.comm.chat .main{grid-template-columns:200px 1fr 200px}
+.comm.chat.narrow .main{grid-template-columns:110px 1fr 110px}
+.comm.chat .blk{font-size:30px;letter-spacing:.1em}
+.comm.chat.narrow .blk{font-size:18px}
+.to{flex:none;font-size:17px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.blk.fn.send{color:var(--focus);border-color:var(--focus)}
+/* invite */
+.inv{height:100%;display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center;padding-top:4px}
+.inv h2{margin:0;font-size:40px;font-weight:900}
+.inv p{margin:0;font-size:22px;color:var(--muted)}
+.code{display:flex;gap:14px;margin:6px 0}
+.code span{width:104px;height:128px;border-radius:18px;border:2px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;font:800 76px var(--page-latin);color:var(--focus)}
+.code i{width:18px}
+.touchbtn{font:500 17px var(--page-cjk);border:1px dashed var(--muted);background:transparent;color:var(--muted);border-radius:10px;padding:8px 16px;cursor:pointer}
+.invrow{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:760px;height:100px;margin-top:auto}
+.invrow .item{display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700}
+/* assistant */
+.as{height:100%;display:grid;grid-template-columns:1fr 330px;gap:20px;min-height:0}
+.asmain{display:grid;grid-template-rows:1fr 72px 92px;gap:12px;min-height:0;min-width:0}
+.ashist{background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:16px 20px;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;min-height:0;overflow:hidden}
+.ashist .bub{font-size:24px}
+.who{display:block;font-size:14px;color:var(--muted);margin-bottom:2px}
+.bub.typing{color:var(--muted)}
+.bub.cf{max-width:100%;width:100%;border:2px solid var(--focus);background:var(--panel-2)}
+.cf .q{font-size:22px;font-weight:700;margin-bottom:10px}
+.cfopts{display:grid;gap:12px;height:84px}
+.cfopts .item{display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;text-align:center;padding:0 10px}
+.cf .tip{font-size:15px;color:var(--muted);margin-top:10px}
+.asdraft{background:var(--panel);border:2px solid var(--line);border-radius:16px;display:flex;align-items:center;gap:16px;padding:0 22px;min-width:0}
+.asdraft .lab{font-size:16px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 12px;flex:none}
+.asdraft .tx{font-size:30px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.asdraft .tx.ph{font-size:22px;color:var(--dim)}
+.asbar{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;transition:opacity .2s}
+.asbar .item{display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
+.asbar .item.off{opacity:.32;cursor:default}
+.asbar.dim{opacity:.45}
+.ashome{background:var(--mag);border:2px solid var(--line);border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.ashome h4{margin:0;font-size:22px;font-weight:800}
+.ashome .s{font-size:15px;color:var(--muted);margin-bottom:6px}
+.hrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 14px;border-radius:12px;border:2px solid transparent;font-size:21px;transition:background-color .2s,border-color .2s}
+.hrow b{font:700 20px var(--page-latin);text-align:right}
+.hrow.chg{border-color:var(--focus);background:linear-gradient(var(--focus-tint),var(--focus-tint)),var(--panel)}
+.hrow .old{color:var(--muted);text-decoration:line-through;margin-right:8px;font-weight:500}
+.hrow .new{color:var(--focus)}
+.hrow.done{border-color:var(--ok);background:var(--ok-tint)}
+.prevnote{font-size:16px;color:var(--focus);font-weight:700;min-height:22px;margin-top:auto}
+/* music */
+.mu{height:100%;display:grid;grid-template-rows:1fr 100px;gap:16px;min-height:0}
+.mutop{display:grid;grid-template-columns:360px 1fr;gap:44px;align-items:center;min-height:0;padding:0 20px}
+.disc{width:340px;height:340px;border-radius:50%;background:radial-gradient(circle,#2a241f 0 16%,hsl(var(--h) 45% 46%) 16.5% 18%,#1d1916 18.5% 100%);position:relative}
+.disc::before{content:'';position:absolute;inset:14%;border-radius:50%;border:1px solid rgba(255,255,255,.08);box-shadow:0 0 0 18px rgba(255,255,255,.025),0 0 0 36px rgba(255,255,255,.02)}
+.disc i{position:absolute;inset:34%;border-radius:50%;background:linear-gradient(155deg,hsl(var(--h) 50% 58%),hsl(var(--h) 48% 32%))}
+.disc.on{animation:spin 9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.muinfo b{display:block;font-size:56px;font-weight:900;line-height:1.1}
+.muinfo .ar{font-size:24px;color:var(--muted);margin-top:6px}
+.mustate{font-size:20px;color:var(--focus);margin-top:18px;font-weight:700}
+.prog{height:8px;border-radius:4px;background:var(--line);margin-top:14px;overflow:hidden}
+.prog i{display:block;height:100%;background:var(--focus)}
+.ptime{display:flex;justify-content:space-between;font:500 16px var(--page-latin);color:var(--muted);margin-top:6px}
+.upnext{margin-top:22px;font-size:19px;color:var(--muted);line-height:1.7}
+.upnext b{font-size:15px;font-weight:500;display:block}
+.murow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.murow .item{display:flex;align-items:center;justify-content:center;gap:12px;font-size:26px;font-weight:700}
+.murow svg{width:28px;height:28px}
+/* video: always dark, it is a video surface */
+.vd{height:100%;border-radius:18px;background:#0E1114;position:relative;overflow:hidden;color:#F2EEE8}
+.vd .remote{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding-bottom:110px}
+.vd .remote .av{width:150px;height:150px;font-size:64px}
+.vd .remote b{font-size:44px;font-weight:900}
+.vd .remote span{font:500 26px var(--page-latin);color:#B9B2A8}
+.vd .remote.live{background:radial-gradient(90% 80% at 50% 35%,hsl(var(--h) 30% 28%),#0E1114)}
+.vd .tag{position:absolute;top:18px;left:22px;font-size:18px;color:#B9B2A8}
+.vd .local{position:absolute;top:18px;right:20px;width:230px;height:144px;border-radius:14px;background:#252B31;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:18px;color:#B9B2A8}
+.vrow{position:absolute;left:22px;right:22px;bottom:20px;height:92px;display:grid;gap:14px}
+.vrow.one{left:32%;right:32%}
+.vd .item{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.16);color:#F2EEE8;box-shadow:none;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
+.vd .item.f{background:rgba(255,255,255,.15);border-color:var(--focus)}
+.vd .item.hang{color:#FF8A7E}
+.vd .item.accept{color:#5EE0A0}
+.care .sbtn{font:500 15px var(--page-cjk);border:1px solid var(--care-line);background:transparent;color:var(--care-text);border-radius:8px;padding:6px 12px;cursor:pointer}
+.flow{counter-reset:f;padding-left:0;list-style:none}
+.flow li{position:relative;padding-left:34px;margin:6px 0}
+.flow li::before{counter-increment:f;content:counter(f);position:absolute;left:0;top:3px;width:22px;height:22px;border-radius:50%;background:var(--focus);color:var(--bg);font:700 13px var(--page-latin);display:flex;align-items:center;justify-content:center}
+
+</style>
+<main>
+<section id="proto">
+  <div id="stageWrap">
+    <div id="device">
+      <div class="statusbar">
+        <div class="crumb" id="crumb">主页</div>
+        <div class="sright">
+          <span class="pill"><span class="dot"></span>耳机已连接</span>
+          <span class="pill">L 86% · R 82%</span>
+          <span class="pill" id="pillSpeed">每项 1.5 s</span>
+          <span class="pill" id="pillMode">日间</span>
+          <button class="care-btn" id="careBtn" title="仅照护者触摸；实机为长按 2 秒">照护</button>
+        </div>
+      </div>
+      <div class="view" id="view"></div>
+      <div id="overlay"></div>
+      <div class="actionbar">
+        <div class="slot l" id="slotL"><div class="g">◀</div><div class="t"><small>左看</small><span id="lblL"></span></div></div>
+        <div class="slot m" id="slotB"><div class="ready" id="ready"><i></i><i></i><i></i></div><div class="readytxt" id="readyTxt">就绪</div><div class="t"><small>咬牙</small><span id="lblB"></span></div></div>
+        <div class="slot r" id="slotR"><div class="t"><small>右看</small><span id="lblR"></span></div><div class="g">▶</div></div>
+      </div>
+      <div class="edge l" id="edgeL"></div><div class="edge r" id="edgeR"></div><div class="pulse" id="pulse"></div>
+      <div class="toast" id="toast"></div>
+      <aside class="care" id="care">
+        <h3>照护面板 <button id="careClose">关闭</button></h3>
+        <div class="ban">面板打开期间，患者的耳机指令暂停，扫描停止。关闭后恢复。</div>
+        <div class="row"><span>耳机控制（真实识别结果驱动界面）</span><button class="sw on" id="swHead"></button></div>
+        <div class="row"><span>提示音（识别到动作时）</span><button class="sw on" id="swSound"></button></div>
+        <div class="row"><span>悬浮波形窗口</span><button class="sw" id="swWave"></button></div>
+        <div class="row"><span>设备</span><b>Naoyun Pods BLE · 已连接</b></div>
+        <div class="row"><span>电量 / 佩戴</span><b>L 86% R 82% · 佩戴正常</b></div>
+        <div class="row"><span>模型</span><b>个性化 CSANet 四分类</b></div>
+        <div class="row"><span>沟通服务</span><b>smu-brain.online · 已绑定</b></div>
+        <div class="row"><span>生活助手服务</span><b>localhost:8765 <button class="sbtn" id="btnAsstTest">测试连接</button></b></div>
+        <div class="row"><span>模拟：还没有绑定家属</span><button class="sw" id="swNoC"></button></div>
+        <div class="row"><span>模拟：妈妈发起视频来电</span><button class="sbtn" id="btnInc">来电</button></div>
+        <canvas id="wave" width="856" height="300"></canvas>
+        <div><b style="font-size:15px">最近识别到的动作</b><div class="log" id="log">暂无</div></div>
+        <button class="lnk" onclick="toast('进入原「设备与模型」页：采集、服务器、用户、训练记录')">进入设备与模型（采集 · 训练 · 用户）</button>
+      </aside>
+    </div>
+  </div>
+  <div class="sim">
+    <div class="sim-pad"><button data-s="L">◀ 左看 <kbd>←</kbd></button><button data-s="B">咬牙 <kbd>空格</kbd></button><button data-s="R">右看 ▶ <kbd>→</kbd></button></div>
+    <div class="sim-grp">跳转 <button data-go="home">主页</button><button data-go="contacts">沟通</button><button data-go="asst">生活助手</button><button data-go="ent">娱乐</button><button data-go="settings">设置</button></div>
+    <div class="sim-grp">模拟 <button id="simInc">妈妈来电</button></div>
+    <div class="sim-grp">模式 <button data-md="auto">自动</button><button data-md="light" class="on">日间</button><button data-md="dark">夜间</button></div>
+    <label>每项停留 <input type="range" id="spd" min="1100" max="3000" step="100" value="1500"> <span id="spdv">1.5 s</span></label>
+    <label><input type="checkbox" id="optLock" checked> 模拟识别锁定</label>
+    <label><input type="checkbox" id="optGrace" checked> 延迟补偿 400 ms</label>
+    <label><input type="checkbox" id="optSound" checked> 提示音</label>
+  </div>
+  <p style="color:var(--muted);font-size:14px;margin-top:12px">沟通：主页 → 沟通 → 妈妈 → 文字消息，打字后选右侧「发送」，约 3 秒后妈妈回复；或选「视频通话」，挂断后回到妈妈。生活助手：主页 → 生活助手 → 输入 → 右侧「常用语」选「我热」→ 发送，右侧模拟家居会预览变化；「看央视新闻」会打开电视，返回时回到助手。任何页面都可以点「妈妈来电」，接听或拒绝后回到原来的页面和焦点。</p>
+</section>
+
+<section id="spec" hidden>
+<div class="spec">
+  <h2>v3：对照最新源码补齐了两条流程，视觉和交互规则不变</h2>
+  <p class="lead">源码 e14c3f3 把「实时沟通」改成了联系人 → 通讯方式 → 文字或视频，还新增了「生活助手」和「扫描方式」设置。v3 原型把这些都接进来，继续使用珊瑚配色、底部动作栏、确认框“取消先亮”等 v2 已定规则。下方的 v2 说明仍然有效。</p>
+
+  <h2>对照源码：哪些入口、页面补齐了</h2>
+  <table>
+    <tr><th style="width:18%">位置</th><th style="width:38%">源码 e14c3f3 的现状</th><th>v3 预览的处理</th></tr>
+    <tr><td><b>首页</b></td><td>设置、实时沟通、娱乐、生活助手 4 个可扫描入口，外加只能触摸的「耳机设置」</td><td>沟通、生活助手、娱乐、设置、<span class="k">呼叫护士</span>，共 5 张卡，焦点卡变宽。耳机设置继续放在照护面板。</td></tr>
+    <tr><td><b>联系人列表</b></td><td>左栏联系人加底部「返回主页」，左右看逐个移动（不自动扫描）；「+」生成邀请码</td><td>改为统一扫描。列表第一项是<span class="k">当面说话</span>，保留 v2 的「说出」（朗读加全屏）；末行是「邀请家属」和「返回主页」。有未读消息时，进入后焦点停在第一个有未读的联系人。右侧预览最近 3 条消息。</td></tr>
+    <tr><td><b>通讯方式</b></td><td>「返回 / 输入法 / 视频通话」自动循环</td><td>「文字消息 / 视频通话」两张大卡，下面是「返回联系人」。焦点先停在文字消息，返回在最后。</td></tr>
+    <tr><td><b>文字消息</b></td><td>上方是消息记录，下方是 T9；一级块之后依次是「返回 / 发送 / 删除」</td><td>左侧一栏消息记录，右侧是 v2 的输入界面。字母块：左侧 ABC–JKL、删除、返回；右侧 MNO–WXYZ、<span class="k">发送</span>、常用语。预测层末尾也有「发送」，写完一个词不用回到字母块就能发。发出后显示“发送中… → 已送达”。</td></tr>
+    <tr><td><b>视频通话</b></td><td>呼叫中：取消呼叫。来电：接听 / 拒绝。通话中：静音 / 关闭摄像头 / 切换摄像头 / 挂断，挂断需要再确认</td><td>动作全部保留，改用统一扫描样式。视频画面始终是深色。挂断用 v2 的确认框（继续通话先亮）。</td></tr>
+    <tr><td><b>邀请码</b></td><td>「+」进入，显示邀请码、复制按钮和返回</td><td>大号 6 位码（分两组），显示有效期；「复制」只给照护者触摸；可扫描的只有「返回联系人」和「换一个邀请码」。</td></tr>
+    <tr><td><b>生活助手</b></td><td>底部是「输入 / 清空输入内容 / 发送 / 退出」；输入法「完成」把文字放回草稿；家居确认显示在气泡里；音乐和电视返回助手；连接设置在页面右上角</td><td>底部四项保留，不可用的项变灰，扫描时跳过。输入法右侧直接有「发送」，写完不用先回草稿；「返回」把文字留在草稿里。家居确认里「取消」先亮，右侧「模拟家居」实时预览会改变什么。连接设置移到照护面板。</td></tr>
+    <tr><td><b>设置</b></td><td>新增「页面导航扫描模式：手动 / 自动」，默认手动</td><td>新增「扫描方式」一项。手动模式下光标不自己移动，左看上一项、右看下一项，动作栏同步改写；沟通的字母块始终自动扫描。预览默认自动（见文末待定）。</td></tr>
+    <tr><td><b>娱乐</b></td><td>8 个模块加返回</td><td>不变。音乐卡现在会进入音乐页；从任何子页面返回时，焦点停在刚才那张卡上。</td></tr>
+  </table>
+
+  <h2>流程一：实时沟通</h2>
+  <ol class="flow">
+    <li>主页「沟通」→ 联系人列表（焦点停在第一个有未读的人，没有未读时停在「当面说话」）。</li>
+    <li>选家属 → 通讯方式：「文字消息」或「视频通话」。</li>
+    <li><b>文字消息</b>：用字母块、拼音、字或常用语写好，选右侧「发送」（或预测层末尾的「发送」）→ 消息进入记录，显示“发送中… → 已送达”，对方在线时约 3 秒后回复。</li>
+    <li><b>视频通话</b>：显示“正在呼叫…”→ 接通后计时 → 「挂断」需要确认 → 回到通讯方式，焦点在「视频通话」。对方离线时显示“无人接听”，然后返回。</li>
+    <li><b>当面说话</b>：写好后选「说出」→ 朗读并全屏显示 →「返回修改 / 再说一遍 / 清空」（清空要确认）。</li>
+    <li><b>邀请家属</b>：显示邀请码 →「返回联系人」，焦点回到「邀请家属」。</li>
+    <li><b>来电</b>：任何页面都可能弹出 →「接听 / 拒绝」→ 结束后回到被打断的页面，焦点和没写完的文字都保留。</li>
+  </ol>
+
+  <h2>流程二：生活助手</h2>
+  <ol class="flow">
+    <li>主页「生活助手」→ 对话记录、草稿、底部四项、右侧模拟家居。</li>
+    <li>「输入」→ 输入界面（顶部标明“问助手”，常用语换成助手指令）→ 选「发送」直接提交；选「返回」时文字留在草稿里，焦点停在底部「发送」。</li>
+    <li>发出后显示“正在回复…”，底部暂停操作，不会误触「退出」。</li>
+    <li><b>问答</b>：回复进入对话，焦点回到「输入」。</li>
+    <li><b>点播</b>：“看央视新闻”打开电视并切到 CCTV-13；“播放《演员》”打开音乐。电视菜单和音乐页的返回项写作「返回助手」，回来后焦点在「输入」。</li>
+    <li><b>家居操作</b>：回复里出现「取消 + 候选操作」，取消先亮且第一次多停 1.5 倍时间；焦点移到某个候选时，右侧对应设备显示“旧值 → 新值”。确认后设备行闪绿，三轮都不选按取消处理。</li>
+    <li><b>需要补充</b>：比如“看体育台”有两个台，助手追问时保留原草稿，选「继续输入」接着补充。</li>
+  </ol>
+
+  <h2>切页与返回后的焦点</h2>
+  <table>
+    <tr><th style="width:34%">从哪里返回</th><th>回到哪里、焦点在哪</th></tr>
+    <tr><td>任一模块 → 主页</td><td>主页，焦点在刚才那个模块的卡片上</td></tr>
+    <tr><td>通讯方式「返回联系人」</td><td>联系人列表，焦点在同一个联系人</td></tr>
+    <tr><td>文字消息「返回」</td><td>通讯方式，焦点在「文字消息」；没发的文字按联系人保留</td></tr>
+    <tr><td>当面说话「返回」</td><td>联系人列表，焦点在「当面说话」；文字保留</td></tr>
+    <tr><td>视频挂断 / 取消 / 无人接听</td><td>通讯方式，焦点在「视频通话」</td></tr>
+    <tr><td>来电接听后挂断，或拒绝 / 未接</td><td>被打断的页面，焦点、弹层和输入状态原样恢复</td></tr>
+    <tr><td>邀请码「返回联系人」</td><td>联系人列表，焦点在「邀请家属」</td></tr>
+    <tr><td>助手输入「返回」</td><td>助手页，草稿非空时焦点在「发送」，否则在「输入」</td></tr>
+    <tr><td>助手打开的电视 / 音乐返回</td><td>助手页，焦点在「输入」，能看到刚才的回复</td></tr>
+    <tr><td>娱乐打开的游戏 / 电视 / 音乐返回</td><td>娱乐画廊，刚才那张卡在中间</td></tr>
+    <tr><td>任何弹层关闭</td><td>底层页面焦点不变</td></tr>
+  </table>
+  <p>每次切页或换层时，扫描方向重置为向右，延迟补偿清零，未投递的识别结果作废（沿用 v2 规则）。</p>
+
+  <h2>哪些是模拟的</h2>
+  <table>
+    <tr><th style="width:26%">内容</th><th>原型里怎么模拟</th><th style="width:30%">正式版来源</th></tr>
+    <tr><td>联系人与消息</td><td>5 个写死的联系人；对方在线时按固定句子在约 3 秒后回复；“发送中”0.7 秒后变“已送达”</td><td>沟通服务器 HTTP + WebSocket，本地待发缓存</td></tr>
+    <tr><td>视频通话</td><td>没有真实画面；在线联系人 2.5 秒后接通，离线 6 秒后“无人接听”；来电由照护面板或下方按钮触发，20 秒未接自动结束</td><td>VideoSession / LiveKit</td></tr>
+    <tr><td>邀请码</td><td>本地随机生成 6 位，不校验</td><td>服务器按当前患者 profile 生成</td></tr>
+    <tr><td>生活助手回复</td><td>按关键词匹配固定回复（新闻、演员、我热、开灯、窗帘、一分钟后关机、体育、天空…），其余返回“模拟回复”</td><td>电脑端助手服务（DeepSeek）</td></tr>
+    <tr><td>模拟家居</td><td>在页面里改状态；“一分钟后关机”真的倒计时 60 秒</td><td>源码里的 SimulatedHome，本来就是模拟</td></tr>
+    <tr><td>电视、音乐</td><td>频道名和曲目信息，没有真实播放</td><td>现有电视页、本地音乐库</td></tr>
+    <tr><td>词库与预测</td><td>小词库</td><td>现有输入引擎</td></tr>
+    <tr><td>无联系人状态</td><td>照护面板开关</td><td>没有绑定家属时的真实状态</td></tr>
+  </table>
+
+  <h2>已定决策（2026-11-23）</h2>
+  <table>
+    <tr><th style="width:34%">问题</th><th>结论</th></tr>
+    <tr><td>扫描方式默认值</td><td><b>默认自动</b>。手动作为设置里的可选项（左看上一项、右看下一项）。</td></tr>
+    <tr><td>T9 候选阶段“同向看跳过一项”</td><td><b>不保留</b>。左右看只改方向、不跳项，和全应用一致；想逐项移动的用户切到手动扫描。</td></tr>
+    <tr><td>来电时哪项先亮</td><td><b>「接听」先亮</b>，是“取消先亮”唯一的例外，理由是漏接比误接代价大。</td></tr>
+    <tr><td>「当面说话」入口</td><td>放在联系人列表第一位，首页不单独设入口。</td></tr>
+    <tr><td>助手输入法</td><td>右侧直接「发送」；「返回」把文字留在草稿里。</td></tr>
+  </table>
+
+  <h2>以下为 v2 设计说明（仍然有效）</h2>
+
+  <h2>先说结论：一种动作语法、一条动作栏、反馈出现在视线所在处</h2>
+  <p class="lead">现有版本功能完整，但同一个动作在不同页面含义不同（字母块页左看＝选中，其余页面左看＝改方向）；界面也没告诉患者此刻每个动作会做什么、刚才的动作有没有被识别、现在能不能做下一个。识别有约 1 秒窗口，命令后要连续 Rest 才解锁，扫描光标却不等人。重构就是把这三件事做进界面。</p>
+
+  <h2>v2 改了什么</h2>
+  <table>
+    <tr><th style="width:24%">反馈</th><th>处理</th></tr>
+    <tr><td><b>配色不好看</b></td><td>去掉石墨底 + 琥珀。改为暖中性底色（日间瓷白、夜间墨蓝黑）+ 一种焦点色，曾提供钴蓝 / 紫藤 / 珊瑚三套，<span class="k">已定为珊瑚</span>。焦点改为“外圈描边 + 很淡的底色”，不再整块染色。</td></tr>
+    <tr><td><b>日间 / 夜间</b></td><td>每套配色都有两版。设置里新增「显示模式：自动 / 日间 / 夜间」，自动为 7:00–19:00 日间。照护面板始终用反色，和患者界面区分开。</td></tr>
+    <tr><td><b>娱乐改画廊</b></td><td>中间一张大卡是当前项，整排随扫描左右滑动；扫描方向上的下一张卡标“下一个”并放大一档。下方一排名称条显示整体位置。卡片以图片为背景，现在先用线稿占位。</td></tr>
+  </table>
+
+  <h2>我们在为谁设计</h2>
+  <table>
+    <tr><th style="width:24%">事实（来自项目）</th><th>对交互的含义</th></tr>
+    <tr><td><b>只有左看、右看、咬牙</b></td><td>每页最多 3 种即时意图，靠“扫描 + 确认”扩展。三种动作的含义必须全应用一致。</td></tr>
+    <tr><td><b>1 秒窗口、100 ms 步长、3/5 投票</b>，命令后需 3 个合格 Rest 窗才解锁</td><td>做动作到生效有延迟，光标可能已经换项；连做两次，第二次会被吞。界面要显示“放松 → 就绪”，并补偿延迟。</td></tr>
+    <tr><td><b>评分里误触和漏判扣分最重</b></td><td>误触一定会发生：破坏性操作要确认且默认取消，删除随时可达，呼叫可撤销，误入的页面一步可退。</td></tr>
+    <tr><td><b>横屏 Pad 2560×1600</b>，床旁支架，照护者在旁</td><td>远距离、卧位、易疲劳：字大、对比高、焦点只用一种颜色；配置与诊断交给照护者。</td></tr>
+  </table>
+
+  <h2>六条原则</h2>
+  <div class="principles">
+    <div><b>1. 咬牙永远是“就是它”</b>任何页面、任何弹层，咬牙只执行当前高亮项（游戏直接控制除外，动作栏写明）。</div>
+    <div><b>2. 左右看永远是空间方向</b>朝哪边看，事情就往哪边发生：选左侧的块、切到右侧、扫描改向左、二选一选右边。</div>
+    <div><b>3. 动作栏把规则写在屏幕上</b>底部三格与三个动作的位置一一对应，实时写出此刻的含义。</div>
+    <div><b>4. 反馈出现在视线所在处</b>左看左边缘亮，右看右边缘亮，咬牙中心出现脉冲环，动作栏对应格同时闪一下。</div>
+    <div><b>5. 为延迟和误触设计</b>停留进度条；换项后 400 ms 内到达的命令按上一项执行；改方向后当前项重新计时；放松三点 0/3 → 3/3 才可再做动作。</div>
+    <div><b>6. 只有一种“等待”</b>除了游戏直接控制，凡是有选项的地方，高亮都会自己移动，患者只需等目标亮起再咬牙。确认框也不例外，不再有“需要先左右看选、再咬牙”的特殊页面。</div>
+  </div>
+
+  <h2>全局交互语法</h2>
+  <table>
+    <tr><th>模式</th><th>左看</th><th>咬牙</th><th>右看</th><th>自动变化</th><th>用于</th></tr>
+    <tr><td><b>扫描列表</b></td><td>方向改为向左/向前</td><td>执行高亮项</td><td>方向改为向右/向后</td><td>按停留时间移动，改向后重新计时</td><td>主页、设置、拼音、汉字、预测词、常用语、菜单弹层</td></tr>
+    <tr><td><b>画廊</b></td><td>方向改为向左，“下一个”换到左边</td><td>进入中间那张</td><td>方向改为向右</td><td>整排滑动，当前项永远在中间</td><td>仅娱乐页（音乐歌单、电视频道保持列表）</td></tr>
+    <tr><td><b>双翼字母块</b></td><td>正扫左侧时选中高亮块；否则切到左侧</td><td>有字母块 → 去选拼音；无 → 常用语</td><td>同理，右侧</td><td>当前侧从上到下循环</td><td>沟通第一层</td></tr>
+    <tr><td><b>确认（两项扫描）</b></td><td colspan="1">当前项重新计时</td><td>执行高亮项</td><td>当前项重新计时</td><td>和普通列表一样自动轮流；「取消」先亮且停 1.5 倍；三轮不选按取消处理</td><td>清空、离开对局、删除音乐、电视菜单</td></tr>
+    <tr><td><b>直接控制</b></td><td colspan="3">游戏/频道定义，动作栏写明</td><td>由游戏决定</td><td>迷宫、贪吃蛇、电视观看</td></tr>
+    <tr><td><b>呼叫倒计时</b></td><td>取消呼叫</td><td>立即呼叫</td><td>立即呼叫</td><td>5 秒后自动呼叫</td><td>呼叫护士：选中已是确认，倒计时只用来撤销误触</td></tr>
+    <tr><td><b>照护面板</b></td><td colspan="3">不接收耳机指令，只能触摸</td><td>扫描暂停</td><td>耳机开关、设备、信号、模型、指令日志</td></tr>
+  </table>
+
+  <h2>娱乐画廊规格</h2>
+  <table>
+    <tr><th style="width:24%">项</th><th>规格（1280×800 逻辑 dp）</th></tr>
+    <tr><td><b>布局</b></td><td>中心卡 700×438（16:10，约占画廊宽度 55%），圆角 26；左右邻卡按 0.50 缩放，扫描方向上的“下一个”按 0.60 缩放，与中心卡间距 32，只露出靠近中心的一部分。更远的卡隐藏，画廊两端 60 dp 渐隐。下方名称条显示全部 9 项：当前项实心焦点色，下一个焦点色描边。</td></tr>
+    <tr><td><b>顺序</b></td><td>环形：返回主页 → 迷宫 → 贪吃蛇 → 魔法师 → 象棋 → 斗地主 → 麻将 → 电视 → 音乐 → 返回主页。进入时停在“迷宫”，“返回主页”在它左边，反向一步即到。</td></tr>
+    <tr><td><b>动效</b></td><td>换项时整排平移 500 ms，cubic-bezier(.2,.75,.2,1)；扫描间隔最短 1.1 秒，动画不会叠加。环形回绕的那张卡瞬移，不横穿屏幕。减少动画时直接切换。</td></tr>
+    <tr><td><b>焦点</b></td><td>中心卡：5 dp 底色间隙 + 5 dp 焦点色外圈，卡内底部白色停留进度条。下一个：焦点色淡外圈 +「下一个 ▶」胶囊，放在下一张卡靠近中心卡的一侧；中心卡与下一个之间放一个 72 dp 焦点色圆形箭头，从当前指向下一个。箭头方向与动作栏「当前方向」一致。</td></tr>
+    <tr><td><b>卡片文字</b></td><td>标题 54 / 900，说明 24，白色，压在底部暗色渐变上，日夜两版共用同一张图。</td></tr>
+  </table>
+  <h3>图片要求（交给美术）</h3>
+  <ul>
+    <li>尺寸 1600×1000（16:10），WebP，单张 ≤ 300 KB；建议放 <code>assets/entertainment/{id}.webp</code>，id 为 maze、snake、wizard、chess、doudizhu、mahjong、tv、music。</li>
+    <li>主体放在画面上方 60%；下方 40% 会被暗色渐变覆盖，用来放标题。</li>
+    <li>图里不放文字；中等亮度，避免大面积纯白，否则夜间刺眼。</li>
+    <li>没有图片或加载失败时，回退为该项的色块 + 线稿（就是现在原型里的样子）。</li>
+  </ul>
+
+  <h2>信息架构</h2>
+  <table>
+    <tr><th style="width:22%">页面</th><th>内容与变化</th></tr>
+    <tr><td><b>主页</b></td><td>大时钟与日期 + 四个入口，卡片统一为左上图标、左下标题与说明。四张卡默认等宽，<span class="k">光标所在的卡变宽</span>（1.6 : 1），300 ms 过渡：<span class="k">沟通</span>（默认焦点）、娱乐、设置、<span class="k">呼叫护士</span>。波形、设备列表、“设备与模型”移入照护面板。</td></tr>
+    <tr><td><b>沟通</b></td><td>顶部输出句子与正在组合的字母块 → 拼音；两翼字母块；中间上方<span class="k">放大镜</span>永远放大光标所在的东西，中间下方候选区，选了字母块后可能的拼音以 58 号大字显示。离开字母块层时两翼收窄变暗。左侧底部「删除」「退出」，右侧底部「说出」（朗读 + 全屏）「常用语」。退出不需要确认，没说完的话会保留，下次进来接着写。</td></tr>
+    <tr><td>常用语</td><td>紧急语（叫医生、我疼、需要吸痰）固定在最前并带红点，不参与频率重排；「返回打字」在最前，「回主页」在最后。</td></tr>
+    <tr><td><b>娱乐</b></td><td>画廊，见上。</td></tr>
+    <tr><td><b>设置</b></td><td>左侧大行列表：返回、音量、亮度、每项停留、<span class="k">显示模式</span>、模拟悬浮球、速度练习；右侧放大当前项数值与说明。数值调节统一为「减小 / 增大 / 完成」弹层。</td></tr>
+    <tr><td><b>照护面板</b></td><td>状态栏右上「照护」，实机长按 2 秒打开。合并医护开关、设备、波形、设备与模型入口，新增最近识别动作日志。</td></tr>
+  </table>
+
+  <h2>视觉规范</h2>
+  <h3>配色：已定珊瑚（日夜两版）；另两套仅作对比保留</h3>
+  <p>每套只用一种焦点色，全应用只表示“光标在这里”。绿色只表示已确认/就绪，红色只用于呼叫和紧急语。底色不用纯白和纯黑：日间暖瓷白减轻反光，夜间墨蓝黑配暖白文字，压低眩光。</p>
+  <div class="pal-grid" id="palGrid"></div>
+  <table>
+    <tr><th>Token</th><th>用途</th><th>Token</th><th>用途</th></tr>
+    <tr><td>bg / panel / panel-2</td><td>页面底 / 卡片 / 焦点卡底</td><td>focus / focus-tint / focus-ring</td><td>焦点描边 / 焦点卡底色 8–12% / 外圈 20–28%</td></tr>
+    <tr><td>line</td><td>边框与分隔</td><td>ok / alarm</td><td>已确认 / 警报</td></tr>
+    <tr><td>text / muted / dim</td><td>正文 / 次要 / 占位</td><td>care-*</td><td>照护面板，始终与当前模式反色</td></tr>
+  </table>
+  <p>文字对比：日间正文约 15:1，夜间约 14:1；焦点色对底色均 ≥ 4.5:1（珊瑚日间 3.9:1，只用于描边和大字，不用于小字）。</p><p><b>警报与焦点的区分</b>：珊瑚焦点和红色色相接近，所以不单靠颜色区分，而是靠形式区分。全应用只有「呼叫护士」是<span class="k">实心红底白字</span>，其余卡片都是白底或深底；呼叫倒计时是整屏红底。紧急常用语用红色描边、红字和左侧红条。警报红：日间 #C8102E，夜间 #E0243F；焦点珊瑚：日间 #D9502A，夜间 #FF8C5E。</p>
+  <h3>字号（dp）</h3>
+  <table>
+    <tr><th>用途</th><th>字号</th><th>用途</th><th>字号</th></tr>
+    <tr><td>放大镜字母 / 单字</td><td>92 / 118</td><td>输出句子</td><td>44</td></tr>
+    <tr><td>主页时钟</td><td>84</td><td>画廊卡标题</td><td>54</td></tr>
+    <tr><td>主页入口名</td><td>46</td><td>汉字候选</td><td>40</td></tr>
+    <tr><td>字母块</td><td>36（Archivo 700）</td><td>动作栏文案</td><td>25；说明文字下限 17</td></tr>
+  </table>
+  <h3>焦点与动效</h3>
+  <p>焦点：2 dp 焦点色描边 + 5 dp 外圈 + 8–12% 底色 + 放大 2.5%；底部 5 dp 停留进度条按扫描方向填充；右上角方向箭头。选中瞬间变绿 450 ms。换项 140 ms；边缘光与脉冲 450 ms；画廊平移 500 ms；切换日夜 300 ms 渐变。开启“减少动画”时取消缩放、脉冲和滑动。</p>
+
+  <h2>与现状的差异</h2>
+  <table>
+    <tr><th style="width:30%">项</th><th>处理</th></tr>
+    <tr><td>沟通第一层双翼扫描</td><td><span class="tagk keep">保留</span>每侧从 5 块变为 6 块：左侧 4 个字母块 + 删除 + 退出，右侧 4 个字母块 + 说出 + 常用语。字母块仍在最前，等到字母的时间不变；代价是每侧一轮多一步。</td></tr>
+    <tr><td>普通菜单左右看只改方向</td><td><span class="tagk keep">保留</span>新增改向后重新计时和方向标记。</td></tr>
+    <tr><td>确认框左右看选择、不自动变化</td><td><span class="tagk">修改</span>改为普通两项扫描，和其他页面同一套逻辑。安全靠三点保证：「取消」永远在左、先亮、首轮停 1.5 倍；三轮无操作自动取消；需要确认的都是可恢复的操作（离开对局、清空句子、删除音乐）。<b>这会修改现有《全局操作规范》中“确认窗口不自动改变决定”一条。</b></td></tr>
+    <tr><td>Aurora 毛玻璃紫色主题</td><td><span class="tagk">替换</span>三套实色主题 × 日夜两版。</td></tr>
+    <tr><td>娱乐 3×3 宫格</td><td><span class="tagk">替换</span>画廊，图片背景。</td></tr>
+    <tr><td>无动作含义提示、无识别反馈</td><td><span class="tagk new">新增</span>动作栏、边缘光、脉冲、放松/就绪三点。</td></tr>
+    <tr><td>扫描不等延迟</td><td><span class="tagk new">新增</span>停留进度条 + 400 ms 延迟补偿。</td></tr>
+    <tr><td>「完成」只归档清空</td><td><span class="tagk new">新增</span>「说出」：朗读 + 全屏。</td></tr>
+    <tr><td>无呼叫入口</td><td><span class="tagk new">新增</span>呼叫护士 + 5 秒可撤销倒计时。</td></tr>
+    <tr><td>主页波形、设备列表</td><td><span class="tagk">移走</span>进照护面板。</td></tr>
+  </table>
+
+  <h2>已定决策</h2>
+  <p>珊瑚配色；画廊只用于娱乐页；「说出」接系统朗读；呼叫护士只做本地警报（循环警报音）；照护面板长按 2 秒打开，主页不显示波形；确认框改为两项自动扫描。施工细节与数值见同目录 <code>IMPLEMENTATION_SPEC.md</code>。</p>
+
+</div>
+</section>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const HP=new URLSearchParams(location.hash.slice(1));
+const FREEZE=HP.has('freeze');
+let replaying=false;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* ---------- data ---------- */
+const T9={2:'abc',3:'def',4:'ghi',5:'jkl',6:'mno',7:'pqrs',8:'tuv',9:'wxyz'};
+const LBL={2:'ABC',3:'DEF',4:'GHI',5:'JKL',6:'MNO',7:'PQRS',8:'TUV',9:'WXYZ',DEL:'删除',BACK:'返回',SAY:'说出',SEND:'发送',PH:'常用语'};
+const DICT={a:'啊阿',ai:'爱哎矮',an:'安按暗',ba:'吧把八爸',bai:'白百拜',bang:'帮棒',bao:'包抱保报',bei:'被背杯北',bu:'不部补布步捕',cai:'才菜',chi:'吃迟',chu:'出处',cu:'粗醋促',da:'大打',dao:'到道',de:'的得',dian:'点电',dong:'动懂东',e:'饿',fan:'饭翻',gai:'该盖',gei:'给',hao:'好号',he:'喝和合',hen:'很',hui:'回会',jia:'家加',jiao:'叫脚',jiu:'就',kai:'开',kan:'看',ke:'可渴',le:'了',leng:'冷',ma:'吗妈',mei:'没',men:'们门',mi:'米',na:'那拿',ne:'呢',ni:'你',nin:'您',qing:'请',qu:'去',re:'热',shi:'是',shu:'舒书',shui:'水睡',ta:'他她',teng:'疼',tou:'头',wo:'我',xiang:'想',xie:'谢',yao:'要药',ye:'也',yi:'一',you:'有',zai:'在',zhe:'这'};
+const L2D={}; for(const d in T9) for(const c of T9[d]) L2D[c]=d;
+const sd=s=>[...s].map(c=>L2D[c]).join('');
+const combos=seq=>Object.keys(DICT).filter(s=>sd(s)===seq.join(''));
+const prefixSyl=seq=>Object.keys(DICT).filter(s=>sd(s).startsWith(seq.join('')));
+function previewChars(seq){const k=seq.join('');const keys=prefixSyl(seq);const ex=keys.filter(s=>sd(s)===k),rest=keys.filter(s=>sd(s)!==k);return [...new Set([...ex,...rest].flatMap(s=>[...DICT[s]]))].slice(0,16);}
+const NEXT={'我':['想','要','很','不','疼','饿了','冷'],'想':['喝水','吃饭','睡觉','回家','翻身','上厕所','看电视'],'你':['好','们','辛苦了','在吗','放心'],'不':['是','要','舒服','用了','疼了','想'],'喝':['水','点水','粥'],'好':['的','了','吗','多了','累'],'水':['太烫了','再来点','够了'],'疼':['得厉害','好多了','在这里'],'吃':['饭','药','水果','不下']};
+const predict=c=>(NEXT[c]||['的','了','是','好的','谢谢','我','不']).slice(0,7);
+const PHRASES=['叫医生','我疼','需要吸痰','不舒服','想翻身','我想喝水','想上厕所','我冷了','我热了','帮我盖被子','把枕头垫高','请开灯','请关灯','谢谢你们','我爱你','我想见家人','我想看电视','我想听音乐','没关系','不用担心我','辛苦了','我很开心'];
+const URG=new Set(['叫医生','我疼','需要吸痰']);
+const HOME=[{id:'comm',label:'沟通',sub:'家属消息 · 视频 · 当面说',icon:'message-square-text'},{id:'asst',label:'生活助手',sub:'问答 · 点播 · 家居',icon:'bot'},{id:'ent',label:'娱乐',sub:'游戏 · 音乐 · 电视',icon:'gamepad-2'},{id:'settings',label:'设置',sub:'音量 · 亮度 · 扫描',icon:'sliders-horizontal'},{id:'call',label:'呼叫护士',sub:'选中后 5 秒内可取消',icon:'bell-ring'}];
+const ART={
+ back:'<svg viewBox="0 0 320 200"><path d="M230 100H96M146 52l-50 48 50 48"/></svg>',
+ maze:'<svg viewBox="0 0 320 200"><path d="M40 24h240v152H40zM40 66h86M164 24v88M206 66h74M126 108v68M126 108h80M244 108v42M82 142h44"/></svg>',
+ snake:'<svg viewBox="0 0 320 200"><path d="M64 180C64 128 134 132 134 86S204 34 204 92 262 140 262 66" stroke-width="24"/><circle cx="262" cy="30" r="12" fill="currentColor" stroke="none"/></svg>',
+ wizard:'<svg viewBox="0 0 320 200"><path d="M104 176L160 30l56 146zM86 176h148"/><path d="M252 44a26 26 0 1 0 18 40 20 20 0 0 1-18-40z"/><path d="M60 60v20M50 70h20M248 140v16M240 148h16"/></svg>',
+ chess:'<svg viewBox="0 0 320 200"><circle cx="160" cy="100" r="70"/><circle cx="160" cy="100" r="52"/><text x="160" y="124" text-anchor="middle" font-size="66" font-weight="900" fill="currentColor" stroke="none" font-family="Noto Sans SC,sans-serif">帅</text></svg>',
+ ddz:'<svg viewBox="0 0 320 200"><rect x="92" y="38" width="88" height="128" rx="12" transform="rotate(-16 136 166)"/><rect x="118" y="30" width="88" height="128" rx="12"/><rect x="144" y="38" width="88" height="128" rx="12" transform="rotate(16 188 166)"/></svg>',
+ mj:'<svg viewBox="0 0 320 200"><rect x="44" y="52" width="52" height="96" rx="10"/><rect x="108" y="52" width="52" height="96" rx="10"/><rect x="172" y="52" width="52" height="96" rx="10"/><rect x="236" y="52" width="52" height="96" rx="10"/><circle cx="70" cy="100" r="12"/><path d="M134 80v40M198 84h0M198 116h0"/><circle cx="262" cy="86" r="7"/><circle cx="262" cy="114" r="7"/></svg>',
+ tv:'<svg viewBox="0 0 320 200"><rect x="62" y="28" width="196" height="124" rx="14"/><path d="M126 182h68M160 152v30M128 10l32 18 32-18"/></svg>',
+ music:'<svg viewBox="0 0 320 200"><circle cx="160" cy="100" r="78"/><circle cx="160" cy="100" r="44"/><circle cx="160" cy="100" r="8" fill="currentColor"/></svg>'};
+const ENT=[{id:'back',label:'返回主页',sub:'回到主页选择其他功能',nav:1,h:220},{id:'maze',label:'迷宫',sub:'左 · 右 · 上 直接控制',h:198},{id:'snake',label:'向上贪吃蛇',sub:'左右转向，向上爬',h:132},{id:'wizard',label:'魔法师',sub:'冒险游戏',h:262},{id:'chess',label:'中国象棋',sub:'人机对弈',h:12},{id:'ddz',label:'斗地主',sub:'三人牌局',h:345},{id:'mj',label:'麻将',sub:'四人牌局',h:165},{id:'tv',label:'看电视',sub:'CCTV 直播 13 个频道',h:214},{id:'music',label:'音乐',sub:'本地 10 首',h:34}];
+const CH=['CCTV-1 综合','CCTV-2 财经','CCTV-4 中文国际','CCTV-5 体育','CCTV-7 国防军事','CCTV-10 科教','CCTV-11 戏曲','CCTV-13 新闻','CCTV-15 音乐'];
+const PALS={cobalt:'钴蓝',wisteria:'紫藤',coral:'珊瑚'};
+const MODES={auto:'自动',light:'日间',dark:'夜间'};
+const ASST_PHRASES=['开灯','关灯','打开床头灯','关闭床头灯','打开窗帘','关闭窗帘','窗帘开到一半','开空调','关空调','我热','空调一分钟后关机','看央视新闻','看体育台','播放音乐','播放《演员》','为什么天空是蓝色的'];
+const TRACKS=[{t:'演员',a:'薛之谦',d:261},{t:'绅士',a:'薛之谦',d:291},{t:'丑八怪',a:'薛之谦',d:248},{t:'刚刚好',a:'薛之谦',d:250},{t:'认真的雪',a:'薛之谦',d:260},{t:'意外',a:'薛之谦',d:282}];
+const CONTACTS=[
+ {id:'self',kind:'self',name:'当面说话',av:'说',sub:'打字后朗读，并放大给身边的人看',msgs:[],replies:[]},
+ {id:'mom',name:'妈妈',online:true,unread:2,av:'妈',h:12,msgs:[{me:0,t:'今天感觉怎么样？',time:'09:12'},{me:0,t:'中午我给你带粥',time:'09:13'}],replies:['好的，我马上过来','收到，你先休息一会儿','我在路上了，二十分钟到']},
+ {id:'yu',name:'小雨',rel:'女儿',online:true,unread:0,av:'雨',h:200,msgs:[{me:1,t:'想你了',time:'昨天'},{me:0,t:'晚上我过来看你',time:'昨天'}],replies:['我晚上七点到','收到！']},
+ {id:'zhang',name:'张医生',rel:'主治医生',online:false,unread:0,av:'张',h:160,msgs:[{me:0,t:'明天上午查房',time:'周一'}],replies:[]},
+ {id:'li',name:'李阿姨',rel:'护工',online:true,unread:0,av:'李',h:300,msgs:[],replies:['好的，马上来']}
+];
+function blocks(){return {L:[2,3,4,5,'DEL','BACK'],R:[6,7,8,9,comm.mode==='talk'?'SAY':'SEND','PH']};}
+const phraseList=()=>comm.mode==='asst'?ASST_PHRASES:PHRASES;
+
+/* ---------- state ---------- */
+const st={screen:'home',idx:0,dir:1,ov:[],interval:1500,grace:400,lockSim:true,sound:true,locked:false,rest:3,careOpen:false,head:true,vol:60,bri:80,ball:true,ch:0,game:null,log:[],pal:'coral',mode:'light',scan:'auto',parent:'ent',contact:null,call:null,callBack:null,noContacts:false,code:'K7Q2M9',track:0,pos:48,playing:true,devFlash:null};
+const comm={mode:'talk',target:null,phase:'L1',side:'L',bIdx:0,seq:[],out:'',pinyin:[],py:'',chars:[],page:0,preds:[],flash:null};
+const drafts={};
+const asst={draft:'',turns:[{r:'a',t:'你好，我是生活助手。可以问我问题、点播音乐和电视，或者让我操作房间里的设备（演示为模拟）。'}],pending:false,confirm:null};
+const dev={main:false,bed:false,curtain:0,ac:{on:true,t:26,mode:'制冷',swing:'自动摆风',offAt:null}};
+let timer=null,lastAdv=0,prevIdx=-1;
+const topOv=()=>st.ov[st.ov.length-1];
+const cur=()=>topOv()||st;
+const later=(ms,fn)=>{if(replaying)fn();else if(!FREEZE)setTimeout(fn,ms);};
+const pad2=n=>String(n).padStart(2,'0');
+const hhmm=(plusMin)=>{if(FREEZE)return plusMin?'09:51':'09:41';const n=new Date(Date.now()+(plusMin||0)*60000);return pad2(n.getHours())+':'+pad2(n.getMinutes());};
+const fmt=s=>Math.floor(s/60)+':'+pad2(s%60);
+const visContacts=()=>st.noContacts?CONTACTS.slice(0,1):CONTACTS;
+
+/* ---------- theme & scan mode ---------- */
+function effMode(){if(st.mode!=='auto')return st.mode;const h=new Date().getHours();return h>=7&&h<19?'light':'dark';}
+function applyTheme(){const d=document.documentElement;d.dataset.pal=st.pal;d.dataset.mode=effMode();$('#pillMode').textContent=MODES[effMode()]+(st.mode==='auto'?' · 自动':'');document.querySelectorAll('[data-md]').forEach(b=>b.classList.toggle('on',b.dataset.md===st.mode));}
+function paintPill(){$('#pillSpeed').textContent=st.scan==='manual'?'手动扫描':'每项 '+(st.interval/1000).toFixed(1)+' s';}
+function applyScan(){document.documentElement.classList.toggle('manual',st.scan==='manual');paintPill();}
+
+/* ---------- item lists ---------- */
+function commItems(){
+  const p=comm.phase;
+  if(p==='PY') return [{id:'back',label:'返回',nav:1},...comm.pinyin.map(v=>({id:'py',label:v,val:v}))];
+  if(p==='CH'){const per=10,all=comm.chars,pages=Math.ceil(all.length/per);const r=[{id:'back',label:'换拼音',nav:1},...all.slice(comm.page*per,comm.page*per+per).map(c=>({id:'ch',label:c}))];if(pages>1)r.push({id:'next',label:comm.page<pages-1?'下一页':'回第一页',nav:1});return r;}
+  if(p==='PR') return [{id:'cont',label:'继续打字',nav:1},...comm.preds.map(w=>({id:'pred',label:w})),{id:'send',label:comm.mode==='talk'?'说出':'发送',nav:1}];
+  if(p==='PH'){const L=phraseList(),per=9,pages=Math.ceil(L.length/per);const r=[{id:'back',label:'返回打字',nav:1},...L.slice(comm.page*per,comm.page*per+per).map(w=>({id:'phrase',label:w,urg:comm.mode!=='asst'&&URG.has(w)}))];if(pages>1)r.push({id:'next',label:comm.page<pages-1?'下一页':'回第一页',nav:1});return r;}
+  return [];
+}
+function settingsItems(){return [
+ {id:'back',label:'返回主页',icon:'arrow-left',v:'',d:'回到主页，选择其他功能。',nav:1},
+ {id:'vol',label:'音量',icon:'volume-2',v:st.vol+'%',d:'整个应用的声音大小，包括朗读、通话和提示音。'},
+ {id:'bri',label:'屏幕亮度',icon:'sun',v:st.bri+'%',d:'只在使用本应用时生效。夜间建议调低。'},
+ {id:'speed',label:'每项停留',icon:'gauge',v:(st.interval/1000).toFixed(1)+' 秒',d:'自动扫描时，光标在每一项停留多久。范围 1.1–3.0 秒。'},
+ {id:'scanmode',label:'扫描方式',icon:'arrow-left-right',v:st.scan==='auto'?'自动':'手动',d:'自动：光标按停留时间自己移动，看向左右改变方向。手动：光标不自己动，左看上一项、右看下一项。沟通的字母块始终自动扫描。'},
+ {id:'theme',label:'显示模式',icon:'sun-moon',v:MODES[st.mode],d:'咬牙依次切换：自动 → 日间 → 夜间。自动为 7:00–19:00 日间，其余时间夜间。'},
+ {id:'ball',label:'模拟悬浮球',icon:'circle-dot',v:st.ball?'显示':'隐藏',d:'照护者测试用的模拟按钮，不影响真实耳机控制。'},
+ {id:'practice',label:'速度练习',icon:'target',v:'12 题',d:'做 12 次目标选择，系统推荐合适的停留时间，由你决定是否采用。'}];}
+function contactsItems(){return [...visContacts().map(c=>({id:'c:'+c.id,label:c.name,c})),{id:'invite',label:'邀请家属',nav:1},{id:'home',label:'返回主页',nav:1}];}
+function cactItems(){return [{id:'text',label:'文字消息'},{id:'video',label:'视频通话'},{id:'back',label:'返回联系人',nav:1}];}
+function asstBar(){const p=asst.pending,d=asst.draft.trim();return [{id:'input',label:asst.draft?'继续输入':'输入',off:p},{id:'clear',label:'清空草稿',off:p||!asst.draft},{id:'send',label:'发送',off:p||!d},{id:'exit',label:'退出',off:p}];}
+function asstItems(){
+  if(asst.confirm)return [{id:'cancel',label:'取消'},...asst.confirm.opts.map((o,i)=>({id:'opt'+i,label:o.label,opt:o}))];
+  if(asst.pending)return [{id:'wait',label:'正在回复…'}];
+  return asstBar().filter(b=>!b.off);
+}
+function musicItems(){return [{id:'prev',label:'上一首',icon:'skip-back'},{id:'play',label:st.playing?'暂停':'播放',icon:st.playing?'pause':'play'},{id:'next',label:'下一首',icon:'skip-forward'},{id:'back',label:st.parent==='asst'?'返回助手':'返回娱乐',icon:'arrow-left',nav:1}];}
+function videoItems(){const k=st.call;if(!k)return [];
+  if(k.state==='incoming')return [{id:'accept',label:'接听',cls:'accept'},{id:'reject',label:'拒绝',cls:'hang'}];
+  if(k.state==='ringing')return [{id:'cancel',label:'取消呼叫',cls:'hang'}];
+  return [{id:'mic',label:k.mic?'静音':'取消静音'},{id:'cam',label:k.cam?'关闭摄像头':'打开摄像头'},{id:'flip',label:'切换摄像头'},{id:'end',label:'挂断',cls:'hang'}];}
+function ctx(){
+  const o=topOv();
+  if(o){
+    if(o.type==='confirm') return {mode:'scan',two:1,guard:o,items:[{id:'no',label:o.no},{id:'yes',label:o.yes}]};
+    if(o.type==='call') return {mode:'call'};
+    if(o.type==='speak') return {mode:'scan',items:[{id:'edit',label:'返回修改'},{id:'again',label:'再说一遍'},{id:'clear',label:'清空，开始新的一句'}]};
+    if(o.type==='adjust') return {mode:'scan',items:[{id:'dec',label:'减小'},{id:'inc',label:'增大'},{id:'done',label:'完成'}]};
+    if(o.type==='tvmenu') return {mode:'scan',items:[{id:'resume',label:'继续观看'},{id:'reload',label:'重新加载'},{id:'exit',label:st.parent==='asst'?'返回助手':'返回娱乐'}]};
+  }
+  switch(st.screen){
+    case 'home': return {mode:'scan',items:HOME};
+    case 'contacts': return {mode:'scan',items:contactsItems()};
+    case 'cact': return {mode:'scan',items:cactItems()};
+    case 'invite': return {mode:'scan',items:[{id:'back',label:'返回联系人'},{id:'regen',label:'换一个邀请码'}]};
+    case 'asst': {const items=asstItems();return {mode:'scan',items,guard:asst.confirm||null,two:!!asst.confirm&&items.length===2};}
+    case 'music': return {mode:'scan',items:musicItems()};
+    case 'video': return {mode:'scan',items:videoItems()};
+    case 'ent': return {mode:'scan',items:ENT};
+    case 'settings': return {mode:'scan',items:settingsItems()};
+    case 'comm': return comm.phase==='L1'?{mode:'wing'}:{mode:'scan',items:commItems()};
+    default: return {mode:'direct'};
+  }
+}
+
+/* ---------- timing ---------- */
+function schedule(mult){clearTimeout(timer);if(st.careOpen||FREEZE)return;const c=ctx();if(c.mode==='direct'||c.mode==='call')return;if(st.scan==='manual'&&c.mode==='scan')return;timer=setTimeout(tick,st.interval*(mult||1));}
+function tick(){try{tickBody();}finally{schedule();}}
+function tickBody(){
+  const c=ctx(),o=cur();
+  if(c.mode==='scan'){
+    if(c.guard&&++c.guard.ticks>=3*c.items.length){toast('三轮都没有选择，已按「'+(c.guard.cancelLabel||'取消')+'」处理');c.guard.onTimeout();return;}
+    const n=c.items.length;if(!n)return;prevIdx=o.idx;o.idx=(o.idx+o.dir+n)%n;lastAdv=performance.now();render();
+  }else if(c.mode==='wing'){prevIdx=comm.bIdx;comm.bIdx=(comm.bIdx+1)%6;lastAdv=performance.now();render();}
+}
+function setDwellOnce(m){document.documentElement.style.setProperty('--dwell',st.interval*m+'ms');setTimeout(()=>document.documentElement.style.setProperty('--dwell',st.interval+'ms'),60);}
+function setCtx(idx,mult){const o=cur();o.idx=idx||0;o.dir=1;prevIdx=-1;if(mult)setDwellOnce(mult);schedule(mult);render();}
+function focusId(id,mult){const it=ctx().items||[];const k=it.findIndex(x=>x.id===id);setCtx(k<0?0:k,mult);}
+const DEF={ent:1,settings:1,music:1};
+function go(s,opt={}){
+  if(st.screen==='comm'&&s!=='comm')saveDraft();
+  st.screen=s;st.ov=[];st.dir=1;prevIdx=-1;
+  if(opt.parent)st.parent=opt.parent;
+  st.idx=0;
+  let idx=opt.idx!=null?opt.idx:(DEF[s]||0);
+  if(s==='contacts'&&opt.focus==null&&opt.idx==null){const k=visContacts().findIndex(c=>c.unread);idx=k>=0?k:0;}
+  if(opt.focus){const its=ctx().items||[];const k=its.findIndex(x=>x.id===opt.focus);if(k>=0)idx=k;}
+  st.idx=idx;schedule();render();
+}
+function push(ov){ov.idx=ov.idx||0;ov.dir=1;ov.ticks=0;if(ov.type==='confirm'){ov.cancelLabel=ov.no;ov.onTimeout=ov.onNo;}st.ov.push(ov);prevIdx=-1;const m=ov.type==='confirm'?1.5:0;if(m)setDwellOnce(m);schedule(m||1);render();}
+function pop(){st.ov.pop();prevIdx=-1;schedule();render();}
+function graceIdx(i){return (st.grace&&prevIdx>=0&&performance.now()-lastAdv<st.grace)?prevIdx:i;}
+
+/* ---------- input ---------- */
+function input(sig){
+  if(st.careOpen){toast('照护面板打开中，患者指令已暂停');return;}
+  if(st.locked){toast('请先放松一下，再做下一个动作');return;}
+  feedback(sig);lock();
+  const c=ctx(),o=cur();
+  if(c.mode==='scan'){
+    if(sig==='B'){let i=o.idx;if(st.scan!=='manual'){const g=graceIdx(i);if(g!==i){i=g;o.idx=g;toast('已按上一项执行（延迟补偿）');}}const it=c.items[i];prevIdx=-1;if(it)choose(it);schedule();render();return;}
+    if(st.scan==='manual'){const n=c.items.length;o.dir=sig==='L'?-1:1;if(n)o.idx=(o.idx+o.dir+n)%n;prevIdx=-1;schedule();render();return;}
+    if(!c.two)o.dir=sig==='L'?-1:1;prevIdx=-1;schedule();render();return;
+  }
+  if(c.mode==='wing'){wingInput(sig);return;}
+  if(c.mode==='call'){const t=topOv();if(t.sent){pop();return;}if(sig==='L'){clearInterval(st.callTimer);pop();toast('已取消呼叫');}else sendCall(t);return;}
+  direct(sig);
+}
+function wingInput(sig){
+  if(sig==='B'){comm.seq.length?enterPinyin():enterPhrase();return;}
+  const side=sig==='L'?'L':'R',B=blocks();
+  if(comm.side===side){const i=graceIdx(comm.bIdx);if(i!==comm.bIdx){comm.bIdx=i;toast('已按上一项执行（延迟补偿）');}applyBlock(B[side][i]);}
+  else{comm.side=side;prevIdx=-1;schedule();render();}
+}
+function applyBlock(b){
+  comm.flash=b;setTimeout(()=>{comm.flash=null;if(st.screen==='comm')render();},450);
+  if(b==='DEL'){if(comm.seq.length)comm.seq.pop();else if(comm.out)comm.out=[...comm.out].slice(0,-1).join('');else toast('没有可以删除的内容');}
+  else if(b==='SAY'||b==='SEND'){doSend();return;}
+  else if(b==='BACK'){compBack();return;}
+  else if(b==='PH'){comm.seq=[];enterPhrase();return;}
+  else{if(comm.seq.length>=6)toast('最多 6 个字母块');else comm.seq.push(b);}
+  prevIdx=-1;schedule();render();
+}
+function enterPinyin(){const ex=combos(comm.seq);const list=ex.length?ex:prefixSyl(comm.seq).slice(0,4);if(!list.length){toast('这几个字母块拼不出拼音，可用「删除」去掉');return;}comm.pinyin=list.slice(0,4);comm.phase='PY';setCtx(1);}
+function enterPhrase(){comm.phase='PH';comm.page=0;setCtx(1);}
+function commit(text){comm.out+=text;comm.seq=[];comm.preds=predict([...text].pop());comm.phase='PR';comm.page=0;toast('已写入「'+text+'」',true);setCtx(1);}
+function openComposer(mode,c){comm.mode=mode;comm.target=c||null;comm.out=mode==='asst'?asst.draft:(drafts[c.id]||'');comm.seq=[];comm.phase='L1';comm.side='L';comm.bIdx=0;comm.page=0;if(mode==='chat')c.unread=0;go('comm');}
+function saveDraft(){if(comm.mode==='asst')asst.draft=comm.out;else if(comm.target)drafts[comm.target.id]=comm.out;}
+function compBack(){
+  const m=comm.mode;if(comm.out)toast(m==='asst'?'文字已放进草稿':'没写完的话会保留',true);
+  if(m==='talk')go('contacts',{focus:'c:self'});
+  else if(m==='chat')go('cact',{focus:'text'});
+  else go('asst',{focus:comm.out.trim()?'send':'input'});
+}
+function doSend(){
+  if(comm.mode==='talk'){openSpeak();return;}
+  const text=comm.out.trim();if(!text){toast('还没有要发的内容');return;}
+  if(comm.mode==='chat'){const c=comm.target;sendChat(c,text);comm.out='';comm.seq=[];comm.phase='L1';comm.side='L';comm.bIdx=0;toast('已发送给'+c.name,true);setCtx(0);return;}
+  comm.out='';comm.seq=[];go('asst');asstSubmit(text);
+}
+function sendChat(c,text){
+  const m={me:1,t:text,time:hhmm(),st:'sending'};c.msgs.push(m);
+  later(700,()=>{m.st='sent';render();});
+  if(c.online&&c.replies.length){const r=c.replies[(c.ri||0)%c.replies.length];c.ri=(c.ri||0)+1;
+    later(2600,()=>{c.msgs.push({me:0,t:r,time:hhmm()});if(!(st.screen==='comm'&&comm.target===c))c.unread++;render();});}
+}
+function openContact(c){if(c.kind==='self')openComposer('talk',c);else{st.contact=c;go('cact');}}
+function newCode(){if(FREEZE)return 'K7Q2M9';const A='ABCDEFGHJKMNPQRSTUVWXYZ23456789';return Array.from({length:6},()=>A[Math.floor(Math.random()*A.length)]).join('');}
+
+function choose(it){
+  const t=topOv();
+  if(t){
+    if(t.type==='confirm'){it.id==='yes'?t.onYes():t.onNo();return;}
+    if(t.type==='speak'){if(it.id==='edit')pop();else if(it.id==='again'){say(comm.out);toast('再说一遍');}else push({type:'confirm',title:'清空这句话？',desc:'清空后不能恢复。',no:'取消',noSub:'保留这句话',yes:'清空',yesSub:'开始新的一句',onYes:()=>{comm.out='';comm.seq=[];st.ov=[];comm.phase='L1';comm.side='L';comm.bIdx=0;setCtx(0);toast('已清空',true);},onNo:()=>pop()});return;}
+    if(t.type==='adjust'){if(it.id==='done')pop();else adjust(t.key,it.id==='inc'?1:-1);return;}
+    if(t.type==='tvmenu'){if(it.id==='resume')pop();else if(it.id==='reload'){pop();toast('正在重新加载 '+CH[st.ch].split(' ')[0]);}else backFromMedia('tv');return;}
+    return;
+  }
+  switch(st.screen){
+    case 'home': if(it.id==='call')startCall();else if(it.id==='comm')go('contacts');else go(it.id);break;
+    case 'contacts': if(it.id==='home')go('home',{focus:'comm'});else if(it.id==='invite'){st.code=newCode();go('invite');}else openContact(it.c);break;
+    case 'cact': if(it.id==='back')go('contacts',{focus:'c:'+st.contact.id});else if(it.id==='text')openComposer('chat',st.contact);else startVideo(st.contact);break;
+    case 'invite': if(it.id==='back')go('contacts',{focus:'invite'});else{st.code=newCode();toast('已换成新的邀请码',true);render();}break;
+    case 'asst': asstChoose(it);break;
+    case 'music': musicChoose(it);break;
+    case 'video': videoChoose(it);break;
+    case 'ent': if(it.id==='back')go('home',{focus:'ent'});else if(it.id==='tv')go('tv',{parent:'ent'});else if(it.id==='music')go('music',{parent:'ent'});else{st.game=it;go('game');}break;
+    case 'settings': settingsChoose(it);break;
+    case 'comm': commChoose(it);break;
+  }
+}
+function commChoose(it){
+  const p=comm.phase;
+  switch(it.id){
+    case 'back': if(p==='CH'){comm.phase='PY';setCtx(Math.max(1,comm.pinyin.indexOf(comm.py)+1));}else{comm.phase='L1';comm.page=0;comm.bIdx=0;setCtx(0);}break;
+    case 'py': comm.py=it.val;comm.chars=[...DICT[it.val]];comm.page=0;comm.phase='CH';setCtx(1);break;
+    case 'ch': case 'pred': case 'phrase': commit(it.label);break;
+    case 'next': comm.page=it.label==='回第一页'?0:comm.page+1;setCtx(1);break;
+    case 'cont': comm.phase='L1';comm.side='L';comm.bIdx=0;setCtx(0);break;
+    case 'send': doSend();break;
+  }
+}
+function settingsChoose(it){
+  if(it.id==='back')go('home',{focus:'settings'});
+  else if(it.id==='ball'){st.ball=!st.ball;toast(st.ball?'模拟悬浮球已显示':'模拟悬浮球已隐藏',true);}
+  else if(it.id==='theme'){st.mode={auto:'light',light:'dark',dark:'auto'}[st.mode];applyTheme();toast('显示模式：'+MODES[st.mode],true);}
+  else if(it.id==='scanmode'){st.scan=st.scan==='auto'?'manual':'auto';applyScan();toast('扫描方式：'+(st.scan==='auto'?'自动':'手动'),true);}
+  else if(it.id==='practice')toast('沿用现有 12 题速度练习，改用新组件');
+  else push({type:'adjust',key:it.id,idx:1});
+}
+function direct(sig){
+  if(st.screen==='tv'){if(sig==='B')push({type:'tvmenu'});else{st.ch=(st.ch+(sig==='L'?-1:1)+CH.length)%CH.length;render();}return;}
+  if(sig==='B')push({type:'confirm',title:'离开「'+st.game.label+'」？',desc:'本局进度不会保存。',no:'继续玩',noSub:'回到游戏',yes:'离开',yesSub:'返回娱乐',onYes:()=>go('ent',{focus:st.game.id}),onNo:()=>pop()});
+  else toast('游戏内：'+(sig==='L'?'向左':'向右'));
+}
+function adjust(k,d){
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  if(k==='vol')st.vol=cl(st.vol+10*d,0,100);
+  if(k==='bri'){st.bri=cl(st.bri+10*d,10,100);$('#device').style.filter='brightness('+(0.45+st.bri/180)+')';}
+  if(k==='speed')setSpeed(cl(st.interval+100*d,1100,3000));
+  render();
+}
+function setSpeed(ms){st.interval=ms;$('#spd').value=ms;$('#spdv').textContent=(ms/1000).toFixed(1)+' s';paintPill();document.documentElement.style.setProperty('--dwell',ms+'ms');}
+function openSpeak(){if(!comm.out){toast('还没有要说的话');return;}push({type:'speak',idx:1});say(comm.out);}
+function say(t){if(replaying)return;try{if(!('speechSynthesis' in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='zh-CN';u.rate=.9;speechSynthesis.speak(u);}catch(e){}}
+function startCall(){push({type:'call',t:5,sent:false});clearInterval(st.callTimer);if(FREEZE)return;st.callTimer=setInterval(()=>{const t=topOv();if(!t||t.type!=='call'){clearInterval(st.callTimer);return;}if(t.sent)return;t.t--;if(t.t<=0)sendCall(t);else render();},1000);}
+function sendCall(t){t.sent=true;clearInterval(st.callTimer);beep(740,.5);setTimeout(()=>beep(740,.5),600);render();}
+
+/* ---------- assistant ---------- */
+function asstChoose(it){
+  if(asst.confirm){asstDecide(it.opt||null);return;}
+  if(it.id==='wait')return;
+  if(it.id==='input')openComposer('asst');
+  else if(it.id==='clear'){asst.draft='';toast('已清空草稿',true);focusId('input');}
+  else if(it.id==='send')asstSubmit(asst.draft);
+  else if(it.id==='exit')go('home',{focus:'asst'});
+}
+function asstSubmit(text){
+  text=(text||'').trim();if(!text){toast('请先输入内容');return;}
+  asst.turns.push({r:'u',t:text});asst.draft='';asst.pending=true;
+  if(st.screen==='asst')setCtx(0);
+  later(900,()=>{
+    asst.pending=false;const r=asstReply(text);
+    if(r.opts){asst.confirm={opts:r.opts,ticks:0,cancelLabel:'取消',onTimeout:()=>asstDecide(null)};if(st.screen==='asst')setCtx(0,1.5);else render();return;}
+    asst.turns.push({r:'a',t:r.say});if(r.keep)asst.draft=text;
+    if(st.screen==='asst')focusId('input');else render();
+    if(r.tv!=null)later(1100,()=>{if(st.screen!=='asst')return;st.ch=r.tv;go('tv',{parent:'asst'});});
+    if(r.music!=null)later(1100,()=>{if(st.screen!=='asst')return;st.track=r.music;st.pos=0;st.playing=true;go('music',{parent:'asst'});});
+  });
+}
+function asstReply(t){
+  const has=(...k)=>k.some(x=>t.includes(x)),d=dev,ac=d.ac,O=(label,apply)=>({label,apply});
+  const acOn=O('打开空调（制冷 26°C）',x=>{x.ac.on=true;x.ac.mode='制冷';x.ac.t=26;});
+  if(has('体育'))return {say:'有两个体育频道：CCTV-5 体育、CCTV-5+ 体育赛事。想看哪一个？草稿已保留，可以补充后再发送。',keep:true};
+  if(has('新闻','央视'))return {say:'好的，为你打开 CCTV-13 新闻。',tv:7};
+  if(has('电视'))return {say:'好的，为你打开电视 · CCTV-1 综合。',tv:0};
+  if(has('演员'))return {say:'好的，播放《演员》。',music:0};
+  if(has('音乐','歌'))return {say:'好的，打开音乐，播放《'+TRACKS[st.track].t+'》。',music:st.track};
+  if(has('分钟后关'))return ac.on?{opts:[O('定时 1 分钟后关空调',x=>{x.ac.offAt=Date.now()+60000;})]}:{say:'空调现在是关着的，不需要定时关机。'};
+  if(has('关空调'))return ac.on?{opts:[O('关闭空调',x=>{x.ac.on=false;x.ac.offAt=null;})]}:{say:'空调已经是关着的。'};
+  if(has('开空调'))return ac.on?{say:'空调已经开着：'+ac.mode+' '+ac.t+'°C。'}:{opts:[acOn]};
+  if(has('热','降温'))return !ac.on?{opts:[acOn]}:ac.mode==='制冷'?{opts:[O('降温到 '+(ac.t-1)+'°C',x=>{x.ac.t=Math.max(16,x.ac.t-1);})]}:{opts:[O('切换到制冷 26°C',x=>{x.ac.mode='制冷';x.ac.t=26;})]};
+  if(has('一半'))return {opts:[O('把窗帘打开到 50%',x=>{x.curtain=50;})]};
+  if(has('窗帘'))return has('关')?(d.curtain?{opts:[O('关闭窗帘',x=>{x.curtain=0;})]}:{say:'窗帘已经关好了。'}):(d.curtain<100?{opts:[O('完全打开窗帘',x=>{x.curtain=100;})]}:{say:'窗帘已经全开了。'});
+  if(has('床头灯'))return has('关')?(d.bed?{opts:[O('关闭床头灯',x=>{x.bed=false;})]}:{say:'床头灯已经是关着的。'}):(d.bed?{say:'床头灯已经开着了。'}:{opts:[O('打开床头灯',x=>{x.bed=true;})]});
+  if(has('关灯')){const o=[];if(d.main)o.push(O('关闭大灯',x=>{x.main=false;}));if(d.bed)o.push(O('关闭床头灯',x=>{x.bed=false;}));if(d.main&&d.bed)o.push(O('全部关闭',x=>{x.main=false;x.bed=false;}));return o.length?{opts:o}:{say:'灯都已经关着了。'};}
+  if(has('开灯')){const o=[];if(!d.main)o.push(O('打开大灯',x=>{x.main=true;}));if(!d.bed)o.push(O('打开床头灯',x=>{x.bed=true;}));return o.length?{opts:o}:{say:'灯都已经开着了。'};}
+  if(has('天空','蓝色'))return {say:'阳光里的蓝光波长短，更容易被空气分子散射到各个方向，所以白天的天空看起来是蓝色的。'};
+  return {say:'（模拟回复）收到：「'+t+'」。正式版由电脑端助手服务回答。'};
+}
+function remain(at){if(FREEZE)return '1 分钟后';const s=Math.max(0,Math.ceil((at-Date.now())/1000));return s>=60?Math.ceil(s/60)+' 分钟后':s+' 秒后';}
+function devRows(d){return [
+ {k:'main',label:'大灯',v:d.main?'开':'关'},
+ {k:'bed',label:'床头灯',v:d.bed?'开':'关'},
+ {k:'curtain',label:'窗帘',v:d.curtain===0?'关闭':d.curtain===100?'全开':d.curtain+'%'},
+ {k:'ac',label:'空调',v:d.ac.on?d.ac.mode+' '+d.ac.t+'°C':'关'},
+ {k:'swing',label:'风向',v:d.ac.swing},
+ {k:'timer',label:'定时关机',v:d.ac.offAt?remain(d.ac.offAt):'无'}];}
+function asstDecide(opt){
+  if(!asst.confirm)return;asst.confirm=null;
+  if(!opt)asst.turns.push({r:'a',t:'已取消操作'});
+  else{const before=devRows(dev);opt.apply(dev);const after=devRows(dev);st.devFlash=new Set(after.filter((r,i)=>r.v!==before[i].v).map(r=>r.k));asst.turns.push({r:'a',t:'模拟：已执行「'+opt.label+'」'});later(1300,()=>{st.devFlash=null;if(st.screen==='asst')render();});}
+  focusId('input');
+}
+
+/* ---------- media & video ---------- */
+function musicChoose(it){
+  if(it.id==='prev'){st.track=(st.track-1+TRACKS.length)%TRACKS.length;st.pos=0;st.playing=true;render();}
+  else if(it.id==='next'){st.track=(st.track+1)%TRACKS.length;st.pos=0;st.playing=true;render();}
+  else if(it.id==='play'){st.playing=!st.playing;render();}
+  else backFromMedia('music');
+}
+function backFromMedia(kind){if(st.parent==='asst')go('asst',{focus:'input'});else go('ent',{focus:kind});}
+const dur=()=>{const k=st.call;if(!k||!k.t0)return '00:00';const s=FREEZE?83:Math.floor((Date.now()-k.t0)/1000);return pad2(Math.floor(s/60))+':'+pad2(s%60);};
+function startVideo(c){st.callBack=null;st.call={c,state:'ringing',mic:true,cam:true,t0:0};go('video');
+  later(c.online?2500:6000,()=>{if(!st.call||st.call.state!=='ringing'||st.call.c!==c)return;if(c.online){st.call.state='active';st.call.t0=Date.now();if(st.screen==='video'&&!st.ov.length)setCtx(0);}else endCall('无人接听');});}
+function incoming(){
+  if(st.call)return;const c=CONTACTS[1];if(st.careOpen)openCare(false);
+  st.callBack={screen:st.screen,idx:st.idx,dir:st.dir,ov:st.ov,parent:st.parent};
+  st.call={c,state:'incoming',mic:true,cam:true,t0:0};st.screen='video';st.ov=[];st.idx=0;st.dir=1;prevIdx=-1;schedule();render();beep(660,.3);
+  later(20000,()=>{if(st.call&&st.call.state==='incoming'){c.unread++;c.msgs.push({me:0,t:'[未接视频来电]',time:hhmm()});endCall('未接来电 · '+c.name);}});
+}
+function endCall(msg){
+  const back=st.callBack;st.call=null;st.callBack=null;toast(msg);
+  if(back){st.screen=back.screen;st.idx=back.idx;st.dir=back.dir;st.ov=back.ov;st.parent=back.parent;prevIdx=-1;schedule();render();}
+  else go('cact',{focus:'video'});
+}
+function videoChoose(it){
+  const k=st.call;if(!k)return;
+  switch(it.id){
+    case 'accept':k.state='active';k.t0=Date.now();setCtx(0);toast('已接通',true);break;
+    case 'reject':endCall('已拒绝来电');break;
+    case 'cancel':endCall('已取消呼叫');break;
+    case 'mic':k.mic=!k.mic;toast(k.mic?'已取消静音':'已静音');render();break;
+    case 'cam':k.cam=!k.cam;toast(k.cam?'摄像头已打开':'摄像头已关闭');render();break;
+    case 'flip':toast('已切换摄像头');break;
+    case 'end':push({type:'confirm',title:'挂断和'+k.c.name+'的视频？',desc:'通话会立即结束。',no:'继续通话',noSub:'回到通话',yes:'挂断',yesSub:'结束视频',onYes:()=>{st.ov=[];endCall('通话已结束 · '+dur());},onNo:()=>pop()});break;
+  }
+}
+/* ---------- feedback ---------- */
+function replay(el,c){el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
+function feedback(sig){replay(sig==='L'?$('#edgeL'):sig==='R'?$('#edgeR'):$('#pulse'),'go');const s=$('#slot'+sig);replay(s,'hit');setTimeout(()=>s.classList.remove('hit'),350);tone(sig);st.log.unshift(new Date().toTimeString().slice(0,8)+'  '+{L:'左看',R:'右看',B:'咬牙'}[sig]+'  → '+$('#crumb').textContent);st.log=st.log.slice(0,7);}
+function lock(){if(!st.lockSim)return;st.locked=true;st.rest=0;paintReady();[260,460,660].forEach((ms,i)=>setTimeout(()=>{st.rest=i+1;if(st.rest>=3)st.locked=false;paintReady();},ms));}
+function paintReady(){const r=$('#ready');r.classList.toggle('wait',st.locked);[...r.children].forEach((d,i)=>d.classList.toggle('on',i<st.rest));$('#readyTxt').textContent=st.locked?'放松':'就绪';}
+let actx;
+function beep(f,dur){if(!st.sound||replaying)return;try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();const o=actx.createOscillator(),g=actx.createGain(),t=actx.currentTime;o.frequency.value=f;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.14,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g).connect(actx.destination);o.start(t);o.stop(t+dur+.02);}catch(e){}}
+function tone(s){beep({L:440,R:660,B:880}[s],.16);}
+let toastT;function toast(m,ok){if(replaying)return;const t=$('#toast');t.textContent=m;t.className='toast on'+(ok?' ok':'');clearTimeout(toastT);toastT=setTimeout(()=>t.className='toast',1600);}
+
+/* ---------- render ---------- */
+const cls=(i,o,extra)=>'item '+(extra||'')+(i===o.idx?' f':'');
+const dtag=o=>`<span class="dirtag">${o.dir<0?'←':'→'}</span>`;
+const dcls=()=>'dir-'+(st.dir<0?'l':'r');
+function rHome(){
+  const n=FREEZE?new Date(2026,10,23,9,41):new Date(),w='日一二三四五六'[n.getDay()],h=n.getHours();
+  return `<div class="home"><div class="hello"><div class="clock">${pad2(h)}:${pad2(n.getMinutes())}</div><div class="date">${n.getMonth()+1}月${n.getDate()}日 星期${w} · ${h<12?'上午':h<18?'下午':'晚上'}</div></div>
+  <div class="tiles ${dcls()}" style="grid-template-columns:${homeCols()}">${HOME.map((it,i)=>`<div class="${cls(i,st,'tile t-'+it.id)}" data-i="${i}">${dtag(st)}<div class="ic"><i data-lucide="${it.icon}"></i></div><b>${it.label}</b><small>${it.sub}</small></div>`).join('')}</div></div>`;
+}
+function bub(m){return `<div class="bub${m.me?' me':''}">${esc(m.t)}<span class="meta">${m.time||''}${m.me?(m.st==='sending'?' · 发送中…':' · 已送达'):''}</span></div>`;}
+function head(c){return `<div class="chead"><div class="av${c.online?' on':''}" style="--h:${c.h}">${c.av}</div><div><b>${esc(c.name)}</b><span>${c.rel?c.rel+' · ':''}${c.online?'在线':'离线'}${c.unread?' · '+c.unread+' 条未读':''}</span></div></div>`;}
+function contactRow(it,i,focusIdx,selId,sleep){
+  const c=it.c,f=i===focusIdx;
+  const sub=c.kind==='self'?c.sub:(c.msgs.length?c.msgs[c.msgs.length-1].t:(c.online?'在线':'离线'));
+  return `<div class="item crow${f?' f':''}${selId===c.id?' sel':''}" ${sleep?'data-ci':'data-i'}="${i}">${f?dtag(st):''}<div class="av${c.kind==='self'?' self':''}${c.online?' on':''}" style="--h:${c.h||24}">${c.av}</div><div class="cinfo"><div class="cname">${esc(c.name)}${c.rel?`<small>${c.rel}</small>`:''}</div><div class="csub">${esc(sub)}</div></div>${c.unread?`<span class="badge">${c.unread}</span>`:''}</div>`;
+}
+function rList(focusIdx,selId,sleep){
+  const its=contactsItems(),n=its.length;
+  const nav=[n-2,n-1].map(i=>`<div class="item nav${i===focusIdx?' f':''}" ${sleep?'':`data-i="${i}"`}>${i===focusIdx?dtag(st):''}<i data-lucide="${its[i].id==='invite'?'user-plus':'house'}"></i>${its[i].label}</div>`).join('');
+  return `<div class="clist${sleep?' sleep':''} ${dcls()}">${its.slice(0,n-2).map((it,i)=>contactRow(it,i,focusIdx,selId,sleep)).join('')}<div class="navrow">${nav}</div></div>`;
+}
+function rContactSide(it){
+  if(!it)return '';
+  if(it.id==='invite')return `<div class="cempty"><b>邀请家属</b><p>生成一个 6 位邀请码。家属在手机端输入后，就能给你发消息、打视频。邀请码 10 分钟内有效。</p></div>`;
+  if(it.id==='home')return `<div class="cempty"><b>返回主页</b><p>没发出去的文字会按联系人分别保留。</p></div>`;
+  const c=it.c;
+  if(c.kind==='self')return `<div class="chead"><div class="av self">${c.av}</div><div><b>当面说话</b><span>给身边的人看和听</span></div></div><div class="cempty"><p>打好字以后选「说出」，平板会朗读出来，并把这句话放大到整个屏幕。</p>${st.noContacts?'<p>还没有绑定家属。选「邀请家属」生成邀请码，交给家属在手机上输入。</p>':''}</div><p class="chint">咬牙开始打字</p>`;
+  return `${head(c)}<div class="msgs">${c.msgs.slice(-3).map(bub).join('')||'<p class="chint">还没有消息</p>'}</div><p class="chint">咬牙选择：发文字消息，或视频通话</p>`;
+}
+function rContacts(){return `<div class="ct">${rList(st.idx,null,false)}<div class="cside">${rContactSide(contactsItems()[st.idx])}</div></div>`;}
+function rCact(){
+  const c=st.contact,its=cactItems();
+  const sub=[`打字发给${esc(c.name)}`,c.online?`${esc(c.name)}在线，可以直接呼叫`:'对方离线，可能无人接听'];
+  return `<div class="ct">${rList(-1,c.id,true)}<div class="cside">${head(c)}<div class="msgs">${c.msgs.slice(-2).map(bub).join('')}</div><div class="acards ${dcls()}">${[0,1].map(i=>`<div class="${cls(i,st,'acard')}" data-i="${i}">${dtag(st)}<div class="ic"><i data-lucide="${i?'video':'message-square-text'}"></i></div><b>${its[i].label}</b><small>${sub[i]}</small></div>`).join('')}</div><div class="${cls(2,st,'aback nav')} ${dcls()}" data-i="2">${dtag(st)}← 返回联系人</div></div></div>`;
+}
+function rInvite(){
+  const its=ctx().items;
+  return `<div class="inv"><h2>邀请家属</h2><p>请家属打开手机端，在「兑换邀请码」里输入下面 6 位字符</p><div class="code">${[...st.code].map((ch,i)=>(i===3?'<i></i>':'')+`<span>${ch}</span>`).join('')}</div><p>10 分钟内有效（${hhmm(10)} 前）· 只能使用一次</p><button class="touchbtn" id="copyBtn">复制邀请码（照护者触摸）</button><div class="invrow ${dcls()}">${its.map((it,i)=>`<div class="${cls(i,st)}" data-i="${i}">${dtag(st)}${it.label}</div>`).join('')}</div></div>`;
+}
+function rComm(){
+  const p=comm.phase,narrow=p!=='L1',B=blocks();
+  const fnCls={SAY:' say',SEND:' send',BACK:' exit'};
+  const wingCol=(side,arr)=>`<div class="wing ${p==='L1'?(comm.side===side?'on':'off'):'sleep'}">${arr.map((b,i)=>{const f=p==='L1'&&comm.side===side&&comm.bIdx===i;const ords=comm.seq.map((d,k)=>d===b?k+1:0).filter(Boolean);const fn=typeof b==='string';return `<div class="item blk${fn?' fn':''}${fnCls[b]||''}${f?' f':''}${comm.flash===b?' pick':''}" data-b="${b}">${LBL[b]}${ords.length?`<span class="ord">${ords.join('·')}</span>`:''}</div>`}).join('')}</div>`;
+  const cb=comm.seq.length?combos(comm.seq):[];
+  const compose=comm.seq.length?`<div class="compose">${comm.seq.map(d=>`<i>${LBL[d]}</i>`).join('')}<span class="arrow">→</span><span class="py">${cb.length?cb.join(' · '):(prefixSyl(comm.seq).length?'继续…':'无拼音')}</span></div>`:'';
+  const toTag=comm.mode==='chat'?`<span class="to">发给 ${esc(comm.target.name)}</span>`:comm.mode==='asst'?'<span class="to">问助手</span>':'';
+  const ph={talk:'想说什么？看向左右挑字母块，或咬牙打开常用语',chat:'写给'+(comm.target?comm.target.name:'')+'的话…（咬牙打开常用语）',asst:'想问什么，或想让助手做什么？'}[comm.mode];
+  const empty=!comm.out;
+  const out=`<div class="outbar">${toTag}<div class="outtext${empty?' empty':''}">${empty?(comm.seq.length?'':`<span class="ph">${esc(ph)}</span>`):`<span>${esc(comm.out)}</span>`}<i class="caret"></i></div>${compose}</div>`;
+  const body=`<div class="comm${narrow?' narrow':''}${comm.mode==='chat'?' chat':''}">${out}<div class="main">${wingCol('L',B.L)}<div class="center"><div class="mag">${mag()}</div><div class="cands ${dcls()}">${cands()}</div></div>${wingCol('R',B.R)}</div></div>`;
+  if(comm.mode!=='chat')return body;
+  const c=comm.target;
+  return `<div class="chatwrap"><div class="hist"><h4>${esc(c.name)} <small>${c.online?'在线':'离线'}</small></h4><div class="msgs">${c.msgs.slice(-7).map(bub).join('')||'<p class="chint">还没有消息</p>'}</div></div>${body}</div>`;
+}
+function mag(){
+  const p=comm.phase,B=blocks();
+  if(p==='L1'){const b=B[comm.side][comm.bIdx],fn=typeof b==='string';
+    const who=comm.target&&comm.target.name;
+    const H={DEL:comm.seq.length?'删掉最后一个字母块':'删掉最后一个字',SAY:'朗读这句话，并放大给身边的人看',SEND:comm.mode==='asst'?'把这句话发给生活助手':'把这句话发给'+who,BACK:comm.mode==='talk'?'回到联系人，没说完的话会保留':comm.mode==='chat'?'回到'+who+'，没写完的会保留':'回到生活助手，文字留在草稿里',PH:'打开常用语，挑一句直接写入'};
+    const hint=fn?H[b]:(comm.side==='L'?'左看选它 · 右看切到右侧':'右看选它 · 左看切到左侧');
+    return `<div class="tag">${comm.side==='L'?'← 正在扫描左侧':'正在扫描右侧 →'}</div><div class="big${fn?' cjk':''}">${fn?LBL[b]:T9[b].toUpperCase().split('').join(' ')}</div><div class="hint">${esc(hint)}</div>`;}
+  const it=commItems()[st.idx]||{};
+  if(p==='PY')return `<div class="tag">选拼音</div><div class="big${it.id==='py'?'':' cjk'}">${it.label}</div><div class="hint">${it.id==='py'?[...DICT[it.val]].join('  '):'回到字母块，已选的保留'}</div>`;
+  if(p==='CH')return `<div class="tag">${comm.py} · 选字</div><div class="big cjk${it.id==='ch'?' xl':''}">${it.label}</div>`;
+  const add=(it.id==='pred'||it.id==='phrase')?it.label:'';
+  const sendHint=comm.mode==='talk'?'朗读这句话并放大显示':comm.mode==='asst'?'发给生活助手':'发给'+(comm.target?comm.target.name:'');
+  return `<div class="tag">${p==='PR'?'加上它，这句话会变成':'常用语'}</div>${add?`<div class="sent"><span>${esc(comm.out)}<em>${esc(add)}</em></span></div>`:`<div class="big cjk">${it.label}</div><div class="hint">${it.id==='cont'?'预测里没有，就回到字母块继续':it.id==='send'?esc(sendHint):'换一批'}</div>`}`;
+}
+function cands(){
+  const p=comm.phase,o=st;
+  if(p==='L1'){
+    if(comm.seq.length){const cb=combos(comm.seq);return `<div class="cap"><span>可能的拼音和字 · 咬牙去挑选</span><span>${comm.seq.map(d=>LBL[d]).join(' + ')}</span></div>${cb.length?`<div class="pyrow">${cb.map(x=>`<span>${x}</span>`).join('')}</div>`:`<div class="pyrow wait">还不是完整拼音，可以继续选字母块</div>`}<div class="prevrow">${previewChars(comm.seq).map(c=>`<span>${c}</span>`).join('')||'<span style="color:var(--dim);font-size:24px">没有对应的字，可用「删除」去掉最后一块</span>'}</div>`;}
+    return `<div class="cap"><span>常用语 · 咬牙打开</span><span>${comm.mode==='asst'?'助手常用指令':'紧急语固定在最前'}</span></div><div class="phprev">${phraseList().slice(0,6).map(w=>`<span>${w}</span>`).join('')}</div>`;
+  }
+  const its=commItems();
+  const g={PY:'g-py',CH:'g-ch',PR:'g-pr',PH:'g-ph'}[p];
+  const capL={PY:'左右看改方向 · 咬牙确定拼音',CH:'咬牙写入高亮的字',PR:'咬牙把词接到句子后面',PH:'咬牙写入这句话'}[p];
+  const capR=p==='CH'||p==='PH'?`第 ${comm.page+1} 页`:'';
+  let extra='';
+  if(p==='PY'){const it=its[st.idx];extra=`<div class="prevrow dim">${it&&it.id==='py'?[...DICT[it.val]].join('  '):''}</div>`;}
+  return `<div class="cap"><span>${capL}</span><span>${capR}</span></div><div class="cgrid ${g}">${its.map((it,i)=>`<div class="${cls(i,o,'cell'+(it.nav?' nav':'')+(it.urg?' urg':''))}" data-i="${i}">${dtag(o)}${esc(it.label)}</div>`).join('')}</div>${extra}`;
+}
+function rAsst(){
+  const cf=asst.confirm,its=asstItems();
+  const turns=asst.turns.slice(-6).map(t=>`<div class="bub${t.r==='u'?' me':''}">${t.r==='a'?'<span class="who">助手</span>':''}${esc(t.t)}</div>`).join('');
+  const typing=asst.pending?'<div class="bub typing"><span class="who">助手</span>正在回复…</div>':'';
+  const cfh=cf?`<div class="bub cf"><span class="who">助手</span><div class="q">要执行这项操作吗？</div><div class="cfopts ${dcls()}" style="grid-template-columns:repeat(${its.length},1fr)">${its.map((it,i)=>`<div class="${cls(i,st)}" data-i="${i}">${dtag(st)}${esc(it.label)}</div>`).join('')}</div><div class="tip">「取消」先亮 · 右侧「模拟家居」预览变化 · 三轮不选按取消处理</div></div>`:'';
+  let k=0;const live=!cf&&!asst.pending;
+  const bar=`<div class="asbar${live?'':' dim'} ${dcls()}">${asstBar().map(b=>{if(b.off||!live)return `<div class="item off">${b.label}</div>`;const i=k++;return `<div class="${cls(i,st)}" data-i="${i}">${dtag(st)}${b.label}</div>`;}).join('')}</div>`;
+  const draft=`<div class="asdraft"><span class="lab">草稿</span><div class="tx${asst.draft?'':' ph'}">${asst.draft?esc(asst.draft):'选「输入」开始，也可以直接用常用语'}</div></div>`;
+  const fo=cf&&its[st.idx]&&its[st.idx].opt;let prow=null;
+  if(fo){const pv=JSON.parse(JSON.stringify(dev));fo.apply(pv);prow=devRows(pv);}
+  const rows=devRows(dev);
+  const home=`<div class="ashome"><h4>模拟家居</h4><div class="s">演示用，不控制真实家电</div>${rows.map((r,i)=>{const nv=prow&&prow[i].v!==r.v?prow[i].v:null;return `<div class="hrow${nv?' chg':''}${st.devFlash&&st.devFlash.has(r.k)?' done':''}"><span>${r.label}</span><b${r.k==='timer'?' id="hrTimer"':''}>${nv?`<span class="old">${r.v}</span><span class="new">${nv}</span>`:r.v}</b></div>`;}).join('')}<div class="prevnote">${cf?(fo?'预览：确认后会这样变化':'取消：保持现状，不做改变'):''}</div></div>`;
+  return `<div class="as"><div class="asmain"><div class="ashist">${turns}${typing}${cfh}</div>${draft}${bar}</div>${home}</div>`;
+}
+function rSettings(){
+  const its=settingsItems(),f=its[st.idx]||its[0];
+  return `<div class="set"><div class="srows ${dcls()}">${its.map((it,i)=>`<div class="${cls(i,st,'srow'+(it.nav?' nav':''))}" data-i="${i}"><span class="lab"><i data-lucide="${it.icon}"></i>${it.label}</span><span class="v">${it.v}</span></div>`).join('')}</div>
+  <div class="sdesc"><div class="k">${f.label}</div>${f.v?`<div class="bigv">${f.v}</div>`:''}<p>${f.d}</p></div></div>`;
+}
+function rTv(){return `<div class="tv"><div class="screen"><div class="live">● 直播 · 官方网页源</div><span class="chn">${CH[st.ch].split(' ')[0]}</span><span class="chs">${CH[st.ch].split(' ')[1]}</span></div><div class="chstrip">${[-2,-1,0,1,2].map(d=>{const i=(st.ch+d+CH.length)%CH.length;return `<div class="${d===0?'on':''}">${CH[i].split(' ')[0]}</div>`}).join('')}</div></div>`;}
+function rMusic(){
+  const T=TRACKS[st.track],its=musicItems(),h=(34+st.track*53)%360,up=[1,2,3].map(k=>TRACKS[(st.track+k)%TRACKS.length].t);
+  return `<div class="mu"><div class="mutop"><div class="disc${st.playing&&!FREEZE?' on':''}" style="--h:${h}"><i></i></div><div class="muinfo"><b>${T.t}</b><div class="ar">${T.a} · 本地音乐</div><div class="mustate">${st.playing?'● 正在播放':'Ⅱ 已暂停'}</div><div class="prog"><i id="mprog" style="width:${st.pos/T.d*100}%"></i></div><div class="ptime"><span id="mtime">${fmt(st.pos)}</span><span>${fmt(T.d)}</span></div><div class="upnext"><b>接下来</b>${up.join(' · ')}</div></div></div><div class="murow ${dcls()}">${its.map((it,i)=>`<div class="${cls(i,st,it.nav?'nav':'')}" data-i="${i}">${dtag(st)}<i data-lucide="${it.icon}"></i>${it.label}</div>`).join('')}</div></div>`;
+}
+function rVideo(){
+  const k=st.call;if(!k)return '';const c=k.c,its=videoItems();
+  const status=k.state==='incoming'?'视频来电…':k.state==='ringing'?'正在呼叫…':dur();
+  return `<div class="vd"><div class="tag">${k.state==='active'?'● 通话中':k.state==='incoming'?'来电':'视频通话'}</div><div class="remote${k.state==='active'?' live':''}" style="--h:${c.h}"><div class="av" style="--h:${c.h}">${c.av}</div><b>${esc(c.name)}</b><span id="vclock">${status}</span></div>${k.state!=='incoming'?`<div class="local">${k.cam?'我的画面':'摄像头已关闭'}${k.mic?'':' · 已静音'}</div>`:''}<div class="vrow${its.length===1?' one':''} ${dcls()}" style="grid-template-columns:repeat(${its.length},1fr)">${its.map((it,i)=>`<div class="${cls(i,st,it.cls||'')}" data-i="${i}">${dtag(st)}${it.label}</div>`).join('')}</div></div>`;
+}
+function rGame(){const g=st.game||ENT[1];return `<div class="game"><div class="thumb" style="--h:${g.h}"><div class="art">${ART[g.id]}</div></div><h2>${g.label}</h2><p>游戏画面由原模块提供。本次只统一宿主层：顶部状态栏、底部动作栏写明本游戏的动作含义、离开前确认（默认继续玩）。</p></div>`;}
+const HOME_GROW=1.5;
+function homeCols(){return HOME.map((_,i)=>(i===st.idx?HOME_GROW:1)+'fr').join(' ');}
+function updateHome(){
+  const t=document.querySelector('.tiles');
+  t.style.gridTemplateColumns=homeCols();
+  t.classList.toggle('dir-l',st.dir<0);t.classList.toggle('dir-r',st.dir>=0);
+  t.querySelectorAll('.tile').forEach((el,i)=>{el.classList.remove('f');el.querySelector('.dirtag').textContent=st.dir<0?'←':'→';if(i===st.idx){void el.offsetWidth;el.classList.add('f');}});
+}
+function rEnt(){
+  return `<div class="ent"><div class="ent-top"><h2>娱乐</h2><span class="pos" id="galPos"></span><span class="hint">当前项永远在中间 · 看向左右改变滑动方向</span></div>
+  <div class="gal" id="gal">${ENT.map((it,i)=>`<div class="gcard${it.nav?' back':''}" data-i="${i}" style="--h:${it.h}"><div class="art">${ART[it.id]}</div><div class="img"${it.img?` style="background-image:url('${it.img}')"`:''}></div><div class="scrim"></div><span class="nexttag"></span><div class="cap2"><b>${it.label}</b><small>${it.sub}</small></div><div class="bar"><i></i></div></div>`).join('')}<div class="gnext" id="gnext"></div></div>
+  <div class="rail" id="rail"></div></div>`;
+}
+function updateGallery(){
+  const n=ENT.length,gal=$('#gal');
+  gal.classList.toggle('dir-l',st.dir<0);
+  [...gal.querySelectorAll('.gcard')].forEach((el,i)=>{
+    let d=((i-st.idx)%n+n)%n; if(d>n/2)d-=n;
+    const ad=Math.abs(d),sg=Math.sign(d),isNext=d===st.dir,prev=el._d;
+    let x=0,s=1,o=1;
+    if(ad===1){s=isNext?.6:.5;x=350+350*s+32;o=isNext?1:.6;}
+    else if(ad>=2){s=.4;x=1100;o=0;}
+    const jump=prev===undefined||Math.abs(d-prev)>2;
+    if(jump)el.style.transition='none';
+    el.style.transform=`translate(-50%,-50%) translateX(${sg*x}px) scale(${s})`;
+    el.style.opacity=o; el.style.zIndex=10-ad; el.style.pointerEvents=o?'auto':'none';
+    el.classList.toggle('next',isNext); el.classList.toggle('toR',isNext&&d>0); el.classList.toggle('toL',isNext&&d<0);
+    el.querySelector('.nexttag').textContent=d>0?'下一个 ▶':'◀ 下一个';
+    el.classList.remove('f'); if(d===0){void el.offsetWidth;el.classList.add('f');}
+    if(jump){void el.offsetWidth;el.style.transition='';}
+    el._d=d;
+  });
+  const nx=(st.idx+st.dir+n)%n;
+  const gn=$('#gnext');gn.textContent=st.dir>0?'▶':'◀';gn.style.transform=`translateX(${st.dir*366}px)`;
+  $('#rail').innerHTML=ENT.map((it,i)=>`<span class="${i===st.idx?'on':i===nx?'nx':''}">${it.label}</span>`).join('');
+  $('#galPos').textContent=(st.idx===0?'—':st.idx)+' / '+(n-1);
+}
+function rOv(t,k){
+  const active=k===st.ov.length-1;
+  const row=(items,cols)=>`<div class="ovrow dir-${t.dir<0?'l':'r'}" style="grid-template-columns:repeat(${cols},1fr)">${items.map((it,i)=>`<div class="item${active&&i===t.idx?' f':''}" data-i="${i}">${active?dtag(t):''}${it.label}</div>`).join('')}</div>`;
+  if(t.type==='speak')return `<div class="ov"><div class="ovtag">正在朗读 · 照护者请看这里</div><div class="speak-text">${esc(comm.out)}</div>${row(ovItems(t),3)}</div>`;
+  if(t.type==='confirm')return `<div class="ov"><div class="confirm-q">${t.title}<small>${t.desc}</small></div><div class="halves dir-${t.dir<0?'l':'r'}"><div class="item half l${active&&t.idx===0?' f':''}" data-c="0"><span class="gz">先亮 · 默认</span><div><b>${t.no}</b><small>${t.noSub}</small></div></div><div class="item half r${active&&t.idx===1?' f':''}" data-c="1"><span class="gz">后亮</span><div><b>${t.yes}</b><small>${t.yesSub}</small></div></div></div><div class="ovtag">两项自动轮流高亮，亮到哪项咬牙就选哪项 · 三轮不选按「${t.no}」处理</div></div>`;
+  if(t.type==='call')return t.sent?`<div class="ov call"><div class="ring" style="font-size:80px">✓</div><h2>已呼叫护士</h2><p>本地警报已响起（原型示意，是否联动护士站待定）<br>做任意动作关闭</p></div>`:`<div class="ov call"><div class="ring">${t.t}</div><h2>正在呼叫护士</h2><p>${t.t} 秒后自动呼叫 · 左看取消 · 咬牙或右看立即呼叫</p></div>`;
+  if(t.type==='adjust'){const m={vol:['音量',st.vol+'%',st.vol],bri:['屏幕亮度',st.bri+'%',st.bri],speed:['每项停留',(st.interval/1000).toFixed(1)+' 秒',(st.interval-1100)/19]}[t.key];return `<div class="ov"><div class="adj-t">${m[0]}</div><div class="adj-v">${m[1]}</div><div class="meter"><i style="width:${m[2]}%"></i></div><div style="height:8px"></div>${row(ovItems(t),3)}</div>`;}
+  if(t.type==='tvmenu')return `<div class="ov"><div class="adj-t">电视菜单</div><div style="flex:1"></div>${row(ovItems(t),3)}</div>`;
+  return '';
+}
+function ovItems(t){const saved=st.ov;st.ov=saved.slice(0,saved.indexOf(t)+1);const it=ctx().items;st.ov=saved;return it;}
+function crumb(){
+  const P=st.parent==='asst'?'生活助手':'娱乐';
+  switch(st.screen){
+    case 'home':return '<b>主页</b>';
+    case 'contacts':return '主页 › <b>沟通</b>';
+    case 'cact':return '沟通 › <b>'+esc(st.contact.name)+'</b>';
+    case 'invite':return '沟通 › <b>邀请家属</b>';
+    case 'comm':return comm.mode==='talk'?'沟通 › <b>当面说话</b>':comm.mode==='chat'?'沟通 › '+esc(comm.target.name)+' › <b>文字消息</b>':'生活助手 › <b>输入</b>';
+    case 'video':return st.call?(st.callBack?'来电 › <b>'+esc(st.call.c.name)+'</b>':'沟通 › '+esc(st.call.c.name)+' › <b>视频通话</b>'):'';
+    case 'asst':return '主页 › <b>生活助手</b>';
+    case 'ent':return '主页 › <b>娱乐</b>';
+    case 'settings':return '主页 › <b>设置</b>';
+    case 'tv':return P+' › <b>看电视</b>';
+    case 'music':return P+' › <b>音乐</b>';
+    case 'game':return '娱乐 › <b>'+(st.game?st.game.label:'')+'</b>';
+  }
+  return '';
+}
+function labels(){
+  const c=ctx(),o=cur();
+  if(c.mode==='scan'){const it=c.items[o.idx]||{},B='选「'+(it.label||'')+'」';
+    if(st.scan==='manual')return {L:'上一项',B,R:'下一项',dir:0};
+    if(c.two)return {L:'多停一会',B,R:'多停一会',dir:0};
+    const g=st.screen==='ent'&&!topOv();return {L:g?'向左滑':'向左轮转',B,R:g?'向右滑':'向右轮转',dir:o.dir};}
+  if(c.mode==='wing'){const BL=blocks(),b=BL[comm.side][comm.bIdx];return {L:comm.side==='L'?'选「'+LBL[b]+'」':'切到左侧',R:comm.side==='R'?'选「'+LBL[b]+'」':'切到右侧',B:comm.seq.length?'去选拼音':'打开常用语',dir:comm.side==='L'?-1:1};}
+  if(c.mode==='call'){const t=topOv();return t.sent?{L:'关闭',B:'关闭',R:'关闭'}:{L:'取消呼叫',B:'立即呼叫',R:'立即呼叫'};}
+  if(st.screen==='tv')return {L:'上一台',B:'打开菜单',R:'下一台'};
+  return {L:'游戏内 · 向左',B:'离开游戏…',R:'游戏内 · 向右'};
+}
+function paintBar(){const l=labels();$('#lblL').textContent=l.L;$('#lblB').textContent=l.B;$('#lblR').textContent=l.R;$('#slotL').classList.toggle('cur',l.dir<0);$('#slotR').classList.toggle('cur',l.dir>0);}
+const R={home:rHome,contacts:rContacts,cact:rCact,invite:rInvite,comm:rComm,asst:rAsst,ent:rEnt,settings:rSettings,tv:rTv,music:rMusic,video:rVideo,game:rGame};
+function fitGal(){const g=$('#gal');if(g)g.style.height='100%';}
+function render(){
+  const v=$('#view');
+  if(st.screen==='ent'&&$('#gal'))updateGallery();
+  else if(st.screen==='home'&&document.querySelector('.tiles'))updateHome();
+  else{v.innerHTML=R[st.screen]();if(st.screen==='ent'){fitGal();updateGallery();}}
+  $('#overlay').innerHTML=st.ov.map(rOv).join('');
+  $('#crumb').innerHTML=crumb();
+  paintBar();
+  if(st.careOpen)paintLog();
+  if(window.lucide)lucide.createIcons();
+}
+
+/* ---------- touch (same execution path as BCI) ---------- */
+$('#device').addEventListener('click',e=>{
+  if(e.target.closest('.care'))return;
+  if(st.careOpen)return;
+  if(e.target.id==='copyBtn'){toast('已复制邀请码（演示）',true);return;}
+  const c=e.target.closest('[data-c]');if(c){const t=topOv();+c.dataset.c?t.onYes():t.onNo();return;}
+  const b=e.target.closest('[data-b]');if(b&&st.screen==='comm'&&comm.phase==='L1'){const v=b.dataset.b;const k=isNaN(v)?v:+v;const B=blocks();comm.side=B.L.includes(k)?'L':'R';comm.bIdx=B[comm.side].indexOf(k);applyBlock(k);return;}
+  const ci=e.target.closest('[data-ci]');if(ci){openContact(visContacts()[+ci.dataset.ci]);return;}
+  const d=e.target.closest('[data-i]');if(d&&ctx().mode==='scan'){const it=ctx().items[+d.dataset.i];if(!it)return;cur().idx=+d.dataset.i;prevIdx=-1;choose(it);schedule();render();}
+});
+/* ---------- caregiver ---------- */
+function paintLog(){$('#log').innerHTML=st.log.length?st.log.map(esc).join('<br>'):'暂无';}
+function openCare(on){st.careOpen=on;$('#care').classList.toggle('on',on);if(on){clearTimeout(timer);paintLog();waveLoop();}else schedule();}
+$('#careBtn').onclick=e=>{e.stopPropagation();openCare(true);};
+$('#careClose').onclick=()=>openCare(false);
+$('#swSound').onclick=()=>{st.sound=!st.sound;$('#swSound').classList.toggle('on',st.sound);$('#optSound').checked=st.sound;};
+$('#swWave').onclick=()=>{const on=!$('#swWave').classList.contains('on');$('#swWave').classList.toggle('on',on);toast(on?'悬浮波形窗口已显示':'悬浮波形窗口已隐藏');};
+$('#swHead').onclick=()=>{st.head=!st.head;$('#swHead').classList.toggle('on',st.head);toast(st.head?'耳机控制已启用':'耳机控制已停用，仅模拟输入');};
+function waveLoop(){const cv=$('#wave'),x=cv.getContext('2d');let ph=0;(function f(){if(!st.careOpen)return;const dark=effMode()==='light';x.clearRect(0,0,cv.width,cv.height);[[dark?'#8AA8FF':'#1F5BD6',80],[dark?'#FFB38A':'#C2410C',220]].forEach(([col,y0],ch)=>{x.strokeStyle=col;x.lineWidth=2;x.beginPath();for(let i=0;i<cv.width;i+=3){const t=(i+ph)/18;const y=y0+Math.sin(t+ch)*9+Math.sin(t*2.7)*6+(Math.random()-.5)*10;i?x.lineTo(i,y):x.moveTo(i,y);}x.stroke();});x.fillStyle=dark?'#A3A8B0':'#62676C';x.font='22px Archivo, sans-serif';x.fillText('左耳 CH1',10,28);x.fillText('右耳 CH2',10,168);ph+=6;requestAnimationFrame(f);})();}
+
+/* ---------- palette cards in spec ---------- */
+const PAL_HEX={cobalt:{light:['#F4F2EE','#FFFFFF','#DFDBD2','#1A2130','#2D5BE3'],dark:['#10141B','#171C24','#283040','#E8E5DE','#8AA8FF'],note:'冷静、医疗感，蓝色焦点在两种底色上都最醒目'},wisteria:{light:['#F5F3F7','#FFFFFF','#E2DDE8','#211C2B','#6A4FD6'],dark:['#121019','#1A1722','#2C2738','#ECE7F2','#AE9BFF'],note:'延续原品牌紫色，更柔和'},coral:{light:['#F6F3EF','#FFFFFF','#E5DED5','#211C18','#D9502A'],dark:['#14110E','#1C1915','#312B25','#EFE8DF','#FF8C5E'],note:'已选定 · 最温暖，夜间蓝光最少'}};
+$('#palGrid').innerHTML=Object.entries(PAL_HEX).map(([k,v])=>`<div class="pal-card"><h4>${PALS[k]} <small>${v.note}</small></h4>${['light','dark'].map(m=>`<div class="pal-half" style="background:${v[m][0]};color:${v[m][3]}">${v[m].map(c=>`<i style="background:${c}"></i>`).join('')}<span>${m==='light'?'日间':'夜间'} · 焦点 ${v[m][4]}</span></div>`).join('')}</div>`).join('');
+
+$('#swNoC').onclick=()=>{st.noContacts=!st.noContacts;$('#swNoC').classList.toggle('on',st.noContacts);toast(st.noContacts?'已模拟：还没有绑定家属':'已恢复示例联系人');if(st.screen==='contacts'){st.careOpen=false;$('#care').classList.remove('on');go('contacts');}};
+$('#btnInc').onclick=()=>incoming();
+$('#btnAsstTest').onclick=()=>toast('助手服务连接正常（演示）',true);
+
+/* ---------- sim panel ---------- */
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{input(b.dataset.s);b.blur();});
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{openCare(false);st.call=null;st.callBack=null;openScreen(b.dataset.go);});
+document.querySelectorAll('[data-md]').forEach(b=>b.onclick=()=>{st.mode=b.dataset.md;applyTheme();if(st.screen==='settings')render();});
+$('#simInc').onclick=()=>incoming();
+$('#spd').oninput=e=>{setSpeed(+e.target.value);schedule();};
+$('#optLock').onchange=e=>{st.lockSim=e.target.checked;if(!st.lockSim){st.locked=false;st.rest=3;paintReady();}};
+$('#optGrace').onchange=e=>st.grace=e.target.checked?400:0;
+$('#optSound').onchange=e=>{st.sound=e.target.checked;$('#swSound').classList.toggle('on',st.sound);};
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'&&e.target.type==='range')return;const m={ArrowLeft:'L',ArrowRight:'R',' ':'B'}[e.key];if(m&&!$('#proto').hidden){e.preventDefault();if(!e.repeat)input(m);}});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));$('#proto').hidden=t.dataset.tab!=='proto';$('#spec').hidden=t.dataset.tab!=='spec';fitDevice();});
+
+function openScreen(S){
+  if(S==='comm'||S==='talk')openComposer('talk',CONTACTS[0]);
+  else if(S==='chat'){st.contact=CONTACTS[1];openComposer('chat',CONTACTS[1]);}
+  else if(S==='cact'){st.contact=CONTACTS[1];go('cact');}
+  else if(S==='video'){st.contact=CONTACTS[1];startVideo(CONTACTS[1]);}
+  else if(S==='tv'||S==='music')go(S,{parent:'ent'});
+  else if(R[S])go(S);
+  else go('home');
+}
+function fitDevice(){if(document.documentElement.classList.contains('solo')){$('#device').style.transform='none';$('#stageWrap').style.height='800px';return;}const w=$('#stageWrap').clientWidth-24;const s=Math.min(1,w/1280);$('#device').style.transform='translate(12px,12px) scale('+s+')';$('#stageWrap').style.height=(800*s+34)+'px';}
+window.addEventListener('resize',fitDevice);
+
+if(HP.get('mode'))st.mode=HP.get('mode');
+if(HP.get('scan'))st.scan=HP.get('scan');
+if(HP.has('solo'))document.documentElement.classList.add('solo');
+if(FREEZE)document.documentElement.classList.add('freeze');
+applyTheme();setSpeed(+HP.get('speed')||1500);applyScan();fitDevice();paintReady();
+if(HP.get('screen'))openScreen(HP.get('screen'));else{render();schedule();}
+if(HP.get('keys')){replaying=true;const g=st.grace,l=st.lockSim;st.grace=0;st.lockSim=false;
+  for(const k of HP.get('keys')){if(k==='T')tickBody();else if('LRB'.includes(k))input(k);}
+  st.grace=g;st.lockSim=l;st.locked=false;st.rest=3;paintReady();replaying=false;render();}
+if(HP.has('care'))openCare(true);
+if(HP.has('incoming'))incoming();
+
+setInterval(()=>{if(FREEZE)return;if(st.mode==='auto')applyTheme();if(st.screen==='home'&&!st.ov.length){const c=document.querySelector('.clock');if(c){const n=new Date();c.textContent=pad2(n.getHours())+':'+pad2(n.getMinutes());}}},10000);
+setInterval(()=>{
+  if(FREEZE)return;
+  if(st.screen==='video'&&st.call&&st.call.state==='active'){const e=$('#vclock');if(e)e.textContent=dur();}
+  if(st.screen==='music'&&st.playing){st.pos++;const T=TRACKS[st.track];if(st.pos>=T.d){st.track=(st.track+1)%TRACKS.length;st.pos=0;render();}else{const p=$('#mprog'),t=$('#mtime');if(p)p.style.width=(st.pos/T.d*100)+'%';if(t)t.textContent=fmt(st.pos);}}
+  if(dev.ac.offAt){if(Date.now()>=dev.ac.offAt){dev.ac.on=false;dev.ac.offAt=null;asst.turns.push({r:'a',t:'模拟：定时到了，空调已关闭'});if(st.screen==='asst')render();}else{const e=$('#hrTimer');if(e&&!e.querySelector('.new'))e.textContent=remain(dev.ac.offAt);}}
+},1000);
+
+</script>
+</body>
+</html>

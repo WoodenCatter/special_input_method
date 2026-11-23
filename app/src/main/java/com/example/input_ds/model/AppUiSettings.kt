@@ -13,6 +13,16 @@ object AppUiSettings {
     private const val KEY_FLOATING_BALL_VISIBLE = "floating_ball_visible"
     private const val KEY_SCREEN_BRIGHTNESS = "screen_brightness"
 
+    enum class DisplayMode { AUTO, LIGHT, DARK }
+
+    private fun preferences(context: Context) = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    fun displayMode(context: Context) = DisplayMode.entries.firstOrNull {
+        it.name == preferences(context).getString("display_mode", null)
+    } ?: DisplayMode.AUTO
+    fun feedbackSound(context: Context) = preferences(context).getBoolean("feedback_sound", true)
+    fun floatingEegVisible(context: Context) = preferences(context).getBoolean("floating_eeg_visible", true)
+    fun graceMs(context: Context) = preferences(context).getLong("grace_ms", 400L)
+
     fun readFloatingBallVisible(context: Context): Boolean = context
         .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         .getBoolean(KEY_FLOATING_BALL_VISIBLE, true)
