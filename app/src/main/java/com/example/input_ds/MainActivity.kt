@@ -146,6 +146,7 @@ class MainActivity : ComponentActivity() {
     private var feedbackSound by mutableStateOf(true)
     private var floatingEegVisible by mutableStateOf(false)
     private var debugNoContacts by mutableStateOf(false)
+    private var debugFakeAssistant by mutableStateOf(false)
     private var bluetoothPermissionRequested = false
     private var statusPath = listOf("主页")
     private val feedback = GazeFeedback()
@@ -432,10 +433,6 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, speakOverlay != null, confirmOverlay != null, careOpen) {
                     bciController?.invalidatePendingCommands()
                 }
-                BackHandler(enabled = careOpen) { toggleCareSheet(false) }
-                BackHandler(enabled = !careOpen && confirmOverlay != null) { dismissConfirmOverlay() }
-                BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay != null) { dismissSpeakOverlay() }
-                BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null && nurseCall != null) { dismissNurseCall() }
                 Box(Modifier.fillMaxSize()) {
                     if (patient) {
                         val connection = when (bleState) {
@@ -629,6 +626,21 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else AppContent(vm = vm, chat = chat, bleState = bleState)
+                    // Conditionally mounted so opening an overlay registers on top of OnBackPressedDispatcher (LIFO).
+                    androidx.compose.runtime.key(destination.value, call?.id) {
+                        if (nurseCall != null) {
+                            BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null) { dismissNurseCall() }
+                        }
+                        if (speakOverlay != null) {
+                            BackHandler(enabled = !careOpen && confirmOverlay == null) { dismissSpeakOverlay() }
+                        }
+                        if (confirmOverlay != null) {
+                            BackHandler(enabled = !careOpen) { dismissConfirmOverlay() }
+                        }
+                        if (careOpen) {
+                            BackHandler { toggleCareSheet(false) }
+                        }
+                    }
                     FloatingEegSignalWindow(
                         bleManager = bleManager,
                         visible = floatingEegVisible && call == null && !careOpen &&
@@ -652,7 +664,7 @@ class MainActivity : ComponentActivity() {
         if (destination.value != AppDestination.HOME &&
             destination.value != AppDestination.DEVICE_STATUS
         ) {
-            BackHandler {
+            BackHandler(enabled = !careOpen && confirmOverlay == null && speakOverlay == null && nurseCall == null) {
                 if (destination.value == AppDestination.INPUT_METHOD) {
                     inputViewModel?.handleBackPress()
                     return@BackHandler
@@ -723,11 +735,13 @@ class MainActivity : ComponentActivity() {
             }
 
             AppDestination.LIFE_ASSISTANT -> assistantState.SaveableStateProvider("life_assistant") {
+                val videoState by chat.video.state.collectAsState()
                 AssistantScreen(
                     scanIntervalMs = inputState.scanIntervalMs,
                     scanMode = scanMode.value,
-                    paused = careOpen || nurseCall != null,
+                    paused = careOpen || confirmOverlay != null || speakOverlay != null || nurseCall != null || videoState.call != null,
                     frozen = frozen,
+                    fakeAssistant = debugFakeAssistant,
                     onToast = { message, ok -> feedback.toast(message, ok) },
                     onEditingChange = { assistantEditing = it },
                     onBack = {
@@ -780,14 +794,16 @@ class MainActivity : ComponentActivity() {
                 scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
                 onBack = { navigateTo(mediaParent()) },
-                initialChannelId = assistantMediaId
+                initialChannelId = assistantMediaId,
+                fromAssistant = assistantMediaId != null
             )
 
             AppDestination.MUSIC -> MusicScreen(
                 scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
                 onBack = { navigateTo(mediaParent()) },
-                initialTrackId = assistantMediaId
+                initialTrackId = assistantMediaId,
+                fromAssistant = assistantMediaId != null
             )
 
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
@@ -1089,6 +1105,15 @@ class MainActivity : ComponentActivity() {
         if (target == AppDestination.COMMUNICATION && previous != AppDestination.INPUT_METHOD && previous != AppDestination.COMMUNICATION) {
             communicationViewModel?.enterContactList()
         }
+        if (target == AppDestination.LIFE_ASSISTANT && previous in setOf(AppDestination.TV, AppDestination.MUSIC)) {
+            AssistantInputBus.resetFocusToInput()
+        }
+        if (target == AppDestination.ENTERTAINMENT) {
+            val moduleIndex = EntertainmentHubModule.entries.indexOfFirst { it.destination == previous }
+            if (moduleIndex >= 0) {
+                entertainmentSelection.value = entertainmentSelection.value.copy(selectedIndex = moduleIndex, scanDirection = 1)
+            }
+        }
         updateBciCommandDelivery()
     }
 
@@ -1174,6 +1199,14 @@ class MainActivity : ComponentActivity() {
             "fake incoming" -> {
                 toggleCareSheet(false)
                 communicationViewModel?.injectFakeIncomingCall()
+                dwellRevision++
+            }
+            "fake assistant" -> {
+                debugFakeAssistant = true
+                dwellRevision++
+            }
+            "fake home reset" -> {
+                AssistantInputBus.resetHome()
                 dwellRevision++
             }
             "care on", "care off" -> toggleCareSheet(cmd.endsWith("on"))

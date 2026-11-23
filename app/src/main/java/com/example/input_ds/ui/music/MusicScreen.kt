@@ -119,8 +119,11 @@ fun MusicScreen(
     scanIntervalMs: Long,
     scanMode: ScanMode,
     onBack: () -> Unit,
-    initialTrackId: String? = null
+    initialTrackId: String? = null,
+    fromAssistant: Boolean = false
 ) {
+    val returnLabel = if (fromAssistant) "返回助手" else "返回娱乐"
+    val settingsLabels = remember(returnLabel) { listOf("返回音乐", "删除音乐", returnLabel) }
     val context = LocalContext.current
     val appContext = context.applicationContext
     val scope = rememberCoroutineScope()
@@ -170,7 +173,7 @@ fun MusicScreen(
         } to controlDirection
         MusicFocusMode.PLAYLIST -> tracks.getOrNull(playlistIndex)?.title.orEmpty() to playlistDirection
         MusicFocusMode.VOLUME -> VOLUME_LABELS[volumeIndex] to volumeDirection
-        MusicFocusMode.SETTINGS -> SETTINGS_LABELS[settingsIndex] to settingsDirection
+        MusicFocusMode.SETTINGS -> settingsLabels[settingsIndex] to settingsDirection
         MusicFocusMode.DELETE_LIST -> (tracks.getOrNull(deleteIndex-1)?.title ?: "返回") to deleteDirection
         MusicFocusMode.DELETE_CONFIRM -> (if (confirmIndex == 0) "确定删除" else "返回") to confirmDirection
     }
@@ -488,6 +491,10 @@ fun MusicScreen(
             tracks.firstOrNull { it.id == playbackStore.lastTrackId() } ?: tracks.firstOrNull()
         }
         initialTrack?.let(::startTrack)
+        if (initialTrackId != null) {
+            focusMode = MusicFocusMode.CONTROLS
+            controlIndex = CONTROL_PLAY_PAUSE
+        }
         notice = if (initialTrackId != null && initialTrack == null) "指定歌曲已不在本地曲库" else null
         while (true) {
             delay(500)
@@ -623,6 +630,7 @@ fun MusicScreen(
                 }
             )
             MusicFocusMode.SETTINGS -> SettingsOverlay(
+                labels = settingsLabels,
                 selectedIndex = settingsIndex,
                 hasMusic = tracks.isNotEmpty(),
                 onSelect = { index ->
@@ -993,6 +1001,7 @@ private fun VolumeOverlay(
 
 @Composable
 private fun SettingsOverlay(
+    labels: List<String>,
     selectedIndex: Int,
     hasMusic: Boolean,
     onSelect: (Int) -> Unit
@@ -1000,7 +1009,7 @@ private fun SettingsOverlay(
     MusicOverlay(widthFraction = .52f) {
         Text("音乐设置", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
         Text("进入设置不会暂停歌曲 · 光标自动跳转 · 左看/右看改变方向 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SETTINGS_LABELS.forEachIndexed { index, label ->
+        labels.forEachIndexed { index, label ->
             val enabled = index != 1 || hasMusic
             FocusOptionButton(
                 text = if (index == 1 && !hasMusic) "删除音乐（暂无）" else label,

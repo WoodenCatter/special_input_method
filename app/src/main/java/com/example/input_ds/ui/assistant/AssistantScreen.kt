@@ -1,41 +1,35 @@
 package com.example.input_ds.ui.assistant
 
-import com.example.input_ds.ui.design.*
 import android.app.Application
-import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,86 +46,120 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.input_ds.assistant.AssistantCareStore
 import com.example.input_ds.assistant.AssistantCatalogItem
 import com.example.input_ds.assistant.AssistantConnection
+import com.example.input_ds.assistant.AssistantHomePreview
 import com.example.input_ds.assistant.AssistantResult
 import com.example.input_ds.assistant.AssistantService
 import com.example.input_ds.assistant.AssistantServiceException
 import com.example.input_ds.assistant.HomeAction
+import com.example.input_ds.assistant.HomePreviewRow
 import com.example.input_ds.assistant.SimulatedHome
 import com.example.input_ds.model.AppDestination
+import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.InputMode
+import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.runScanTimer
 import com.example.input_ds.music.MusicLibrary
 import com.example.input_ds.ui.communication.ComposerScreen
-import com.example.input_ds.ui.theme.AuroraBackground
-import com.example.input_ds.ui.theme.AuroraDarkAccentSoft
-import com.example.input_ds.ui.theme.AuroraDarkBorder
-import com.example.input_ds.ui.theme.AuroraDarkSurfaceStrong
-import com.example.input_ds.ui.theme.AuroraVioletBright
-import com.example.input_ds.ui.theme.GlassPanel
+import com.example.input_ds.ui.design.ActionHints
+import com.example.input_ds.ui.design.ReportActionHints
+import com.example.input_ds.ui.design.confirmHints
+import com.example.input_ds.ui.design.inputHints
+import com.example.input_ds.ui.design.scanItem
+import com.example.input_ds.ui.theme.BciType
+import com.example.input_ds.ui.theme.LocalBciColors
 import com.example.input_ds.ui.tv.TV_CHANNELS
 import com.example.input_ds.viewmodel.InputMethodViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.io.Serializable
 
 private const val MAX_INPUT_LENGTH = 240
-private const val MAX_CHAT_TURNS = 50
-private val ASSISTANT_PHRASES = listOf(
-    "开灯", "关灯", "打开窗帘", "关闭窗帘", "开空调", "关空调", "我热",
-    "降温", "打开床头灯", "关闭床头灯", "播放音乐", "看电视", "看央视新闻"
-)
+private const val MAX_CHAT_ENTRIES = 50
+private const val WELCOME_MESSAGE =
+    "你好，我是生活助手。可以问我问题、点播音乐和电视，或者让我操作房间里的设备（演示为模拟）。"
+
+internal val AssistantDwellProgressReaderKey =
+    SemanticsPropertyKey<() -> Float?>("AssistantDwellProgressReader")
 
 private enum class AssistantAction(val label: String) {
     INPUT("输入"),
-    CLEAR("清空输入内容"),
+    CLEAR("清空草稿"),
     SEND("发送"),
     EXIT("退出");
 
     fun labelFor(draft: String): String =
         if (this == INPUT && draft.isNotEmpty()) "继续输入" else label
 
-    fun isAvailable(draft: String, sending: Boolean): Boolean = when (this) {
-        INPUT -> !sending
-        CLEAR -> !sending && draft.isNotEmpty()
-        SEND -> !sending && draft.isNotBlank()
-        EXIT -> true
+    fun isAvailable(draft: String, busy: Boolean): Boolean = when (this) {
+        INPUT -> !busy
+        CLEAR -> !busy && draft.isNotEmpty()
+        SEND -> !busy && draft.isNotBlank()
+        EXIT -> !busy
     }
 }
 
-private data class ChatTurn(val prompt: String, val reply: String)
+private data class AssistantEntry(val fromUser: Boolean, val text: String)
 private data class HomeConfirmation(val prompt: String, val options: List<HomeAction>) : Serializable
 
-private val ChatTurnsSaver = listSaver<List<ChatTurn>, String>(
-    save = { turns -> turns.flatMap { listOf(it.prompt, it.reply) } },
-    restore = { values -> values.chunked(2).map { ChatTurn(it[0], it[1]) } }
+private val AssistantEntriesSaver = listSaver<List<AssistantEntry>, String>(
+    save = { entries -> entries.flatMap { listOf(if (it.fromUser) "u" else "a", it.text) } },
+    restore = { values -> values.chunked(2).map { AssistantEntry(it[0] == "u", it[1]) } }
 )
 
 internal object AssistantInputBus {
     private var handler: ((ControlSignal) -> Unit)? = null
     private var ticker: (() -> Unit)? = null
+    private var homeResetter: (() -> Unit)? = null
+    private var focusResetter: (() -> Unit)? = null
 
-    fun attach(onSignal: (ControlSignal) -> Unit, onTick: () -> Unit = {}) {
+    fun attach(
+        onSignal: (ControlSignal) -> Unit,
+        onTick: () -> Unit = {},
+        onResetHome: () -> Unit = {},
+        onResetFocus: () -> Unit = {}
+    ) {
         handler = onSignal
         ticker = onTick
+        homeResetter = onResetHome
+        focusResetter = onResetFocus
     }
 
     fun detach(onSignal: (ControlSignal) -> Unit) {
         if (handler === onSignal) {
             handler = null
             ticker = null
+            homeResetter = null
+            focusResetter = null
         }
     }
 
@@ -142,6 +170,14 @@ internal object AssistantInputBus {
     fun debugTick() {
         ticker?.invoke()
     }
+
+    fun resetHome() {
+        homeResetter?.invoke()
+    }
+
+    fun resetFocusToInput() {
+        focusResetter?.invoke()
+    }
 }
 
 @Composable
@@ -150,6 +186,7 @@ internal fun AssistantScreen(
     scanMode: ScanMode = ScanMode.AUTO,
     paused: Boolean = false,
     frozen: Boolean = false,
+    fakeAssistant: Boolean = false,
     onToast: (String, Boolean) -> Unit = { _, _ -> },
     onEditingChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -161,10 +198,6 @@ internal fun AssistantScreen(
     }
     val inputState by input.state.collectAsState()
     val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
-    val preferences = remember(context) {
-        context.getSharedPreferences("assistant_connection", Context.MODE_PRIVATE)
-    }
     val library = remember(context) { MusicLibrary(context) }
     val allowHttp = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     val channels = remember {
@@ -175,12 +208,8 @@ internal fun AssistantScreen(
     val sharedConfig by AssistantCareStore.config.collectAsState()
     val sharedDraft by AssistantCareStore.debugDraft.collectAsState()
     LaunchedEffect(context) { AssistantCareStore.load(context) }
-    var address by remember(sharedConfig.address) { mutableStateOf(sharedConfig.address) }
-    var accessCode by remember(sharedConfig.accessCode) { mutableStateOf(sharedConfig.accessCode) }
-    var showSetup by remember { mutableStateOf(false) }
+
     var editing by remember { mutableStateOf(false) }
-    var selected by remember { mutableIntStateOf(0) }
-    var direction by remember { mutableIntStateOf(1) }
     var draft by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(sharedDraft) {
         if (sharedDraft != draft) draft = sharedDraft
@@ -188,36 +217,150 @@ internal fun AssistantScreen(
     LaunchedEffect(draft) {
         if (draft != sharedDraft) AssistantCareStore.setDebugDraft(draft)
     }
-    var turns by rememberSaveable(stateSaver = ChatTurnsSaver) { mutableStateOf(emptyList<ChatTurn>()) }
-    var pendingPrompt by remember { mutableStateOf<String?>(null) }
+
+    var entries by rememberSaveable(stateSaver = AssistantEntriesSaver) {
+        mutableStateOf(listOf(AssistantEntry(fromUser = false, text = WELCOME_MESSAGE)))
+    }
+    var pending by remember { mutableStateOf(false) }
+    var requestGeneration by remember { mutableLongStateOf(0L) }
+    var activeRequestJob by remember { mutableStateOf<Job?>(null) }
     var home by rememberSaveable { mutableStateOf(SimulatedHome()) }
     var confirmation by rememberSaveable { mutableStateOf<HomeConfirmation?>(null) }
     var homeTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var flashKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var dwellRevision by remember { mutableIntStateOf(0) }
 
-    fun appendTurn(prompt: String, reply: String) {
-        turns = (turns + ChatTurn(prompt, reply)).takeLast(MAX_CHAT_TURNS)
+    val liveBar = !pending && confirmation == null
+    val availableActions = remember(draft, liveBar) {
+        if (liveBar) AssistantAction.entries.filter { it.isAvailable(draft, busy = false) }
+        else emptyList()
+    }
+    var barCursor by remember { mutableStateOf(ScanCursor(size = 2, index = 0, direction = 1)) }
+    var confirmCursor by remember { mutableStateOf(ScanCursor(size = 2, index = 0, direction = 1)) }
+
+    LaunchedEffect(availableActions.size) {
+        if (availableActions.isNotEmpty() && barCursor.size != availableActions.size) {
+            barCursor = ScanCursor(
+                size = availableActions.size,
+                index = barCursor.index.coerceIn(0, availableActions.lastIndex),
+                direction = 1
+            )
+            dwellRevision++
+        }
+    }
+    LaunchedEffect(confirmation) {
+        val req = confirmation
+        if (req != null && confirmCursor.size != req.options.size + 1) {
+            confirmCursor = ScanCursor(size = req.options.size + 1, index = 0, direction = 1)
+        }
     }
 
-    fun submit() {
-        val prompt = draft.trim()
+    fun appendEntry(fromUser: Boolean, text: String) {
+        entries = (entries + AssistantEntry(fromUser, text)).takeLast(MAX_CHAT_ENTRIES)
+    }
+
+    fun focusBarAction(target: AssistantAction, currentDraft: String = draft) {
+        val actions = AssistantAction.entries.filter { it.isAvailable(currentDraft, busy = false) }
+        val idx = actions.indexOf(target).coerceAtLeast(0)
+        barCursor = ScanCursor(size = actions.size.coerceAtLeast(1), index = idx, direction = 1)
+        dwellRevision++
+    }
+
+    fun submit(explicitText: String? = null) {
+        val prompt = (explicitText ?: draft).trim()
+        if (prompt.isEmpty()) {
+            if (!frozen) onToast("请先输入内容", false)
+            return
+        }
         if (prompt.length > MAX_INPUT_LENGTH) {
             val preview = prompt.take(MAX_INPUT_LENGTH).trimEnd { it.isHighSurrogate() }
-            appendTurn("$preview…", "请把输入缩短到 ${MAX_INPUT_LENGTH} 字以内")
+            appendEntry(true, "$preview…")
+            appendEntry(false, "请把输入缩短到 ${MAX_INPUT_LENGTH} 字以内")
             return
         }
-        val connection = AssistantConnection.parse(address, accessCode, allowHttp)
+        activeRequestJob?.cancel()
+        activeRequestJob = null
+        val reqId = ++requestGeneration
+        appendEntry(true, prompt)
+        draft = ""
+        AssistantCareStore.setDebugDraft("")
+
+        if (fakeAssistant) {
+            val homeNow = home.expireTimer(System.currentTimeMillis())
+            val fakeCatalog = listOf(
+                AssistantCatalogItem("track_1", "演员 · 薛之谦"),
+                AssistantCatalogItem("track_2", "绅士 · 薛之谦")
+            )
+            val reply = AssistantHomePreview.fakeReply(prompt, homeNow, channels, fakeCatalog)
+            when (reply) {
+                is AssistantResult.ConfirmHome -> {
+                    confirmation = HomeConfirmation(prompt, reply.options)
+                    confirmCursor = ScanCursor(size = reply.options.size + 1, index = 0, direction = 1)
+                    dwellRevision++
+                }
+                is AssistantResult.Message -> {
+                    appendEntry(false, reply.text)
+                    if (reply.clarify) {
+                        draft = prompt
+                        AssistantCareStore.setDebugDraft(prompt)
+                    }
+                    focusBarAction(AssistantAction.INPUT, if (reply.clarify) prompt else "")
+                }
+                is AssistantResult.PlayTv -> {
+                    val ch = channels.firstOrNull { it.id == reply.channelId }
+                    appendEntry(false, "好的，为你打开 ${ch?.name ?: "电视"}。")
+                    focusBarAction(AssistantAction.INPUT, "")
+                    pending = true
+                    activeRequestJob = scope.launch {
+                        try {
+                            if (!frozen) delay(1_100L)
+                            if (requestGeneration == reqId && !editing) {
+                                onOpenMedia(AppDestination.TV, reply.channelId)
+                            }
+                        } finally {
+                            if (requestGeneration == reqId) pending = false
+                        }
+                    }
+                }
+                is AssistantResult.PlayMusic -> {
+                    appendEntry(false, "好的，打开音乐，播放《演员》。")
+                    focusBarAction(AssistantAction.INPUT, "")
+                    pending = true
+                    activeRequestJob = scope.launch {
+                        try {
+                            if (!frozen) delay(1_100L)
+                            val tracks = library.initializeAndLoadTracks()
+                            val targetId = tracks.firstOrNull { it.title.contains("演员") }?.id
+                                ?: tracks.firstOrNull()?.id
+                                ?: reply.trackId
+                            if (requestGeneration == reqId && !editing) {
+                                onOpenMedia(AppDestination.MUSIC, targetId)
+                            }
+                        } finally {
+                            if (requestGeneration == reqId) pending = false
+                        }
+                    }
+                }
+            }
+            return
+        }
+
+        val connection = AssistantConnection.parse(sharedConfig.address, sharedConfig.accessCode, allowHttp)
         if (connection == null) {
-            appendTurn(prompt, "请在右上角「设置」中完成连接配置")
+            appendEntry(false, "请照护者在照护面板「生活助手服务」中完成连接配置")
+            focusBarAction(AssistantAction.INPUT, "")
             return
         }
-        pendingPrompt = prompt
-        scope.launch {
+
+        pending = true
+        activeRequestJob = scope.launch {
             try {
                 val tracks = library.initializeAndLoadTracks().take(100)
                 val catalog = tracks.mapIndexed { index, track ->
                     AssistantCatalogItem("track_${index + 1}", "${track.title} · ${track.artist}".take(180))
                 }
                 val reply = AssistantService.submit(connection, prompt, catalog, channels, home)
+                if (requestGeneration != reqId) return@launch
                 var media: Pair<AppDestination, String>? = null
                 val responseText = when (reply) {
                     is AssistantResult.Message -> reply.text
@@ -232,22 +375,37 @@ internal fun AssistantScreen(
                         "已打开电视页 · ${channel.name}"
                     }
                     is AssistantResult.ConfirmHome -> {
-                        selected = 0
                         confirmation = HomeConfirmation(prompt, reply.options)
-                        draft = ""
+                        confirmCursor = ScanCursor(size = reply.options.size + 1, index = 0, direction = 1)
+                        dwellRevision++
                         return@launch
                     }
                 }
-                appendTurn(prompt, responseText)
-                // Keep the original text available when the user needs to clarify it.
-                if (reply !is AssistantResult.Message || !reply.clarify) draft = ""
-                media?.let { (destination, id) -> onOpenMedia(destination, id) }
+                appendEntry(false, responseText)
+                val keptDraft = if (reply is AssistantResult.Message && reply.clarify) prompt else ""
+                if (keptDraft.isNotEmpty()) {
+                    draft = keptDraft
+                    AssistantCareStore.setDebugDraft(keptDraft)
+                }
+                focusBarAction(AssistantAction.INPUT, keptDraft)
+                media?.let { (destination, id) ->
+                    delay(1_100L)
+                    if (requestGeneration == reqId && !editing) {
+                        onOpenMedia(destination, id)
+                    }
+                }
             } catch (error: AssistantServiceException) {
-                appendTurn(prompt, error.message ?: "生活助手暂时无法回复，请稍后重试")
+                if (requestGeneration == reqId) {
+                    appendEntry(false, error.message ?: "生活助手暂时无法回复，请稍后重试")
+                    focusBarAction(AssistantAction.INPUT, "")
+                }
             } catch (_: IOException) {
-                appendTurn(prompt, "未能连接电脑服务，请检查服务地址和调试连接")
+                if (requestGeneration == reqId) {
+                    appendEntry(false, "未能连接电脑服务，请检查服务地址和调试连接")
+                    focusBarAction(AssistantAction.INPUT, "")
+                }
             } finally {
-                pendingPrompt = null
+                if (requestGeneration == reqId) pending = false
             }
         }
     }
@@ -261,20 +419,22 @@ internal fun AssistantScreen(
         onEditingChange(false)
         if (submitNow) {
             if (text.trim().isEmpty()) {
-                onToast("还没有要发的内容", false)
-                selected = AssistantAction.INPUT.ordinal
+                if (!frozen) onToast("还没有要发的内容", false)
+                focusBarAction(AssistantAction.INPUT, text)
             } else {
-                selected = AssistantAction.INPUT.ordinal
-                submit()
+                submit(text)
             }
         } else {
-            selected = if (text.isNotBlank()) AssistantAction.SEND.ordinal else AssistantAction.INPUT.ordinal
+            if (text.isNotEmpty() && !frozen) onToast("文字已放进草稿", true)
+            focusBarAction(
+                if (text.isNotBlank()) AssistantAction.SEND else AssistantAction.INPUT,
+                text
+            )
         }
     }
 
-    fun choose(action: AssistantAction) {
-        if (showSetup || confirmation != null || !action.isAvailable(draft, pendingPrompt != null)) return
-        if (action != AssistantAction.CLEAR) focusManager.clearFocus()
+    fun chooseBarAction(action: AssistantAction) {
+        if (!liveBar || !action.isAvailable(draft, busy = false)) return
         when (action) {
             AssistantAction.INPUT -> {
                 input.setOnToast(onToast)
@@ -287,19 +447,25 @@ internal fun AssistantScreen(
                 editing = true
                 onEditingChange(true)
             }
-            AssistantAction.CLEAR -> draft = ""
+            AssistantAction.CLEAR -> {
+                draft = ""
+                AssistantCareStore.setDebugDraft("")
+                if (!frozen) onToast("已清空草稿", true)
+                focusBarAction(AssistantAction.INPUT, "")
+            }
             AssistantAction.SEND -> submit()
             AssistantAction.EXIT -> onBack()
         }
     }
 
-    fun confirmHome(index: Int) {
+    /** Executes cancel-first home confirmation: index 0 = 取消, index 1..n = options[index - 1]. */
+    fun resolveConfirm(index: Int) {
         val request = confirmation ?: return
-        if (showSetup || index !in 0..request.options.size) return
-        val action = request.options.getOrNull(index)
-        val response = if (action == null) {
+        if (index !in 0..request.options.size) return
+        val response = if (index == 0) {
             "已取消操作"
         } else {
+            val action = request.options[index - 1]
             val now = System.currentTimeMillis()
             val current = home.expireTimer(now)
             val updated = current.apply(action, now)
@@ -307,54 +473,173 @@ internal fun AssistantScreen(
                 home = current
                 "设备状态已变化，请重新发送指令"
             } else {
+                val changed = AssistantHomePreview.changedKeys(current, updated, now, frozen)
                 home = updated
+                homeTime = now
+                if (changed.isNotEmpty()) {
+                    flashKeys = changed
+                    scope.launch {
+                        delay(1_300L)
+                        flashKeys = emptySet()
+                    }
+                }
                 "模拟：已执行「${action.describe(current)}」"
             }
         }
-        appendTurn(request.prompt, response)
+        appendEntry(false, response)
         confirmation = null
-        selected = 0
+        focusBarAction(AssistantAction.INPUT, draft)
+    }
+
+    fun advanceConfirmTick() {
+        if (confirmation == null) return
+        val next = confirmCursor.advance(SystemClock.elapsedRealtime(), scanMode)
+        if (next.timedOut(confirmation = true)) {
+            if (!frozen) onToast("三轮都没有选择，已按「取消」处理", false)
+            resolveConfirm(0)
+        } else {
+            confirmCursor = next
+        }
+    }
+
+    fun advanceBarTick() {
+        if (!liveBar || availableActions.isEmpty()) return
+        val synced = if (barCursor.size != availableActions.size) {
+            ScanCursor(size = availableActions.size, index = barCursor.index.coerceIn(0, availableActions.lastIndex), direction = barCursor.direction)
+        } else barCursor
+        barCursor = synced.advance(SystemClock.elapsedRealtime(), scanMode)
     }
 
     val currentSignalHandler by rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
+        val now = SystemClock.elapsedRealtime()
+        val grace = if (frozen) 0L else AppUiSettings.graceMs(context)
         when {
-            showSetup -> Unit
             editing -> input.handleSignal(signal)
-            else -> when (signal) {
-                ControlSignal.LEFT_LOOK -> direction = -1
-                ControlSignal.RIGHT_LOOK -> direction = 1
-                ControlSignal.BITE -> {
-                    if (confirmation != null) confirmHome(selected)
-                    else choose(AssistantAction.entries[selected])
+            confirmation != null -> {
+                val request = confirmation ?: return@rememberUpdatedState
+                val count = request.options.size + 1
+                val isTwo = count == 2
+                when (signal) {
+                    ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                        val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                        confirmCursor = confirmCursor.look(step, scanMode, hold = isTwo)
+                        dwellRevision++
+                    }
+                    ControlSignal.BITE -> {
+                        val chosen = confirmCursor.selected(now, grace, scanMode)
+                        if (chosen != confirmCursor.index && !frozen) {
+                            onToast("已按上一项执行（延迟补偿）", false)
+                        }
+                        resolveConfirm(chosen)
+                    }
+                    else -> Unit
                 }
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            pending -> Unit
+            else -> when (signal) {
+                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                    val step = if (signal == ControlSignal.LEFT_LOOK) -1 else 1
+                    barCursor = barCursor.look(step, scanMode)
+                    dwellRevision++
+                }
+                ControlSignal.BITE -> {
+                    val chosen = barCursor.selected(now, grace, scanMode)
+                    if (chosen != barCursor.index && !frozen) {
+                        onToast("已按上一项执行（延迟补偿）", false)
+                    }
+                    availableActions.getOrNull(chosen)?.let(::chooseBarAction)
+                }
+                else -> Unit
             }
         }
     }
+
     val currentTickHandler by rememberUpdatedState<() -> Unit> {
-        if (editing) input.debugTick()
+        when {
+            editing -> input.debugTick()
+            confirmation != null -> advanceConfirmTick()
+            liveBar -> advanceBarTick()
+        }
     }
+
+    val currentHomeResetter by rememberUpdatedState<() -> Unit> {
+        activeRequestJob?.cancel()
+        activeRequestJob = null
+        requestGeneration++
+        home = SimulatedHome()
+        homeTime = System.currentTimeMillis()
+        flashKeys = emptySet()
+        confirmation = null
+        pending = false
+        draft = ""
+        AssistantCareStore.setDebugDraft("")
+        entries = listOf(AssistantEntry(fromUser = false, text = WELCOME_MESSAGE))
+        if (editing) {
+            input.deactivate()
+            editing = false
+            onEditingChange(false)
+        }
+        focusBarAction(AssistantAction.INPUT, "")
+    }
+
+    val currentFocusResetter by rememberUpdatedState<() -> Unit> {
+        if (!editing && confirmation == null && !pending) {
+            focusBarAction(AssistantAction.INPUT, draft)
+        }
+    }
+
     DisposableEffect(Unit) {
         val handler: (ControlSignal) -> Unit = { currentSignalHandler(it) }
-        AssistantInputBus.attach(handler, onTick = { currentTickHandler() })
+        AssistantInputBus.attach(
+            onSignal = handler,
+            onTick = { currentTickHandler() },
+            onResetHome = { currentHomeResetter() },
+            onResetFocus = { currentFocusResetter() }
+        )
         onDispose {
+            activeRequestJob?.cancel()
+            activeRequestJob = null
+            requestGeneration++
             AssistantInputBus.detach(handler)
             input.deactivate()
             onEditingChange(false)
         }
     }
+
     LaunchedEffect(scanMode) { input.setScanMode(scanMode) }
     LaunchedEffect(paused) { input.setPaused(paused) }
     LaunchedEffect(frozen) { input.setFrozen(frozen) }
     LaunchedEffect(scanIntervalMs) { input.setScanInterval(scanIntervalMs) }
-    LaunchedEffect(editing, showSetup, selected, direction, scanIntervalMs, confirmation, paused, frozen) {
-        if (!editing && !showSetup && !paused && !frozen) {
-            delay(scanIntervalMs)
-            val count = confirmation?.let { it.options.size + 1 } ?: AssistantAction.entries.size
-            selected = (selected + direction + count) % count
+
+    // Auto-scan timer for confirmation bubble and bottom bar, paused whenever activity leaves RESUMED.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(editing, confirmation != null, pending, paused, frozen, scanMode, dwellRevision, scanIntervalMs, lifecycleOwner) {
+        if (!editing && !paused && !frozen && scanMode == ScanMode.AUTO) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                if (confirmation != null) {
+                    confirmCursor = confirmCursor.copy(previousIndex = -1)
+                    runScanTimer(
+                        interval = { confirmCursor.dwell(scanIntervalMs, confirmation = true) },
+                        onFailure = { android.util.Log.e("ScanCursor", "Assistant confirm tick failed", it) }
+                    ) {
+                        advanceConfirmTick()
+                    }
+                } else if (!pending) {
+                    barCursor = barCursor.copy(previousIndex = -1)
+                    runScanTimer(
+                        interval = { scanIntervalMs },
+                        onFailure = { android.util.Log.e("ScanCursor", "Assistant bar tick failed", it) }
+                    ) {
+                        advanceBarTick()
+                    }
+                }
+            }
         }
     }
-    LaunchedEffect(home.airConditioner.offAtMillis) {
+
+    // Expire AC off-timer in real time.
+    LaunchedEffect(home.airConditioner.offAtMillis, frozen) {
+        if (frozen) return@LaunchedEffect
         val deadline = home.airConditioner.offAtMillis ?: return@LaunchedEffect
         while (true) {
             val now = System.currentTimeMillis()
@@ -362,26 +647,34 @@ internal fun AssistantScreen(
             val remaining = deadline - now
             if (remaining <= 0) {
                 home = home.expireTimer(now)
+                appendEntry(false, "模拟：定时到了，空调已关闭")
                 break
             }
-            delay((remaining - 1) % 60_000L + 1)
+            delay(1_000L)
         }
     }
-    ReportActionHints(when {
-        showSetup -> ActionHints("", "", "")
-        editing -> inputHints(inputState)
-        pendingPrompt != null && confirmation == null -> ActionHints("", "正在回复…", "")
-        else -> {
-            val item = confirmation?.let { it.options.getOrNull(selected)?.describe(home) ?: "取消" }
-                ?: AssistantAction.entries.getOrNull(selected)?.labelFor(draft).orEmpty()
-            ActionHints.list(item, com.example.input_ds.model.ScanMode.AUTO, direction)
-        }
-    })
 
-    BackHandler(enabled = editing) { input.handleBackPress() }
-    BackHandler(enabled = confirmation != null) {
-        confirmation?.let { confirmHome(it.options.size) }
-    }
+    val homeStatus = if (frozen) home else home.expireTimer(homeTime)
+    val confirmLabels = confirmation?.let { AssistantHomePreview.confirmationLabels(it.options, homeStatus) }.orEmpty()
+
+    ReportActionHints(
+        when {
+            editing -> inputHints(inputState)
+            confirmation != null -> {
+                val label = confirmLabels.getOrElse(confirmCursor.index) { "取消" }
+                if (confirmLabels.size == 2) confirmHints(label, scanMode)
+                else ActionHints.list(label, scanMode, confirmCursor.direction)
+            }
+            pending -> ActionHints("", "正在回复…", "")
+            else -> {
+                val label = availableActions.getOrNull(barCursor.index)?.labelFor(draft).orEmpty()
+                ActionHints.list(label, scanMode, barCursor.direction)
+            }
+        }
+    )
+
+    BackHandler(enabled = !paused && editing) { input.handleBackPress() }
+    BackHandler(enabled = !paused && !editing && confirmation != null) { resolveConfirm(0) }
 
     if (editing) {
         val phrases = remember(inputState.mode, inputState.phase, inputState.dwellRevision) {
@@ -402,362 +695,459 @@ internal fun AssistantScreen(
             onPredictionClick = input::selectPredictionByTouch,
             onInitialPredictionClick = input::selectInitialPredictionByTouch
         )
+        return
+    }
+
+    // Dwell progress bar for active confirmation or bottom bar.
+    val dwellMs = if (confirmation != null) {
+        confirmCursor.dwell(scanIntervalMs, confirmation = true)
     } else {
-    AuroraBackground {
-        Column(
-            Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("生活助手", style = MaterialTheme.typography.headlineSmall)
-                TextButton(
-                    onClick = { showSetup = true },
-                    enabled = pendingPrompt == null && confirmation == null
-                ) {
-                    Text("设置")
-                }
+        scanIntervalMs
+    }
+    val dwellAuto = scanMode == ScanMode.AUTO && (confirmation != null || liveBar)
+    val dwellKey = if (confirmation != null) {
+        "cf:${confirmCursor.index}:${confirmCursor.ticks}:${confirmCursor.direction}"
+    } else {
+        "bar:${barCursor.index}:${barCursor.direction}:${availableActions.size}"
+    }
+    val dwellProgress = remember { Animatable(0f) }
+    LaunchedEffect(dwellKey, dwellRevision, dwellMs, dwellAuto, paused, frozen, lifecycleOwner) {
+        when {
+            frozen -> dwellProgress.snapTo(if (dwellAuto) 0.5f else 0f)
+            paused || !dwellAuto -> dwellProgress.snapTo(0f)
+            else -> lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                dwellProgress.snapTo(0f)
+                dwellProgress.animateTo(1f, tween(dwellMs.toInt(), easing = LinearEasing))
             }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    val showSidePanel = maxWidth >= 720.dp
-                    val sending = pendingPrompt != null
-                    val question = confirmation
-                    val homeStatus = home.expireTimer(homeTime)
-                    val updateDraft: (String) -> Unit = { draft = it }
-                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ChatHistory(
-                                turns = turns,
-                                pendingPrompt = pendingPrompt,
-                                confirmation = question,
-                                optionLabels = question?.options?.map { it.describe(homeStatus) }.orEmpty(),
-                                selectedOption = selected,
-                                onConfirm = ::confirmHome,
-                                modifier = Modifier.weight(1f).fillMaxWidth()
-                            )
-                            if (!showSidePanel) {
-                                SimulatedHomeStatus(homeStatus, homeTime)
-                                TestKeyboardInput(draft, !sending && question == null, updateDraft)
-                            }
-                            DraftControls(draft, selected, sending, question != null, ::choose)
-                        }
-                        if (showSidePanel) {
+        }
+    }
+    val progressProvider: () -> Float? = { if (dwellAuto) dwellProgress.value else null }
+
+    val c = LocalBciColors.current
+    val focusedOption = confirmation?.let { req ->
+        val optIdx = confirmCursor.index - 1
+        req.options.getOrNull(optIdx)
+    }
+    val previewRows = remember(homeStatus, focusedOption, homeTime, frozen) {
+        AssistantHomePreview.previewRows(homeStatus, focusedOption, homeTime, frozen)
+    }
+
+    Row(
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        // Left column: history + draft bar + 4-item action bar.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 1. Conversation history panel: LazyColumn(reverseLayout = true) keeps newest content anchored at the bottom.
+            val histListState = rememberLazyListState()
+            val visibleEntries = remember(entries) { entries.takeLast(6) }
+            LaunchedEffect(entries.size, pending, confirmation != null) {
+                histListState.scrollToItem(0)
+            }
+            val histShape = RoundedCornerShape(18.dp)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(c.panel, histShape)
+                    .border(2.dp, c.line, histShape)
+                    .clip(histShape)
+            ) {
+                LazyColumn(
+                    state = histListState,
+                    reverseLayout = true,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom)
+                ) {
+                    val activeConfirm = confirmation
+                    if (activeConfirm != null) {
+                        item(key = "confirm") {
+                            val dir = if (scanMode == ScanMode.AUTO) confirmCursor.direction else 0
+                            val cfShape = RoundedCornerShape(18.dp)
                             Column(
-                                Modifier.width(248.dp).fillMaxHeight().verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(c.panel2, cfShape)
+                                    .border(2.dp, c.focus, cfShape)
+                                    .padding(horizontal = 20.dp, vertical = 13.dp)
                             ) {
-                                GlassPanel(Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
-                                    Text("触摸测试", style = MaterialTheme.typography.titleMedium)
-                                    TestKeyboardInput(draft, !sending && question == null, updateDraft)
-                                    AssistantAction.entries.chunked(2).forEach { actions ->
-                                        Row(
-                                            Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            actions.forEach { action ->
-                                                OutlinedButton(
-                                                    onClick = { choose(action) },
-                                                    enabled = question == null && action.isAvailable(draft, sending),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
-                                                    modifier = Modifier.weight(1f)
-                                                ) {
-                                                    Text(action.labelFor(draft), textAlign = TextAlign.Center)
+                                val cssLineBox = LineHeightStyle(
+                                    alignment = LineHeightStyle.Alignment.Center,
+                                    trim = LineHeightStyle.Trim.None
+                                )
+                                Text(
+                                    text = "助手",
+                                    color = c.muted,
+                                    fontFamily = BciType.chinese,
+                                    fontSize = 14.sp,
+                                    lineHeight = 20.sp,
+                                    style = TextStyle(
+                                        lineHeightStyle = cssLineBox,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = "要执行这项操作吗？",
+                                    color = c.text,
+                                    fontFamily = BciType.chinese,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 22.sp,
+                                    lineHeight = 32.sp,
+                                    style = TextStyle(
+                                        lineHeightStyle = cssLineBox,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(84.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    confirmLabels.forEachIndexed { idx, label ->
+                                        val focused = idx == confirmCursor.index
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                                .scanItem(
+                                                    focused = focused,
+                                                    direction = dir,
+                                                    picked = false,
+                                                    progress = if (focused) progressProvider else null
+                                                )
+                                                .clickable { resolveConfirm(idx) }
+                                                .semantics {
+                                                    if (focused && dwellAuto) {
+                                                        this[AssistantDwellProgressReaderKey] = progressProvider
+                                                    }
                                                 }
-                                            }
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = c.text,
+                                                fontFamily = BciType.chinese,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 24.sp,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                                            )
                                         }
                                     }
                                 }
-                                SimulatedHomeStatus(homeStatus, homeTime)
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    text = "「取消」先亮 · 右侧「模拟家居」预览变化 · 三轮不选按取消处理",
+                                    color = c.muted,
+                                    fontFamily = BciType.chinese,
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp,
+                                    style = TextStyle(
+                                        lineHeightStyle = cssLineBox,
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
                             }
                         }
+                    }
+                    if (pending) {
+                        item(key = "typing") {
+                            AssistantChatBubble(text = "正在回复…", fromUser = false, typing = true)
+                        }
+                    }
+                    items(visibleEntries.asReversed()) { entry ->
+                        AssistantChatBubble(text = entry.text, fromUser = entry.fromUser)
+                    }
+                }
+            }
+
+            // 2. Draft bar (72 dp).
+            val draftShape = RoundedCornerShape(16.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .background(c.panel, draftShape)
+                    .border(2.dp, c.line, draftShape)
+                    .padding(horizontal = 22.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .border(1.dp, c.line, CircleShape)
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "草稿",
+                        color = c.muted,
+                        fontFamily = BciType.chinese,
+                        fontSize = 16.sp,
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
+                }
+                Text(
+                    text = draft.ifEmpty { "选「输入」开始，也可以直接用常用语" },
+                    modifier = Modifier.weight(1f),
+                    color = if (draft.isEmpty()) c.dim else c.text,
+                    fontFamily = BciType.chinese,
+                    fontWeight = if (draft.isEmpty()) FontWeight.Normal else FontWeight(500),
+                    fontSize = if (draft.isEmpty()) 22.sp else 30.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
+
+            // 3. Bottom 4-item action bar (92 dp).
+            val barDir = if (scanMode == ScanMode.AUTO) barCursor.direction else 0
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(92.dp)
+                    .alpha(if (liveBar) 1f else 0.45f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                AssistantAction.entries.forEach { action ->
+                    val availIdx = if (liveBar) availableActions.indexOf(action) else -1
+                    val enabled = availIdx >= 0
+                    val focused = enabled && availIdx == barCursor.index
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .scanItem(
+                                focused = focused,
+                                direction = barDir,
+                                picked = false,
+                                progress = if (focused) progressProvider else null,
+                                enabled = enabled
+                            )
+                            .clickable(enabled = enabled) { chooseBarAction(action) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = action.labelFor(draft),
+                            color = c.text,
+                            fontFamily = BciType.chinese,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 26.sp,
+                            maxLines = 1,
+                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                        )
                     }
                 }
             }
         }
-    }
 
-    if (showSetup) {
-        AssistantConnectionDialog(
-            address = address,
-            accessCode = accessCode,
-            allowHttp = allowHttp,
-            onClose = { showSetup = false },
-            onSave = { connection ->
-                AssistantCareStore.save(context, connection)
-                address = connection.address.toString()
-                accessCode = connection.accessCode
-                showSetup = false
-            }
+        // Right column: Simulated Home panel (330 dp).
+        SimulatedHomePanel(
+            rows = previewRows,
+            flashKeys = flashKeys,
+            confirming = confirmation != null,
+            previewingAction = focusedOption != null,
+            modifier = Modifier
+                .width(330.dp)
+                .fillMaxHeight()
         )
     }
 }
 
 @Composable
-private fun ChatHistory(
-    turns: List<ChatTurn>,
-    pendingPrompt: String?,
-    confirmation: HomeConfirmation?,
-    optionLabels: List<String>,
-    selectedOption: Int,
-    onConfirm: (Int) -> Unit,
-    modifier: Modifier = Modifier
+private fun AssistantChatBubble(
+    text: String,
+    fromUser: Boolean,
+    typing: Boolean = false
 ) {
-    val scroll = rememberLazyListState()
-    val inProgress = confirmation?.prompt ?: pendingPrompt
-    LaunchedEffect(turns, pendingPrompt, confirmation) {
-        if (inProgress != null) scroll.scrollToItem(turns.size + 1)
-        else if (turns.isNotEmpty()) scroll.scrollToItem(turns.lastIndex)
-    }
-    GlassPanel(modifier, contentPadding = PaddingValues(0.dp)) {
-        if (turns.isEmpty() && inProgress == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("选择「输入」开始对话", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = scroll,
-                contentPadding = PaddingValues(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Bottom)
-            ) {
-                items(turns) { turn ->
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ChatBubble(turn.prompt, fromUser = true)
-                        ChatBubble(turn.reply, fromUser = false)
-                    }
-                }
-                if (inProgress != null) {
-                    item { ChatBubble(inProgress, fromUser = true) }
-                    item {
-                        if (confirmation == null) {
-                            ChatBubble("正在回复…", fromUser = false)
-                        } else {
-                            val question = if (optionLabels.size == 1) "要执行这项操作吗？" else "请选择一项操作。"
-                            ChatBubble(question, fromUser = false) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    (optionLabels + "取消").forEachIndexed { index, label ->
-                                        ScanButton(
-                                            label = label,
-                                            highlighted = selectedOption == index,
-                                            enabled = true,
-                                            onClick = { onConfirm(index) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+    val c = LocalBciColors.current
+    val shape = RoundedCornerShape(18.dp)
+    val bg = if (fromUser) c.focusTint.compositeOver(c.panel) else c.panel
 
-@Composable
-private fun ChatBubble(text: String, fromUser: Boolean, actions: (@Composable () -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start
     ) {
-        Box(
-            Modifier.fillMaxWidth(.82f),
-            contentAlignment = if (fromUser) Alignment.CenterEnd else Alignment.CenterStart
+        Column(
+            modifier = Modifier
+                .widthIn(max = 680.dp)
+                .background(bg, shape)
+                .border(1.dp, c.line, shape)
+                .padding(horizontal = 19.dp, vertical = 12.dp)
         ) {
-            Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = if (fromUser) AuroraDarkAccentSoft else AuroraDarkSurfaceStrong,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text(
-                        if (fromUser) "你" else "生活助手",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (fromUser) AuroraVioletBright else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(text, style = MaterialTheme.typography.bodyLarge)
-                    actions?.invoke()
-                }
+            if (!fromUser) {
+                Text(
+                    text = "助手",
+                    color = c.muted,
+                    fontFamily = BciType.chinese,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+                Spacer(Modifier.height(2.dp))
             }
-        }
-    }
-}
-
-@Composable
-private fun SimulatedHomeStatus(home: SimulatedHome, now: Long) {
-    val ac = home.airConditioner
-    val minutes = ac.remainingMinutes(now)
-    GlassPanel(Modifier.fillMaxWidth(), contentPadding = PaddingValues(12.dp)) {
-        Text("模拟家居", style = MaterialTheme.typography.titleSmall)
-        Text(
-            "大灯 ${if (home.mainLightOn) "开" else "关"}  ·  " +
-                "床头灯 ${if (home.bedsideLightOn) "开" else "关"}  ·  窗帘 ${home.curtainPositionPercent}%",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            "空调 ${if (ac.powerOn) "开" else "关"}  ·  ${ac.temperatureC}°C  ·  ${ac.mode.label}\n" +
-                "风向 ${ac.swing.label}  ·  ${if (minutes == 0) "未定时" else "$minutes 分钟后关机"}",
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
-}
-
-@Composable
-private fun TestKeyboardInput(draft: String, enabled: Boolean, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = draft,
-        onValueChange = onChange,
-        label = { Text("键盘输入") },
-        enabled = enabled,
-        maxLines = 3,
-        modifier = Modifier.fillMaxWidth()
-    )
-}
-
-@Composable
-private fun DraftControls(
-    draft: String,
-    selected: Int,
-    sending: Boolean,
-    awaitingConfirmation: Boolean,
-    onAction: (AssistantAction) -> Unit
-) {
-    GlassPanel(Modifier.fillMaxWidth(), contentPadding = PaddingValues(10.dp)) {
-        Box(
-            Modifier.fillMaxWidth().heightIn(min = 42.dp).padding(horizontal = 4.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
             Text(
-                text = draft.ifEmpty { "请输入内容" },
-                color = if (draft.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis
+                text = text,
+                color = if (typing) c.muted else c.text,
+                fontFamily = BciType.chinese,
+                fontWeight = FontWeight.Normal,
+                fontSize = 24.sp,
+                lineHeight = 35.sp,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            AssistantAction.entries.forEach { action ->
-                ScanButton(
-                    label = action.labelFor(draft),
-                    highlighted = !awaitingConfirmation && action.ordinal == selected,
-                    enabled = !awaitingConfirmation && action.isAvailable(draft, sending),
-                    onClick = { onAction(action) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
     }
 }
 
 @Composable
-private fun ScanButton(
-    label: String,
-    highlighted: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
+private fun SimulatedHomePanel(
+    rows: List<HomePreviewRow>,
+    flashKeys: Set<String>,
+    confirming: Boolean,
+    previewingAction: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.heightIn(min = 54.dp),
-        enabled = enabled,
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(
-            if (highlighted) 2.dp else 1.dp,
-            if (highlighted) AuroraVioletBright else AuroraDarkBorder
-        ),
-        color = if (highlighted) AuroraDarkAccentSoft else AuroraDarkSurfaceStrong
+    val c = LocalBciColors.current
+    val panelShape = RoundedCornerShape(20.dp)
+
+    val panelCssLineBox = LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Center,
+        trim = LineHeightStyle.Trim.None
+    )
+
+    Column(
+        modifier = modifier
+            .background(c.mag, panelShape)
+            .border(2.dp, c.line, panelShape)
+            .padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Box(Modifier.padding(horizontal = 4.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-            Text(
-                label,
-                color = when {
-                    highlighted -> AuroraVioletBright
-                    enabled -> MaterialTheme.colorScheme.onSurface
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                style = MaterialTheme.typography.titleSmall,
-                textAlign = TextAlign.Center
+        Text(
+            text = "模拟家居",
+            color = c.text,
+            fontFamily = BciType.chinese,
+            fontWeight = FontWeight(800),
+            fontSize = 22.sp,
+            lineHeight = 31.sp,
+            style = TextStyle(
+                lineHeightStyle = panelCssLineBox,
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
             )
+        )
+        Text(
+            text = "演示用，不控制真实家电",
+            modifier = Modifier.padding(bottom = 3.dp),
+            color = c.muted,
+            fontFamily = BciType.chinese,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+            style = TextStyle(
+                lineHeightStyle = panelCssLineBox,
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            )
+        )
+
+        rows.forEach { row ->
+            val nextValue = row.nextValue
+            val changed = nextValue != null
+            val flashed = !changed && row.key in flashKeys
+            val rowShape = RoundedCornerShape(12.dp)
+            val borderColor = when {
+                changed -> c.focus
+                flashed -> c.ok
+                else -> Color.Transparent
+            }
+            val bgColor = when {
+                changed -> c.focusTint.compositeOver(c.panel)
+                flashed -> c.okTint
+                else -> Color.Transparent
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(bgColor, rowShape)
+                    .border(2.dp, borderColor, rowShape)
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = row.label,
+                    color = c.text,
+                    fontFamily = BciType.chinese,
+                    fontSize = 21.sp,
+                    lineHeight = 30.sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+                if (nextValue != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = mixedLatinText(row.currentValue),
+                            color = c.muted,
+                            fontWeight = FontWeight(500),
+                            fontSize = 20.sp,
+                            textDecoration = TextDecoration.LineThrough,
+                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                        )
+                        Text(
+                            text = mixedLatinText(nextValue),
+                            color = c.focus,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                        )
+                    }
+                } else {
+                    Text(
+                        text = mixedLatinText(row.currentValue),
+                        color = c.text,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        textAlign = TextAlign.End,
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
+                }
+            }
         }
+
+        Spacer(Modifier.weight(1f))
+
+        val note = when {
+            confirming && previewingAction -> "预览：确认后会这样变化"
+            confirming -> "取消：保持现状，不做改变"
+            else -> ""
+        }
+        Text(
+            text = note,
+            modifier = Modifier.heightIn(min = 22.dp),
+            color = c.focus,
+            fontFamily = BciType.chinese,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+        )
     }
 }
 
-@Composable
-private fun AssistantConnectionDialog(
-    address: String,
-    accessCode: String,
-    allowHttp: Boolean,
-    onClose: () -> Unit,
-    onSave: (AssistantConnection) -> Unit
-) {
-    var addressDraft by remember { mutableStateOf(address) }
-    var codeDraft by remember { mutableStateOf(accessCode) }
-    var status by remember { mutableStateOf("") }
-    var checking by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val connection = AssistantConnection.parse(addressDraft, codeDraft, allowHttp)
-
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("生活助手设置") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = addressDraft,
-                    onValueChange = { addressDraft = it; status = "" },
-                    label = { Text("电脑地址，例如 http://localhost:8765") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    singleLine = true,
-                    enabled = !checking
-                )
-                OutlinedTextField(
-                    value = codeDraft,
-                    onValueChange = { codeDraft = it; status = "" },
-                    label = { Text("电脑服务连接码") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    enabled = !checking
-                )
-                if (status.isNotEmpty()) Text(status)
-            }
-        },
-        confirmButton = {
-            Button(onClick = { connection?.let(onSave) }, enabled = connection != null && !checking) {
-                Text("保存")
-            }
-        },
-        dismissButton = {
-            TextButton(
-                enabled = connection != null && !checking,
-                onClick = {
-                    val target = connection ?: return@TextButton
-                    checking = true
-                    status = "正在测试…"
-                    scope.launch {
-                        try {
-                            status = if (AssistantService.checkConnection(target)) {
-                                "已连上电脑，已配置 DeepSeek Key"
-                            } else {
-                                "已连上电脑，请在电脑端配置 DeepSeek Key"
-                            }
-                        } catch (error: AssistantServiceException) {
-                            status = error.message.orEmpty()
-                        } catch (_: IOException) {
-                            status = "无法连接电脑服务"
-                        } finally {
-                            checking = false
-                        }
-                    }
-                }
-            ) { Text("测试连接") }
+private fun mixedLatinText(value: String) = buildAnnotatedString {
+    for (ch in value) {
+        withStyle(SpanStyle(fontFamily = if (ch.code < 0x3000) BciType.latin else BciType.chinese)) {
+            append(ch)
         }
-    )
+    }
 }

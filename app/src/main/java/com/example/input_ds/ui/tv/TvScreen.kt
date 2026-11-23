@@ -115,14 +115,104 @@ private val CCTV_REQUEST_HEADERS = mapOf("Referer" to "https://tv.cctv.com/")
 
 private val TV_OPERATION_LABELS = listOf("继续观看", "重新加载", "退出电视")
 
-@SuppressLint("SetJavaScriptEnabled")
+internal sealed interface TvPlaybackCommand {
+    data class Tune(val index: Int) : TvPlaybackCommand
+    data object OpenMenu : TvPlaybackCommand
+    data object Ignore : TvPlaybackCommand
+}
+
+internal fun resolveTvPlaybackCommand(
+    signal: ControlSignal,
+    currentIndex: Int,
+    channelCount: Int
+): TvPlaybackCommand {
+    if (channelCount <= 0) return TvPlaybackCommand.Ignore
+    return when (signal) {
+        ControlSignal.LEFT_LOOK -> TvPlaybackCommand.Tune((currentIndex - 1 + channelCount) % channelCount)
+        ControlSignal.RIGHT_LOOK -> TvPlaybackCommand.Tune((currentIndex + 1) % channelCount)
+        ControlSignal.BITE -> TvPlaybackCommand.OpenMenu
+        ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> TvPlaybackCommand.Ignore
+    }
+}
+
+internal data class TvControlState(
+    val currentIndex: Int,
+    val channelCount: Int,
+    val fullscreen: Boolean,
+    val operationVisible: Boolean,
+    val operationIndex: Int,
+    val operationDirection: Int,
+    val operationCount: Int = 3
+)
+
+internal sealed interface TvControlEffect {
+    data class Tune(val index: Int) : TvControlEffect
+    data class OpenMenu(val exitFullscreen: Boolean) : TvControlEffect
+    data class UpdateMenu(val index: Int, val direction: Int) : TvControlEffect
+    data class ExecuteMenu(val index: Int) : TvControlEffect
+    data object Ignore : TvControlEffect
+}
+
+internal fun dispatchTvSignal(
+    state: TvControlState,
+    signal: ControlSignal,
+    scanMode: ScanMode
+): TvControlEffect {
+    if (state.operationVisible && !state.fullscreen) {
+        return when (signal) {
+            ControlSignal.LEFT_LOOK -> TvControlEffect.UpdateMenu(
+                index = if (scanMode == ScanMode.MANUAL) {
+                    (state.operationIndex - 1 + state.operationCount) % state.operationCount
+                } else state.operationIndex,
+                direction = -1
+            )
+            ControlSignal.RIGHT_LOOK -> TvControlEffect.UpdateMenu(
+                index = if (scanMode == ScanMode.MANUAL) {
+                    (state.operationIndex + 1) % state.operationCount
+                } else state.operationIndex,
+                direction = 1
+            )
+            ControlSignal.BITE -> TvControlEffect.ExecuteMenu(state.operationIndex)
+            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> TvControlEffect.Ignore
+        }
+    }
+    return when (val cmd = resolveTvPlaybackCommand(signal, state.currentIndex, state.channelCount)) {
+        is TvPlaybackCommand.Tune -> TvControlEffect.Tune(cmd.index)
+        TvPlaybackCommand.OpenMenu -> TvControlEffect.OpenMenu(exitFullscreen = state.fullscreen)
+        TvPlaybackCommand.Ignore -> TvControlEffect.Ignore
+    }
+}
+
 @Composable
 fun TvScreen(
     scanIntervalMs: Long,
     scanMode: ScanMode,
     onBack: () -> Unit,
-    initialChannelId: String? = null
+    initialChannelId: String? = null,
+    fromAssistant: Boolean = false
 ) {
+    TvScreenContent(
+        scanIntervalMs = scanIntervalMs,
+        scanMode = scanMode,
+        onBack = onBack,
+        initialChannelId = initialChannelId,
+        fromAssistant = fromAssistant
+    )
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+internal fun TvScreenContent(
+    scanIntervalMs: Long,
+    scanMode: ScanMode,
+    onBack: () -> Unit,
+    initialChannelId: String? = null,
+    fromAssistant: Boolean = false,
+    initialFullscreen: Pair<View, WebChromeClient.CustomViewCallback>? = null,
+    enableWebView: Boolean = true
+) {
+    val returnLabel = if (fromAssistant) "返回助手" else "返回娱乐"
+    val operationLabels = remember(returnLabel) { listOf("继续观看", "重新加载", returnLabel) }
     val initialIndex = TV_CHANNELS.indexOfFirst { it.id == initialChannelId }.coerceAtLeast(0)
     var currentIndex by remember(initialChannelId) { mutableIntStateOf(initialIndex) }
     var highlightedChannelIndex by remember(initialChannelId) { mutableIntStateOf(initialIndex) }
@@ -132,18 +222,25 @@ fun TvScreen(
     var operationDirection by remember { mutableIntStateOf(1) }
     var reloadGeneration by remember { mutableIntStateOf(0) }
     var pageVariantIndex by remember { mutableIntStateOf(0) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember(initialChannelId, enableWebView) {
+        mutableStateOf(enableWebView && !TV_CHANNELS[initialIndex].temporarilyUnavailable)
+    }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
-    var fullscreenView by remember { mutableStateOf<View?>(null) }
-    var fullscreenCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var fullscreenView by remember(initialFullscreen) { mutableStateOf(initialFullscreen?.first) }
+    var fullscreenCallback by remember(initialFullscreen) { mutableStateOf(initialFullscreen?.second) }
     val currentOnBack by rememberUpdatedState(onBack)
     val listState = rememberLazyListState()
     val channel = TV_CHANNELS[currentIndex]
     val officialPage = channel.officialPages[pageVariantIndex.coerceAtMost(channel.officialPages.lastIndex)]
 
-    ReportActionHints(if (operationVisible) ActionHints.list(TV_OPERATION_LABELS[operationIndex], scanMode, operationDirection)
-        else ActionHints.list(TV_CHANNELS[highlightedChannelIndex].name, scanMode, channelDirection))
+    ReportActionHints(
+        if (operationVisible && fullscreenView == null) {
+            ActionHints.list(operationLabels[operationIndex], scanMode, operationDirection)
+        } else {
+            ActionHints("上一台", "打开菜单", "下一台")
+        }
+    )
 
     fun exitFullscreen() {
         val callback = fullscreenCallback
@@ -153,6 +250,7 @@ fun TvScreen(
     }
 
     BackHandler(enabled = fullscreenView != null, onBack = ::exitFullscreen)
+    BackHandler(enabled = operationVisible && fullscreenView == null) { operationVisible = false }
 
     fun selectChannel(index: Int) {
         val selectedIndex = (index + TV_CHANNELS.size) % TV_CHANNELS.size
@@ -161,7 +259,7 @@ fun TvScreen(
         exitFullscreen()
         currentIndex = selectedIndex
         pageVariantIndex = 0
-        loading = !TV_CHANNELS[selectedIndex].temporarilyUnavailable
+        loading = enableWebView && !TV_CHANNELS[selectedIndex].temporarilyUnavailable
         errorMessage = null
     }
 
@@ -171,7 +269,7 @@ fun TvScreen(
             1 -> {
                 operationVisible = false
                 pageVariantIndex = 0
-                loading = true
+                loading = enableWebView
                 errorMessage = null
                 reloadGeneration += 1
             }
@@ -180,42 +278,33 @@ fun TvScreen(
     }
 
     val signalHandler = rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
-        if (fullscreenView != null) {
-            if (signal == ControlSignal.BITE) exitFullscreen()
-        } else if (operationVisible) {
-            when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    operationDirection = -1
-                    if (scanMode == ScanMode.MANUAL) operationIndex = (operationIndex - 1 + TV_OPERATION_LABELS.size) % TV_OPERATION_LABELS.size
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    operationDirection = 1
-                    if (scanMode == ScanMode.MANUAL) operationIndex = (operationIndex + 1) % TV_OPERATION_LABELS.size
-                }
-                ControlSignal.BITE -> executeOperation(operationIndex)
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+        val effect = dispatchTvSignal(
+            state = TvControlState(
+                currentIndex = currentIndex,
+                channelCount = TV_CHANNELS.size,
+                fullscreen = fullscreenView != null,
+                operationVisible = operationVisible,
+                operationIndex = operationIndex,
+                operationDirection = operationDirection,
+                operationCount = operationLabels.size
+            ),
+            signal = signal,
+            scanMode = scanMode
+        )
+        when (effect) {
+            is TvControlEffect.Tune -> selectChannel(effect.index)
+            is TvControlEffect.OpenMenu -> {
+                if (effect.exitFullscreen) exitFullscreen()
+                operationIndex = 0
+                operationDirection = 1
+                operationVisible = true
             }
-        } else {
-            when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    channelDirection = -1
-                    if (scanMode == ScanMode.MANUAL) selectChannel(highlightedChannelIndex - 1)
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    channelDirection = 1
-                    if (scanMode == ScanMode.MANUAL) selectChannel(highlightedChannelIndex + 1)
-                }
-                ControlSignal.BITE -> {
-                    if (scanMode == ScanMode.AUTO && highlightedChannelIndex != currentIndex) {
-                        selectChannel(highlightedChannelIndex)
-                    } else {
-                        operationIndex = 0
-                        operationDirection = 1
-                        operationVisible = true
-                    }
-                }
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            is TvControlEffect.UpdateMenu -> {
+                operationIndex = effect.index
+                operationDirection = effect.direction
             }
+            is TvControlEffect.ExecuteMenu -> executeOperation(effect.index)
+            TvControlEffect.Ignore -> Unit
         }
     }
     val signalSink = remember { TvSignalSink { signalHandler.value(it) } }
@@ -239,15 +328,8 @@ fun TvScreen(
     LaunchedEffect(scanMode, operationVisible, operationIndex, operationDirection, scanIntervalMs) {
         if (scanMode == ScanMode.AUTO && operationVisible) {
             delay(scanIntervalMs.coerceIn(1_100L, 3_000L))
-            operationIndex = (operationIndex + operationDirection + TV_OPERATION_LABELS.size) %
-                TV_OPERATION_LABELS.size
-        }
-    }
-
-    LaunchedEffect(scanMode, operationVisible, fullscreenView, highlightedChannelIndex, channelDirection, scanIntervalMs) {
-        if (scanMode == ScanMode.AUTO && !operationVisible && fullscreenView == null) {
-            delay(scanIntervalMs.coerceIn(1_100L, 3_000L))
-            highlightedChannelIndex = (highlightedChannelIndex + channelDirection + TV_CHANNELS.size) % TV_CHANNELS.size
+            operationIndex = (operationIndex + operationDirection + operationLabels.size) %
+                operationLabels.size
         }
     }
 
@@ -274,16 +356,12 @@ fun TvScreen(
                 Column(Modifier.weight(1f)) {
                     Text("看电视", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        if (scanMode == ScanMode.AUTO) {
-                            "自动扫描频道 · 咬牙确认高亮频道 · 当前播放：${channel.name} · 再次咬牙打开电视操作"
-                        } else {
-                            "左看、右看切换频道 · 咬牙打开电视操作 · 当前：${channel.name}"
-                        },
+                        "左看上一台 · 右看下一台 · 咬牙打开菜单 · 当前：${channel.name}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 TextButton(onClick = { operationVisible = true }) { Text("电视操作") }
-                TextButton(onClick = currentOnBack) { Text("返回首页") }
+                TextButton(onClick = currentOnBack) { Text(returnLabel) }
             }
 
             Row(
@@ -316,78 +394,80 @@ fun TvScreen(
                         .background(Color.Black, RoundedCornerShape(18.dp))
                         .border(2.dp, Color(0xFF364B5A), RoundedCornerShape(18.dp))
                 ) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize().padding(2.dp),
-                        factory = { context ->
-                            WebView(context).apply {
-                                activeWebView = this
-                                setBackgroundColor(AndroidColor.BLACK)
-                                keepScreenOn = true
-                                settings.apply {
-                                    javaScriptEnabled = true
-                                    domStorageEnabled = true
-                                    databaseEnabled = true
-                                    allowFileAccess = false
-                                    allowContentAccess = false
-                                    javaScriptCanOpenWindowsAutomatically = false
-                                    setSupportMultipleWindows(false)
-                                    mediaPlaybackRequiresUserGesture = false
-                                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                    cacheMode = WebSettings.LOAD_DEFAULT
-                                    loadWithOverviewMode = true
-                                    useWideViewPort = true
-                                    loadsImagesAutomatically = true
-                                    blockNetworkImage = false
-                                    userAgentString = userAgentString.replace("; wv", "")
-                                }
-                                CookieManager.getInstance().setAcceptCookie(true)
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                                webChromeClient = object : WebChromeClient() {
-                                override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                                    if (fullscreenView != null) {
-                                        callback.onCustomViewHidden()
-                                        return
+                    if (enableWebView) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize().padding(2.dp),
+                            factory = { context ->
+                                WebView(context).apply {
+                                    activeWebView = this
+                                    setBackgroundColor(AndroidColor.BLACK)
+                                    keepScreenOn = true
+                                    settings.apply {
+                                        javaScriptEnabled = true
+                                        domStorageEnabled = true
+                                        databaseEnabled = true
+                                        allowFileAccess = false
+                                        allowContentAccess = false
+                                        javaScriptCanOpenWindowsAutomatically = false
+                                        setSupportMultipleWindows(false)
+                                        mediaPlaybackRequiresUserGesture = false
+                                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                        cacheMode = WebSettings.LOAD_DEFAULT
+                                        loadWithOverviewMode = true
+                                        useWideViewPort = true
+                                        loadsImagesAutomatically = true
+                                        blockNetworkImage = false
+                                        userAgentString = userAgentString.replace("; wv", "")
                                     }
-                                    (view.parent as? ViewGroup)?.removeView(view)
-                                    fullscreenCallback = callback
-                                    fullscreenView = view
-                                }
+                                    CookieManager.getInstance().setAcceptCookie(true)
+                                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                    webChromeClient = object : WebChromeClient() {
+                                        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                                            if (fullscreenView != null) {
+                                                callback.onCustomViewHidden()
+                                                return
+                                            }
+                                            (view.parent as? ViewGroup)?.removeView(view)
+                                            fullscreenCallback = callback
+                                            fullscreenView = view
+                                        }
 
-                                override fun onHideCustomView() = exitFullscreen()
-                            }
-                                webViewClient = OfficialTvWebViewClient(
-                                    onStarted = {
-                                        loading = true
-                                        errorMessage = null
-                                    },
-                                    onFinished = { loading = false },
-                                    onError = { message ->
-                                        val alternatives = TV_CHANNELS[currentIndex].officialPages
-                                        if (pageVariantIndex < alternatives.lastIndex) {
-                                            pageVariantIndex += 1
+                                        override fun onHideCustomView() = exitFullscreen()
+                                    }
+                                    webViewClient = OfficialTvWebViewClient(
+                                        onStarted = {
                                             loading = true
                                             errorMessage = null
-                                        } else {
-                                            loading = false
-                                            errorMessage = message
+                                        },
+                                        onFinished = { loading = false },
+                                        onError = { message ->
+                                            val alternatives = TV_CHANNELS[currentIndex].officialPages
+                                            if (pageVariantIndex < alternatives.lastIndex) {
+                                                pageVariantIndex += 1
+                                                loading = true
+                                                errorMessage = null
+                                            } else {
+                                                loading = false
+                                                errorMessage = message
+                                            }
                                         }
+                                    )
+                                }
+                            },
+                            update = { webView ->
+                                val request = "${channel.id}:$pageVariantIndex:$reloadGeneration"
+                                if (webView.tag != request) {
+                                    webView.tag = request
+                                    if (channel.temporarilyUnavailable) {
+                                        webView.stopLoading()
+                                        webView.loadUrl("about:blank")
+                                    } else {
+                                        webView.loadUrl(officialPage, CCTV_REQUEST_HEADERS)
                                     }
-                                )
-                            }
-                        },
-                        update = { webView ->
-                            val request = "${channel.id}:$pageVariantIndex:$reloadGeneration"
-                            if (webView.tag != request) {
-                                webView.tag = request
-                                if (channel.temporarilyUnavailable) {
-                                    webView.stopLoading()
-                                    webView.loadUrl("about:blank")
-                                } else {
-                                    webView.loadUrl(officialPage, CCTV_REQUEST_HEADERS)
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
 
                     if (channel.temporarilyUnavailable) {
                         Surface(
@@ -474,6 +554,7 @@ fun TvScreen(
 
         if (operationVisible && fullscreenView == null) {
             TvOperationOverlay(
+                labels = operationLabels,
                 selectedIndex = operationIndex,
                 onSelect = ::executeOperation,
                 onDismiss = { operationVisible = false }
@@ -503,6 +584,7 @@ private fun TvChannelButton(channel: TvChannel, selected: Boolean, onClick: () -
 
 @Composable
 private fun TvOperationOverlay(
+    labels: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
@@ -527,7 +609,7 @@ private fun TvOperationOverlay(
         ) {
             Text("电视操作", style = MaterialTheme.typography.headlineSmall)
             Text("选项会自动轮转，咬牙确认；也可以直接触摸。")
-            TV_OPERATION_LABELS.forEachIndexed { index, label ->
+            labels.forEachIndexed { index, label ->
                 Button(
                     onClick = { onSelect(index) },
                     modifier = Modifier.fillMaxWidth(),
