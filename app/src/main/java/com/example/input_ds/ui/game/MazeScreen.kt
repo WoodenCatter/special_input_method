@@ -55,7 +55,6 @@ fun MazeScreen(
     controlStatus: String,
     onBack: () -> Unit,
     onAction: (MazeAction) -> Unit,
-    onExitDecision: (MazeExitChoice) -> Unit,
     onReset: () -> Unit
 ) {
     LaunchedEffect(state.completed) {
@@ -89,42 +88,6 @@ fun MazeScreen(
         }
     }
 
-    if (state.exitDialogVisible) {
-        ExitConfirmationDialog(
-            selection = state.exitSelection,
-            onDecision = onExitDecision
-        )
-    }
-}
-
-@Composable
-private fun ExitConfirmationDialog(
-    selection: MazeExitChoice,
-    onDecision: (MazeExitChoice) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = { onDecision(MazeExitChoice.CANCEL) },
-        title = { Text("确认退出迷宫？") },
-        text = {
-            Text("左看选择取消，右看选择确认退出，咬牙确认。")
-        },
-        dismissButton = {
-            TextButton(onClick = { onDecision(MazeExitChoice.CANCEL) }) {
-                Text(
-                    text = if (selection == MazeExitChoice.CANCEL) "● 取消" else "取消",
-                    fontWeight = if (selection == MazeExitChoice.CANCEL) FontWeight.Bold else FontWeight.Normal
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onDecision(MazeExitChoice.CONFIRM) }) {
-                Text(
-                    text = if (selection == MazeExitChoice.CONFIRM) "● 确认退出" else "确认退出",
-                    fontWeight = if (selection == MazeExitChoice.CONFIRM) FontWeight.Bold else FontWeight.Normal
-                )
-            }
-        }
-    )
 }
 
 @Composable

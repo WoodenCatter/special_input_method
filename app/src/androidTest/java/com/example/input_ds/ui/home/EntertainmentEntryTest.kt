@@ -78,6 +78,26 @@ class EntertainmentEntryTest {
     }
 
     @Test
+    fun snakeGameOverRestartsAfterThreeUnansweredRounds() {
+        bci("freeze on")
+        bci("scan auto")
+        bci("nav ent")
+        bci("tick")
+        bci("signal B")
+        val gameOver = composeRule.onAllNodesWithText("游戏结束")
+        composeRule.waitUntil(timeoutMillis = 60_000) {
+            if (gameOver.fetchSemanticsNodes().isEmpty()) bci("tick")
+            gameOver.fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("选「重新开始」").assertIsDisplayed()
+        repeat(5) { bci("tick") }
+        composeRule.onNodeWithText("选「退出游戏」").assertIsDisplayed()
+        bci("tick")
+        composeRule.onNodeWithText("游戏结束").assertDoesNotExist()
+        composeRule.onNodeWithText("娱乐 › 向上贪吃蛇").assertIsDisplayed()
+    }
+
+    @Test
     fun enteringEntertainmentFromHomeFocusesMazeInsteadOfBack() {
         bci("freeze on")
         bci("scan manual")

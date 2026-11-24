@@ -719,6 +719,21 @@
       }
       this.scan.timer = null;
       if (!this.scan.cursor.candidates.length) return;
+      if (this.scan.cursor.pausedConfirm) return;
+      if (this.scan.cursor.confirming) {
+        if (this.scan.cursor.manualConfirm) return;
+        this.scan.timer = setTimeout(() => {
+          this.scan.cursor.advance();
+          if (this.scan.cursor.confirmationExpired) {
+            const label = this.scan.cursor.candidates[0].label;
+            this.cancelConfirmation();
+            window.InputDsMahjongHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+            return;
+          }
+          try { this.renderBciFocus(); } finally { this.restartScanTimer(); }
+        }, this.scan.cursor.confirmationDelay(this.scan.intervalMs));
+        return;
+      }
       const advance = () => {
         this.scan.cursor.advance();
         this.renderBciFocus();
@@ -875,8 +890,8 @@
       this.el.confirmDetail.textContent = request.detail || "咬牙选择当前高亮项。";
       this.el.confirm.classList.remove("hidden");
       this.setScanPhase("confirm", [
-        { kind: "confirm_yes", label: "确定" },
-        { kind: "confirm_no", label: "返回选择" }
+        { kind: "confirm_no", label: "返回选择" },
+        { kind: "confirm_yes", label: "确定" }
       ], 1, 0);
     }
 
@@ -976,10 +991,15 @@
         this.renderBciFocus();
         return;
       }
-      if (action === "bite") this.activateBciCandidate(this.scan.cursor.current());
+      if (action === "bite") {
+        const item = this.scan.cursor.chosen();
+        if (item !== this.scan.cursor.current()) window.InputDsMahjongHost?.notifyFeedback("已按上一项执行（延迟补偿）");
+        this.activateBciCandidate(item);
+      }
     }
 
     renderBciFocus() {
+    window.InputDsMahjongHost?.confirmationLabel(this.scan.cursor.confirming ? this.scan.cursor.current()?.label || '' : '');
       document.querySelectorAll(".bci-focus").forEach(element => element.classList.remove("bci-focus"));
       const cursor = this.scan.cursor;
       const current = cursor.current();
@@ -1190,11 +1210,21 @@
 
   }
 
+  if (typeof module !== "undefined" && module.exports) module.exports = MahjongGame;
+
   window.addEventListener("DOMContentLoaded", function () {
     window.mahjongGame = new MahjongGame();
     window.inputDsMahjong = {
       handleAction: function (action) { window.mahjongGame.handleBciAction(action); },
-      setScanInterval: function (value) { window.mahjongGame.setScanInterval(value); }
+      cancelConfirmation: () => window.mahjongGame.cancelConfirmation(),
+        configureConfirmation: (manual, paused, grace) => {
+          window.mahjongGame.scan.cursor.manualConfirm = manual;
+          window.mahjongGame.scan.cursor.pausedConfirm = paused;
+          window.mahjongGame.scan.cursor.graceMs = grace;
+          window.mahjongGame.scan.cursor.previousConfirm = null;
+          window.mahjongGame.restartScanTimer();
+        },
+        setScanInterval: function (value) { window.mahjongGame.setScanInterval(value); }
     };
   });
 })();

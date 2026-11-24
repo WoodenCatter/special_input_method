@@ -98,7 +98,7 @@ import com.example.input_ds.ui.theme.auroraBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class MusicFocusMode { CONTROLS, PLAYLIST, VOLUME, SETTINGS, DELETE_LIST, DELETE_CONFIRM }
+private enum class MusicFocusMode { CONTROLS, PLAYLIST, VOLUME, SETTINGS, DELETE_LIST }
 private enum class MusicControlIcon { TEXT, VOLUME, PLAYBACK_MODE }
 
 private const val CONTROL_SETTINGS = 0
@@ -120,6 +120,8 @@ fun MusicScreen(
     scanMode: ScanMode,
     onBack: () -> Unit,
     initialTrackId: String? = null,
+    onConfirmation: (ConfirmOverlaySpec) -> Unit,
+    paused: Boolean,
     fromAssistant: Boolean = false
 ) {
     val returnLabel = if (fromAssistant) "返回助手" else "返回娱乐"
@@ -152,9 +154,6 @@ fun MusicScreen(
     var settingsDirection by remember { mutableIntStateOf(1) }
     var deleteIndex by remember { mutableIntStateOf(0) }
     var deleteDirection by remember { mutableIntStateOf(1) }
-    var confirmIndex by remember { mutableIntStateOf(0) }
-    var confirmDirection by remember { mutableIntStateOf(1) }
-    var pendingDelete by remember { mutableStateOf<MusicTrack?>(null) }
     var importing by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var volume by remember {
@@ -175,7 +174,6 @@ fun MusicScreen(
         MusicFocusMode.VOLUME -> VOLUME_LABELS[volumeIndex] to volumeDirection
         MusicFocusMode.SETTINGS -> settingsLabels[settingsIndex] to settingsDirection
         MusicFocusMode.DELETE_LIST -> (tracks.getOrNull(deleteIndex-1)?.title ?: "返回") to deleteDirection
-        MusicFocusMode.DELETE_CONFIRM -> (if (confirmIndex == 0) "确定删除" else "返回") to confirmDirection
     }
     ReportActionHints(ActionHints.list(item, scanMode, direction))
 
@@ -246,15 +244,7 @@ fun MusicScreen(
         focusMode = MusicFocusMode.DELETE_LIST
     }
 
-    fun requestDelete(track: MusicTrack) {
-        pendingDelete = track
-        confirmIndex = 0
-        confirmDirection = 1
-        focusMode = MusicFocusMode.DELETE_CONFIRM
-    }
-
-    fun performDelete() {
-        val target = pendingDelete ?: return
+    fun performDelete(target: MusicTrack) {
         scope.launch {
             val wasCurrent = player.currentTrackId == target.id
             val oldIndex = tracks.indexOfFirst { it.id == target.id }.coerceAtLeast(0)
@@ -264,7 +254,6 @@ fun MusicScreen(
             tracks = playbackStore.orderTracks(loaded)
             shuffleOrder = playbackStore.reconcileShuffleOrder(tracks)
             persistOrders()
-            pendingDelete = null
             notice = if (deleted) "已删除《${target.title}》及 APP 内的音乐文件" else "删除失败"
             if (wasCurrent && tracks.isNotEmpty()) startTrack(tracks[oldIndex.coerceAtMost(tracks.lastIndex)])
             if (wasCurrent && tracks.isEmpty()) playbackStore.saveLastTrack(null)
@@ -276,6 +265,11 @@ fun MusicScreen(
                 focusMode = MusicFocusMode.DELETE_LIST
             }
         }
+    }
+
+    fun requestDelete(track: MusicTrack) {
+        onConfirmation(ConfirmOverlaySpec("删除音乐？", track.title, "取消", "保留这首音乐", "确定删除", "删除应用内副本",
+            onConfirm = { performDelete(track) }, onCancel = {}))
     }
 
     fun cyclePlaybackMode() {
@@ -345,10 +339,7 @@ fun MusicScreen(
                 focusMode = MusicFocusMode.SETTINGS
                 settingsIndex = 1
             }
-            MusicFocusMode.DELETE_CONFIRM -> {
-                pendingDelete = null
-                focusMode = MusicFocusMode.DELETE_LIST
-            }
+
         }
     }
 
@@ -435,18 +426,7 @@ fun MusicScreen(
                 }
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
-            MusicFocusMode.DELETE_CONFIRM -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    confirmDirection = -1
-                    if (scanMode == ScanMode.MANUAL) confirmIndex = (confirmIndex + 1) % 2
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    confirmDirection = 1
-                    if (scanMode == ScanMode.MANUAL) confirmIndex = (confirmIndex + 1) % 2
-                }
-                ControlSignal.BITE -> if (confirmIndex == 0) performDelete() else returnFromOverlay()
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-            }
+
         }
     }
     val signalSink = remember { MusicSignalSink { signalHandler.value(it) } }
@@ -502,50 +482,45 @@ fun MusicScreen(
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, controlIndex, controlDirection, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.CONTROLS) {
+    LaunchedEffect(paused, scanMode, focusMode, controlIndex, controlDirection, scanDelay) {
+        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.CONTROLS) {
             delay(scanDelay)
             controlIndex = (controlIndex + controlDirection + CONTROL_LABELS.size) % CONTROL_LABELS.size
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, playlistIndex, playlistDirection, tracks.size, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.PLAYLIST && tracks.isNotEmpty()) {
+    LaunchedEffect(paused, scanMode, focusMode, playlistIndex, playlistDirection, tracks.size, scanDelay) {
+        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.PLAYLIST && tracks.isNotEmpty()) {
             delay(scanDelay)
             playlistIndex = (playlistIndex + playlistDirection + tracks.size) % tracks.size
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, volumeIndex, volumeDirection, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.VOLUME) {
+    LaunchedEffect(paused, scanMode, focusMode, volumeIndex, volumeDirection, scanDelay) {
+        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.VOLUME) {
             delay(scanDelay)
             volumeIndex = (volumeIndex + volumeDirection + VOLUME_LABELS.size) % VOLUME_LABELS.size
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, settingsIndex, settingsDirection, tracks.size, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.SETTINGS) {
+    LaunchedEffect(paused, scanMode, focusMode, settingsIndex, settingsDirection, tracks.size, scanDelay) {
+        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.SETTINGS) {
             delay(scanDelay)
             moveSettingsFocus(settingsDirection)
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, deleteIndex, deleteDirection, tracks.size, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.DELETE_LIST && tracks.isNotEmpty()) {
+    LaunchedEffect(paused, scanMode, focusMode, deleteIndex, deleteDirection, tracks.size, scanDelay) {
+        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.DELETE_LIST && tracks.isNotEmpty()) {
             delay(scanDelay)
             val candidateCount = tracks.size + 1
             deleteIndex = (deleteIndex + deleteDirection + candidateCount) % candidateCount
         }
     }
 
-    LaunchedEffect(scanMode, focusMode, confirmIndex, confirmDirection, scanDelay) {
-        if (scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.DELETE_CONFIRM) {
-            delay(scanDelay)
-            confirmIndex = (confirmIndex + confirmDirection + 2) % 2
-        }
-    }
 
-    BackHandler { returnFromOverlay() }
+
+    BackHandler(enabled = !paused) { returnFromOverlay() }
 
     Box(Modifier.fillMaxSize().auroraBackground()) {
         Column(
@@ -647,12 +622,7 @@ fun MusicScreen(
                     tracks.getOrNull(index)?.let(::requestDelete)
                 }
             )
-            MusicFocusMode.DELETE_CONFIRM -> DeleteConfirmOverlay(
-                track = pendingDelete,
-                selectedIndex = confirmIndex,
-                onConfirm = ::performDelete,
-                onCancel = ::returnFromOverlay
-            )
+
             MusicFocusMode.CONTROLS, MusicFocusMode.PLAYLIST -> Unit
         }
     }
@@ -1056,33 +1026,6 @@ private fun DeleteListOverlay(
                     onClick = { onSelect(index) }
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun DeleteConfirmOverlay(
-    track: MusicTrack?,
-    selectedIndex: Int,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit
-) {
-    MusicOverlay(widthFraction = .50f) {
-        Text("确定删除这首音乐吗？", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text(
-            track?.let { "《${it.title}》· ${it.artist}" }.orEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            fontSize = 18.sp
-        )
-        Text(
-            "确认后会从播放列表中移除，并删除 APP 私有目录里的音乐副本。设备中原来的文件不会被删除。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            FocusOptionButton("确定删除", selectedIndex == 0, onConfirm, Modifier.weight(1f), danger = true)
-            FocusOptionButton("返回", selectedIndex == 1, onCancel, Modifier.weight(1f))
         }
     }
 }

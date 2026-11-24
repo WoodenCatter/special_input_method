@@ -48,6 +48,8 @@ export class ScanCursor {
 
     setPhase(phase, candidates, preferredKind = null) {
         this.phase = phase;
+      this.confirmTicks = 0;
+      this.previousConfirm = null;
         this.candidates = [...candidates];
         if (this.candidates.length === 0) {
             this.index = -1;
@@ -63,7 +65,18 @@ export class ScanCursor {
         return this.current();
     }
 
+    get confirming() { return this.phase === 'confirm' || this.phase === 'confirm_inline'; }
+
+    confirmationDelay(interval) { return this.confirmTicks === 0 ? interval * 1.5 : interval; }
+
+    get confirmationExpired() { return this.confirming && this.confirmTicks >= this.candidates.length * 3; }
+
     setDirectionFromAction(action) {
+      if (this.confirming) {
+        if (this.manualConfirm) this.index = (this.index + 1) % this.candidates.length;
+        this.previousConfirm = null;
+        return this.direction;
+      }
         // 视线方向与棋盘上的视觉移动方向保持一致。
         if (action === 'look_left') this.direction = -1;
         if (action === 'look_right') this.direction = 1;
@@ -71,6 +84,12 @@ export class ScanCursor {
     }
 
     advance() {
+      if (this.confirming) {
+        if (this.manualConfirm) return this.current();
+        this.previousConfirm = this.current();
+        this.advancedAt = Date.now();
+        this.confirmTicks++;
+      }
         if (this.candidates.length === 0) return null;
         this.index = (this.index + this.direction + this.candidates.length) % this.candidates.length;
         return this.current();
@@ -78,6 +97,12 @@ export class ScanCursor {
 
     current() {
         return this.index >= 0 ? this.candidates[this.index] : null;
+    }
+
+    chosen() {
+      if (this.confirming && !this.manualConfirm && this.previousConfirm && Date.now() - this.advancedAt < (this.graceMs ?? 400))
+        return this.previousConfirm;
+      return this.current();
     }
 
     snapshot() {

@@ -80,6 +80,21 @@ function bciRestartTimer() {
   if (BciScan.timer) clearInterval(BciScan.timer);
   BciScan.timer = null;
   if (!BciScan.cursor.candidates.length) return;
+  if (BciScan.cursor.pausedConfirm) return;
+  if (BciScan.cursor.confirming) {
+    if (BciScan.cursor.manualConfirm) return;
+    BciScan.timer = setTimeout(() => {
+      BciScan.cursor.advance();
+      if (BciScan.cursor.confirmationExpired) {
+        const label = BciScan.cursor.candidates[0].label;
+        bciCancelConfirmation();
+        window.InputDsDoudizhuHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+        return;
+      }
+      try { bciRender(); } finally { bciRestartTimer(); }
+    }, BciScan.cursor.confirmationDelay(BciScan.intervalMs));
+    return;
+  }
   BciScan.timer = setInterval(() => {
     BciScan.cursor.advance();
     bciRender();
@@ -180,6 +195,7 @@ function bciPreview(move) {
 }
 
 function bciRender() {
+    window.InputDsDoudizhuHost?.confirmationLabel(BciScan.cursor.confirming ? BciScan.cursor.current()?.label || '' : '');
   const phaseEl = $('#bci-phase');
   const directionEl = $('#bci-direction');
   const wrap = $('#bci-candidates');
@@ -433,8 +449,8 @@ function bciShowConfirmation(action) {
   if (action.kind === 'play' || action.kind === 'pass') {
     $('#bci-confirm-modal').classList.add('hidden');
     bciSetPhase('confirm_inline', [
-      { kind: 'confirm', label: action.kind === 'play' ? '确定出牌' : '确定不出', style: 'confirm-inline' },
       { kind: 'cancel', label: '返回选择', style: 'cancel-inline' },
+      { kind: 'confirm', label: action.kind === 'play' ? '确定出牌' : '确定不出', style: 'confirm-inline' },
     ], 'horizontal', false);
     return;
   }
@@ -447,8 +463,8 @@ function bciShowConfirmation(action) {
   }
   $('#bci-confirm-modal').classList.remove('hidden');
   bciSetPhase('confirm', [
-    { kind: 'confirm', label: '确定' },
     { kind: 'cancel', label: '返回选择' },
+    { kind: 'confirm', label: '确定' },
   ], 'horizontal', false);
 }
 
@@ -495,7 +511,7 @@ function bciExecute(action) {
 }
 
 function bciRequest(action) {
-  if (BciScan.confirmationEnabled) bciShowConfirmation(action);
+  if (action.kind === 'exit' || BciScan.confirmationEnabled) bciShowConfirmation(action);
   else bciExecute(action);
 }
 
@@ -547,7 +563,11 @@ function handleDoudizhuBciAction(action) {
     bciRender();
     return;
   }
-  if (action === 'bite') bciActivate(BciScan.cursor.current());
+  if (action === "bite") {
+    const item = BciScan.cursor.chosen();
+    if (item !== BciScan.cursor.current()) window.InputDsDoudizhuHost?.notifyFeedback("已按上一项执行（延迟补偿）");
+    bciActivate(item);
+  }
 }
 
 /* ---------------- generic helpers ---------------- */
@@ -1561,7 +1581,15 @@ function boot() {
 
   window.inputDsDoudizhu = {
     handleAction: handleDoudizhuBciAction,
-    setScanInterval: bciSetInterval,
+    cancelConfirmation: () => bciCancelConfirmation(),
+        configureConfirmation: (manual, paused, grace) => {
+          BciScan.cursor.manualConfirm = manual;
+          BciScan.cursor.pausedConfirm = paused;
+          BciScan.cursor.graceMs = grace;
+          BciScan.cursor.previousConfirm = null;
+          bciRestartTimer();
+        },
+        setScanInterval: bciSetInterval,
   };
 
   startPractice();

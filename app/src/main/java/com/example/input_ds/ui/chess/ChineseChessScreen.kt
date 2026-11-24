@@ -1,5 +1,8 @@
 package com.example.input_ds.ui.chess
 
+import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.AppUiSettings
+import com.example.input_ds.ui.design.*
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
@@ -32,11 +35,18 @@ private const val CHESS_URL = "https://$ASSET_HOST/assets/chinese_chess/index.ht
 /** Offline chess screen supporting both direct touch and EEG scanning control. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ChineseChessScreen(scanIntervalMs: Long, onBack: () -> Unit) {
+fun ChineseChessScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean, onFeedback: (String) -> Unit, onBoundary: () -> Unit, onBack: () -> Unit) {
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var activeSignalSink by remember { mutableStateOf<ChineseChessWebSignalSink?>(null) }
     val currentOnBack by rememberUpdatedState(onBack)
 
+    var confirmLabel by remember { mutableStateOf("") }
+    ReportActionHints(if (confirmLabel.isEmpty()) ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
+        else confirmHints(confirmLabel, scanMode))
+
+    androidx.activity.compose.BackHandler(enabled = confirmLabel.isNotEmpty() && !paused) {
+        activeWebView?.evaluateJavascript("window.inputDsChess?.cancelConfirmation()", null)
+    }
     DisposableEffect(Unit) {
         onDispose {
             activeSignalSink?.let(ChineseChessInputBus::detach)
@@ -64,7 +74,10 @@ fun ChineseChessScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                     activeSignalSink = signalSink
                     ChineseChessInputBus.attach(signalSink)
                     addJavascriptInterface(
-                        ChineseChessHostBridge(this) { currentOnBack() },
+                        ChineseChessHostBridge(this, { label ->
+                            if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
+                            confirmLabel = label
+                        }, onFeedback) { currentOnBack() },
                         "InputDsChessHost"
                     )
                     setBackgroundColor(Color.rgb(245, 239, 229))
@@ -89,7 +102,7 @@ fun ChineseChessScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 }
             },
             update = {
-                activeSignalSink?.setScanInterval(scanIntervalMs)
+                activeSignalSink?.configure(scanIntervalMs, scanMode == ScanMode.MANUAL, paused, AppUiSettings.graceMs(it.context))
             }
         )
     }
@@ -151,8 +164,16 @@ private class ChineseChessWebSignalSink(
         sendScanInterval()
     }
 
-    fun setScanInterval(value: Long) {
+    private var manual = false
+    private var paused = false
+    private var grace = 400L
+
+    fun configure(value: Long, manual: Boolean, paused: Boolean, grace: Long) {
+        if (value == scanIntervalMs && this.manual == manual && this.paused == paused && this.grace == grace) return
         scanIntervalMs = value.coerceIn(1_100L, 3_000L)
+        this.manual = manual
+        this.paused = paused
+        this.grace = grace
         if (pageReady) sendScanInterval()
     }
 
@@ -172,7 +193,7 @@ private class ChineseChessWebSignalSink(
     private fun sendScanInterval() {
         webView.post {
             webView.evaluateJavascript(
-                "window.inputDsChess?.setScanInterval($scanIntervalMs)",
+                "window.inputDsChess?.setScanInterval($scanIntervalMs); window.inputDsChess?.configureConfirmation($manual, $paused, $grace)",
                 null
             )
         }
@@ -181,8 +202,16 @@ private class ChineseChessWebSignalSink(
 
 private class ChineseChessHostBridge(
     private val webView: WebView,
+    private val onLabel: (String) -> Unit,
+    private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
+    @JavascriptInterface
+    fun confirmationLabel(label: String) { webView.post { onLabel(label) } }
+
+    @JavascriptInterface
+    fun notifyFeedback(message: String) { webView.post { onFeedback(message) } }
+
     @JavascriptInterface
     fun requestExit() {
         webView.post { onRequestExit() }

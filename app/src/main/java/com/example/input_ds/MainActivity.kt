@@ -767,6 +767,11 @@ class MainActivity : ComponentActivity() {
                     if (!chat.back()) navigateTo(AppDestination.HOME)
                     return@BackHandler
                 }
+                if (destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB,
+                        AppDestination.CHINESE_CHESS, AppDestination.MAHJONG, AppDestination.DOUDIZHU)) {
+                    confirmGameExit()
+                    return@BackHandler
+                }
                 val parent = when (destination.value) {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
@@ -857,31 +862,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            AppDestination.CHINESE_CHESS -> ChineseChessScreen(inputState.scanIntervalMs) {
+            AppDestination.CHINESE_CHESS -> ChineseChessScreen(inputState.scanIntervalMs, scanMode.value, careOpen || hasActiveCall || frozen || confirmOverlay != null, feedback::toast, { bciController?.invalidatePendingCommands() }) {
                 navigateTo(AppDestination.ENTERTAINMENT)
             }
 
-            AppDestination.DOUDIZHU -> DoudizhuScreen(inputState.scanIntervalMs) {
+            AppDestination.DOUDIZHU -> DoudizhuScreen(inputState.scanIntervalMs, scanMode.value, careOpen || hasActiveCall || frozen || confirmOverlay != null, feedback::toast, { bciController?.invalidatePendingCommands() }) {
                 navigateTo(AppDestination.ENTERTAINMENT)
             }
 
-            AppDestination.MAHJONG -> MahjongScreen(inputState.scanIntervalMs) {
+            AppDestination.MAHJONG -> MahjongScreen(inputState.scanIntervalMs, scanMode.value, careOpen || hasActiveCall || frozen || confirmOverlay != null, feedback::toast, { bciController?.invalidatePendingCommands() }) {
                 navigateTo(AppDestination.ENTERTAINMENT)
             }
 
             AppDestination.SNAKE_CLIMB -> SnakeClimbScreen(
                 state = snakeState.value,
                 moveIntervalMs = inputState.scanIntervalMs,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || frozen,
                 onAction = ::applySnakeAction,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
+                onBack = { confirmGameExit() }
             )
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
                 controlStatus = bciStatus.value,
-                onBack = { navigateTo(AppDestination.ENTERTAINMENT) },
+                onBack = { confirmGameExit() },
                 onAction = ::applyMazeAction,
-                onExitDecision = ::resolveMazeExit,
                 onReset = { resetMazeForActiveModel() }
             )
 
@@ -894,6 +899,8 @@ class MainActivity : ComponentActivity() {
             )
 
             AppDestination.MUSIC -> MusicScreen(
+                onConfirmation = ::openConfirmation,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || frozen,
                 scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
                 onBack = { navigateTo(mediaParent()) },
@@ -1019,7 +1026,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun dismissConfirmOverlay() {
+        val spec = confirmOverlay?.first ?: return
         confirmOverlay = null
+        spec.onCancel()
         dwellRevision++
     }
 
@@ -1171,6 +1180,8 @@ class MainActivity : ComponentActivity() {
 
     private fun chooseConfirmOption(index: Int) {
         val (spec, _) = confirmOverlay ?: return
+        confirmOverlay = null
+        dwellRevision++
         if (index == 1) spec.onConfirm() else spec.onCancel()
     }
 
@@ -1261,10 +1272,35 @@ class MainActivity : ComponentActivity() {
     private fun mediaParent(): AppDestination =
         if (assistantMediaId == null) AppDestination.ENTERTAINMENT else AppDestination.LIFE_ASSISTANT
 
+    private fun openConfirmation(spec: ConfirmOverlaySpec) {
+        bciController?.invalidatePendingCommands()
+        confirmOverlay = spec to ScanCursor(2)
+        dwellRevision++
+    }
+
+    private fun confirmGameExit(onCancel: () -> Unit = {}, onExit: () -> Unit = { navigateTo(AppDestination.ENTERTAINMENT) }) {
+        openConfirmation(ConfirmOverlaySpec(
+            "离开游戏？", "退出后返回娱乐。", "继续游戏", "留在游戏中", "退出游戏", "返回娱乐",
+            onConfirm = onExit, onCancel = onCancel
+        ))
+    }
+
     private fun applySnakeAction(action: SnakeAction) {
-        val next = SnakeClimbGame.applyAction(snakeState.value, action)
+        val previous = snakeState.value
+        val next = SnakeClimbGame.applyAction(previous, action)
         snakeState.value = next
-        if (next.exitRequested) navigateTo(AppDestination.ENTERTAINMENT)
+        when {
+            next.exitRequested -> navigateTo(AppDestination.ENTERTAINMENT)
+            next.exitConfirmation && !previous.exitConfirmation -> confirmGameExit(
+                onCancel = { applySnakeAction(SnakeAction.CANCEL_EXIT) },
+                onExit = { applySnakeAction(SnakeAction.CONFIRM_EXIT) }
+            )
+            next.gameOver && !previous.gameOver -> openConfirmation(ConfirmOverlaySpec(
+                "游戏结束", next.message, "重新开始", "再玩一局", "退出游戏", "返回娱乐",
+                onConfirm = { applySnakeAction(SnakeAction.CONFIRM_EXIT) },
+                onCancel = { applySnakeAction(SnakeAction.RESTART) }
+            ))
+        }
     }
 
     private fun enterEntertainmentModule(module: EntertainmentHubModule) {
@@ -1491,6 +1527,7 @@ class MainActivity : ComponentActivity() {
                     destination.value == AppDestination.ENTERTAINMENT -> advanceEntertainment()
                     destination.value == AppDestination.APP_SETTINGS -> AppSettingsInputBus.debugTick()
                     destination.value == AppDestination.SPEED_PRACTICE -> SpeedPracticeInputBus.debugTick()
+                    destination.value == AppDestination.SNAKE_CLIMB -> applySnakeAction(SnakeAction.TICK)
                     destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
                     destination.value == AppDestination.COMMUNICATION -> {
                         val chat = communicationViewModel
@@ -1834,7 +1871,10 @@ class MainActivity : ComponentActivity() {
 
     private fun applyMazeAction(action: MazeAction) {
         val nextState = MazeGame.applyAction(mazeState.value, action)
+        val opened = !mazeState.value.exitDialogVisible && nextState.exitDialogVisible
         mazeState.value = nextState
+        if (opened) confirmGameExit(onCancel = { resolveMazeExit(MazeExitChoice.CANCEL) },
+            onExit = { resolveMazeExit(MazeExitChoice.CONFIRM) })
         if (nextState.exitConfirmed) navigateTo(AppDestination.ENTERTAINMENT)
     }
 

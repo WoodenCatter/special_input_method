@@ -52,10 +52,12 @@ import kotlinx.coroutines.delay
 fun SnakeClimbScreen(
     state: SnakeClimbState,
     moveIntervalMs: Long,
+    paused: Boolean,
     onAction: (SnakeAction) -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(
+        paused,
         state.step,
         state.gameOver,
         state.gameOverSelection,
@@ -64,7 +66,7 @@ fun SnakeClimbScreen(
         state.exitRequested,
         moveIntervalMs
     ) {
-        if (!state.exitRequested) {
+        if (!paused && !state.exitRequested && !state.gameOver && !state.exitConfirmation) {
             delay(moveIntervalMs.coerceIn(1_100L, 3_000L))
             onAction(SnakeAction.TICK)
         }
@@ -110,8 +112,6 @@ fun SnakeClimbScreen(
             SnakeLengthStatus(state.bodyLength)
         }
 
-        if (state.exitConfirmation) ExitConfirmation(state, onAction)
-        if (state.gameOver) GameOverDialog(state, onAction)
     }
 }
 
@@ -394,82 +394,5 @@ private fun GameInstructions(modifier: Modifier = Modifier) {
         Text("吃到苹果，身体长度增加 1。", fontSize = 15.sp)
         Text("通过数字墙时，身体长度必须大于墙上的数字，通过后扣除相应长度。", fontSize = 15.sp)
         Text("撞到左右边界时长度减 1，并自动转向上方；长度降到 0 则结束。", fontSize = 15.sp)
-    }
-}
-
-@Composable
-private fun ExitConfirmation(state: SnakeClimbState, onAction: (SnakeAction) -> Unit) {
-    PromptOverlay(onOutsideClick = { onAction(SnakeAction.CANCEL_EXIT) }) {
-        Text("确定要退出向上贪吃蛇吗？", style = MaterialTheme.typography.headlineSmall)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            PromptButton("继续游戏", !state.exitSelected) { onAction(SnakeAction.CANCEL_EXIT) }
-            PromptButton("退出游戏", state.exitSelected) { onAction(SnakeAction.CONFIRM_EXIT) }
-        }
-    }
-}
-
-@Composable
-private fun GameOverDialog(state: SnakeClimbState, onAction: (SnakeAction) -> Unit) {
-    PromptOverlay(onOutsideClick = {}) {
-        Text("游戏结束", style = MaterialTheme.typography.headlineSmall)
-        Text(state.message)
-        Text("共吃到 ${state.applesEaten} 个苹果，向上前进 ${state.head.row} 行。")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            PromptButton("重新开始", state.gameOverSelection == SnakeEndChoice.RESTART) {
-                onAction(SnakeAction.RESTART)
-            }
-            PromptButton("退出游戏", state.gameOverSelection == SnakeEndChoice.EXIT) {
-                onAction(SnakeAction.CONFIRM_EXIT)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PromptOverlay(
-    onOutsideClick: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(100f)
-            .background(Color(0x99000000))
-            .clickable(onClick = onOutsideClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(min = 420.dp, max = 560.dp)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
-                .border(2.dp, AuroraVioletBright, RoundedCornerShape(24.dp))
-                .clickable { }
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            content = content
-        )
-    }
-}
-
-@Composable
-private fun PromptButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) AuroraVioletBright else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (selected) Color(0xFF1C1730) else MaterialTheme.colorScheme.onSurface
-        ),
-        modifier = Modifier.then(
-            if (selected) Modifier.border(3.dp, Color.White, RoundedCornerShape(24.dp)) else Modifier
-        )
-    ) {
-        Text(label, textAlign = TextAlign.Center)
     }
 }

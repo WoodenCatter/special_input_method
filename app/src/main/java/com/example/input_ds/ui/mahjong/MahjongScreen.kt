@@ -1,5 +1,8 @@
 package com.example.input_ds.ui.mahjong
 
+import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.AppUiSettings
+import com.example.input_ds.ui.design.*
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
@@ -32,11 +35,18 @@ private const val MAHJONG_URL = "https://$ASSET_HOST/assets/mahjong/index.html"
 /** Fully offline four-player Mahjong table with touch and EEG/floating-ball controls. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun MahjongScreen(scanIntervalMs: Long, onBack: () -> Unit) {
+fun MahjongScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean, onFeedback: (String) -> Unit, onBoundary: () -> Unit, onBack: () -> Unit) {
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var activeSignalSink by remember { mutableStateOf<MahjongWebSignalSink?>(null) }
     val currentOnBack by rememberUpdatedState(onBack)
 
+    var confirmLabel by remember { mutableStateOf("") }
+    ReportActionHints(if (confirmLabel.isEmpty()) ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
+        else confirmHints(confirmLabel, scanMode))
+
+    androidx.activity.compose.BackHandler(enabled = confirmLabel.isNotEmpty() && !paused) {
+        activeWebView?.evaluateJavascript("window.inputDsMahjong?.cancelConfirmation()", null)
+    }
     DisposableEffect(Unit) {
         onDispose {
             activeSignalSink?.let(MahjongInputBus::detach)
@@ -66,7 +76,10 @@ fun MahjongScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                     activeSignalSink = signalSink
                     MahjongInputBus.attach(signalSink)
                     addJavascriptInterface(
-                        MahjongHostBridge(this) { currentOnBack() },
+                        MahjongHostBridge(this, { label ->
+                            if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
+                            confirmLabel = label
+                        }, onFeedback) { currentOnBack() },
                         "InputDsMahjongHost"
                     )
                     setBackgroundColor(Color.rgb(8, 116, 62))
@@ -91,7 +104,7 @@ fun MahjongScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 }
             },
             update = {
-                activeSignalSink?.setScanInterval(scanIntervalMs)
+                activeSignalSink?.configure(scanIntervalMs, scanMode == ScanMode.MANUAL, paused, AppUiSettings.graceMs(it.context))
             }
         )
     }
@@ -155,8 +168,16 @@ private class MahjongWebSignalSink(
         sendScanInterval()
     }
 
-    fun setScanInterval(value: Long) {
+    private var manual = false
+    private var paused = false
+    private var grace = 400L
+
+    fun configure(value: Long, manual: Boolean, paused: Boolean, grace: Long) {
+        if (value == scanIntervalMs && this.manual == manual && this.paused == paused && this.grace == grace) return
         scanIntervalMs = value.coerceIn(1_100L, 3_000L)
+        this.manual = manual
+        this.paused = paused
+        this.grace = grace
         if (pageReady) sendScanInterval()
     }
 
@@ -179,7 +200,7 @@ private class MahjongWebSignalSink(
     private fun sendScanInterval() {
         webView.post {
             webView.evaluateJavascript(
-                "if (window.inputDsMahjong) window.inputDsMahjong.setScanInterval($scanIntervalMs)",
+                "if (window.inputDsMahjong) window.inputDsMahjong.setScanInterval($scanIntervalMs); window.inputDsMahjong?.configureConfirmation($manual, $paused, $grace)",
                 null
             )
         }
@@ -188,8 +209,16 @@ private class MahjongWebSignalSink(
 
 private class MahjongHostBridge(
     private val webView: WebView,
+    private val onLabel: (String) -> Unit,
+    private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
+    @JavascriptInterface
+    fun confirmationLabel(label: String) { webView.post { onLabel(label) } }
+
+    @JavascriptInterface
+    fun notifyFeedback(message: String) { webView.post { onFeedback(message) } }
+
     @JavascriptInterface
     fun requestExit() {
         webView.post { onRequestExit() }

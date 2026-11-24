@@ -1,5 +1,8 @@
 package com.example.input_ds.ui.doudizhu
 
+import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.AppUiSettings
+import com.example.input_ds.ui.design.*
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.net.Uri
@@ -32,11 +35,18 @@ private const val DOUDIZHU_URL = "https://$ASSET_HOST/assets/doudizhu/index.html
 /** Fully offline classic three-player Dou Dizhu screen with touch and EEG controls. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun DoudizhuScreen(scanIntervalMs: Long, onBack: () -> Unit) {
+fun DoudizhuScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean, onFeedback: (String) -> Unit, onBoundary: () -> Unit, onBack: () -> Unit) {
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var activeSignalSink by remember { mutableStateOf<DoudizhuWebSignalSink?>(null) }
     val currentOnBack by rememberUpdatedState(onBack)
 
+    var confirmLabel by remember { mutableStateOf("") }
+    ReportActionHints(if (confirmLabel.isEmpty()) ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
+        else confirmHints(confirmLabel, scanMode))
+
+    androidx.activity.compose.BackHandler(enabled = confirmLabel.isNotEmpty() && !paused) {
+        activeWebView?.evaluateJavascript("window.inputDsDoudizhu?.cancelConfirmation()", null)
+    }
     DisposableEffect(Unit) {
         onDispose {
             activeSignalSink?.let(DoudizhuInputBus::detach)
@@ -63,7 +73,10 @@ fun DoudizhuScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                     activeSignalSink = signalSink
                     DoudizhuInputBus.attach(signalSink)
                     addJavascriptInterface(
-                        DoudizhuHostBridge(this) { currentOnBack() },
+                        DoudizhuHostBridge(this, { label ->
+                            if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
+                            confirmLabel = label
+                        }, onFeedback) { currentOnBack() },
                         "InputDsDoudizhuHost"
                     )
                     setBackgroundColor(Color.rgb(18, 63, 39))
@@ -88,7 +101,7 @@ fun DoudizhuScreen(scanIntervalMs: Long, onBack: () -> Unit) {
                 }
             },
             update = {
-                activeSignalSink?.setScanInterval(scanIntervalMs)
+                activeSignalSink?.configure(scanIntervalMs, scanMode == ScanMode.MANUAL, paused, AppUiSettings.graceMs(it.context))
             }
         )
     }
@@ -150,8 +163,16 @@ private class DoudizhuWebSignalSink(
         sendScanInterval()
     }
 
-    fun setScanInterval(value: Long) {
+    private var manual = false
+    private var paused = false
+    private var grace = 400L
+
+    fun configure(value: Long, manual: Boolean, paused: Boolean, grace: Long) {
+        if (value == scanIntervalMs && this.manual == manual && this.paused == paused && this.grace == grace) return
         scanIntervalMs = value.coerceIn(1_100L, 3_000L)
+        this.manual = manual
+        this.paused = paused
+        this.grace = grace
         if (pageReady) sendScanInterval()
     }
 
@@ -171,7 +192,7 @@ private class DoudizhuWebSignalSink(
     private fun sendScanInterval() {
         webView.post {
             webView.evaluateJavascript(
-                "window.inputDsDoudizhu?.setScanInterval($scanIntervalMs)",
+                "window.inputDsDoudizhu?.setScanInterval($scanIntervalMs); window.inputDsDoudizhu?.configureConfirmation($manual, $paused, $grace)",
                 null
             )
         }
@@ -180,8 +201,16 @@ private class DoudizhuWebSignalSink(
 
 private class DoudizhuHostBridge(
     private val webView: WebView,
+    private val onLabel: (String) -> Unit,
+    private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
+    @JavascriptInterface
+    fun confirmationLabel(label: String) { webView.post { onLabel(label) } }
+
+    @JavascriptInterface
+    fun notifyFeedback(message: String) { webView.post { onFeedback(message) } }
+
     @JavascriptInterface
     fun requestExit() {
         webView.post { onRequestExit() }

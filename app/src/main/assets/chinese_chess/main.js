@@ -24,7 +24,7 @@ window.addEventListener('resize', syncChessViewportHeight);
 /**
  * 游戏控制器
  */
-class GameController {
+export class GameController {
     constructor() {
         this.chess = new ChineseChess();
         this.ai = new ChessAI(this.chess);
@@ -506,7 +506,7 @@ class GameController {
         this.scanCursor.setPhase(ScanPhase.CONFIRM, [
             {kind: 'cancel', label: '返回'},
             {kind: 'confirm', label: '确定'}
-        ], 'confirm');
+        ], 'cancel');
         this.restartScanTimer();
         this.renderScanFocus();
     }
@@ -544,6 +544,21 @@ class GameController {
             this.scanCursor.phase === ScanPhase.RESULT || this.scanCursor.phase === ScanPhase.CONFIRM
         );
         if ((!this.canScan() && !gameOverScan) || this.scanCursor.phase === ScanPhase.PAUSED) return;
+        if (this.scanCursor.pausedConfirm) return;
+        if (this.scanCursor.confirming) {
+          if (this.scanCursor.manualConfirm) return;
+          this.scanTimer = setTimeout(() => {
+            this.scanCursor.advance();
+            if (this.scanCursor.confirmationExpired) {
+              const label = this.scanCursor.candidates[0].label;
+              this.cancelPendingAction();
+              window.InputDsChessHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+              return;
+            }
+            try { this.renderScanFocus(); } finally { this.restartScanTimer(); }
+          }, this.scanCursor.confirmationDelay(this.scanIntervalMs));
+          return;
+        }
         this.scanTimer = window.setInterval(() => {
             this.scanCursor.advance();
             this.renderScanFocus();
@@ -563,8 +578,9 @@ class GameController {
         }
         if (action !== 'bite') return;
 
-        const item = this.scanCursor.current();
+        const item = this.scanCursor.chosen();
         if (!item) return;
+        if (item !== this.scanCursor.current()) window.InputDsChessHost?.notifyFeedback("已按上一项执行（延迟补偿）");
         this.activateScanItem(item);
     }
 
@@ -631,6 +647,7 @@ class GameController {
     }
 
     renderScanFocus() {
+    window.InputDsChessHost?.confirmationLabel(this.scanCursor.confirming ? this.scanCursor.current()?.label || '' : '');
         this.clearScanFocus();
         const phaseEl = document.getElementById('scanPhase');
         const choiceEl = document.getElementById('scanChoice');
@@ -897,6 +914,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const controller = new GameController();
     window.inputDsChess = {
         handleAction: action => controller.handleBciAction(action),
+        cancelConfirmation: () => controller.cancelPendingAction(),
+        configureConfirmation: (manual, paused, grace) => {
+          controller.scanCursor.manualConfirm = manual;
+          controller.scanCursor.pausedConfirm = paused;
+          controller.scanCursor.graceMs = grace;
+          controller.scanCursor.previousConfirm = null;
+          controller.restartScanTimer();
+        },
         setScanInterval: intervalMs => controller.setScanInterval(intervalMs)
     };
     window.addEventListener('beforeunload', () => controller.pauseBciScan('页面关闭'));
