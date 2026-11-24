@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,11 +17,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.input_ds.engine.PredictionDebugInfo
+import com.example.input_ds.ui.theme.LocalBciColors
 import kotlinx.coroutines.delay
 
 /** Temporary Debug-build overlay. Remove this file and its Activity hook after diagnosis. */
@@ -52,10 +53,12 @@ fun PredictionDebugOverlay(
         exit = fadeOut(tween(FADE_DURATION_MS))
     ) {
         val current = info ?: return@AnimatedVisibility
+        val colors = LocalBciColors.current
         Surface(
             modifier = Modifier.widthIn(max = 560.dp),
-            color = Color(0xE6F2F3F5),
-            contentColor = Color(0xFF25272A),
+            color = colors.panel.copy(alpha = 0.94f),
+            contentColor = colors.text,
+            border = BorderStroke(1.dp, colors.line),
             shape = RoundedCornerShape(12.dp),
             shadowElevation = 3.dp
         ) {

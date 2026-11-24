@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.components
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -129,8 +131,8 @@ fun FloatingControlBall(
                 .animateContentSize(
                     animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
                 )
-                .background(Color(0xEE17242C), RoundedCornerShape(34.dp))
-                .border(2.dp, Color(0xFF79E495), RoundedCornerShape(34.dp))
+                .background(LocalBciColors.current.panel, RoundedCornerShape(34.dp))
+                .border(2.dp, LocalBciColors.current.line, RoundedCornerShape(34.dp))
                 .padding(4.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
@@ -138,8 +140,8 @@ fun FloatingControlBall(
             Box(
                 modifier = Modifier
                     .size(60.dp)
-                    .background(Color(0xFF58C96F), CircleShape)
-                    .border(3.dp, Color.White, CircleShape)
+                    .background(LocalBciColors.current.focus, CircleShape)
+                    .border(3.dp, LocalBciColors.current.bg, CircleShape)
                     .pointerInput(viewportWidth, viewportHeight) {
                         detectDragGestures(
                             onDragEnd = ::settleAfterDrag,
@@ -161,7 +163,7 @@ fun FloatingControlBall(
             ) {
                 Text(
                     if (expanded) "拖动" else "控制",
-                    color = Color(0xFF102217),
+                    color = LocalBciColors.current.bg,
                     fontSize = if (expanded) 14.sp else 16.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center
@@ -183,11 +185,11 @@ fun FloatingControlBall(
                     modifier = Modifier.padding(start = 6.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FloatingCommandButton("◀\n左看", Color(0xFF345B82), onLeftLook)
+                    FloatingCommandButton("◀\n左看", LocalBciColors.current.panel2, onLeftLook)
                     Spacer(Modifier.width(6.dp))
-                    FloatingCommandButton("●\n咬牙", Color(0xFF91443F), onBite)
+                    FloatingCommandButton("●\n咬牙", LocalBciColors.current.focusTint, onBite)
                     Spacer(Modifier.width(6.dp))
-                    FloatingCommandButton("▶\n右看", Color(0xFF345B82), onRightLook)
+                    FloatingCommandButton("▶\n右看", LocalBciColors.current.panel2, onRightLook)
                 }
             }
         }
@@ -199,7 +201,7 @@ private fun FloatingCommandButton(label: String, color: Color, onClick: () -> Un
     Button(
         onClick = onClick,
         modifier = Modifier.width(74.dp).height(54.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = color),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = LocalBciColors.current.text),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Text(label, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)

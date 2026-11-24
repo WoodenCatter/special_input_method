@@ -61,8 +61,17 @@ fun PatientScaffold(
         Box(Modifier.fillMaxSize().background(c.bg)) {
             Column {
                 StatusBar(status, onCare)
+                var pageOverlay by remember { mutableStateOf<(@Composable BoxScope.() -> Unit)?>(null) }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) { content() }
+                    Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) {
+                        CompositionLocalProvider(LocalStageOverlay provides { pageOverlay = it }) {
+                            content()
+                        }
+                    }
+                    pageOverlay?.let { stageOv ->
+                        Box(Modifier.fillMaxSize().interceptBackgroundPointers())
+                        Box(Modifier.fillMaxSize()) { stageOv() }
+                    }
                     if (overlay != null) {
                         Box(Modifier.fillMaxSize().interceptBackgroundPointers())
                         Box(Modifier.fillMaxSize()) { overlay() }

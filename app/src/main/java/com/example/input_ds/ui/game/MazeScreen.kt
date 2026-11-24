@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.game
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
@@ -25,28 +27,32 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.input_ds.game.MazeAction
 import com.example.input_ds.game.MazeExitChoice
 import com.example.input_ds.game.MazeGame
 import com.example.input_ds.game.MazeProtocol
 import com.example.input_ds.game.MazeState
-import com.example.input_ds.ui.theme.AuroraBad
-import com.example.input_ds.ui.theme.AuroraOk
-import com.example.input_ds.ui.theme.AuroraPink
-import com.example.input_ds.ui.theme.AuroraViolet
-import com.example.input_ds.ui.theme.AuroraButton
-import com.example.input_ds.ui.theme.AuroraButtonStyle
+import com.example.input_ds.ui.theme.BciButton
+import com.example.input_ds.ui.theme.BciButtonStyle
 import com.example.input_ds.ui.theme.GlassPanel
-import com.example.input_ds.ui.theme.auroraBackground
+import com.example.input_ds.ui.theme.bciBackground
 import kotlinx.coroutines.delay
 
 @Composable
@@ -57,33 +63,23 @@ fun MazeScreen(
     onAction: (MazeAction) -> Unit,
     onReset: () -> Unit
 ) {
-    LaunchedEffect(state.completed) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(state.completed, lifecycleOwner) {
         if (state.completed) {
-            delay(1_500)
-            onReset()
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                delay(1_500)
+                onReset()
+            }
         }
     }
 
     Column(
         Modifier.fillMaxSize()
-            .auroraBackground()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(12.dp)
+            .bciBackground()
     ) {
         Text("迷宫游戏", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(12.dp))
         GlassPanel(Modifier.fillMaxSize()) {
-            GlassPanel(
-                Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Text("动作说明：")
-                    Text("咬牙 = 向上")
-                    Text("左看 = 向左")
-                    Text("右看 = 向右")
-                }
-            }
             MazeBoard(state, Modifier.weight(1f).fillMaxWidth())
         }
     }
@@ -92,13 +88,14 @@ fun MazeScreen(
 
 @Composable
 private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
-    val wallColor = MaterialTheme.colorScheme.background
-    val pathColor = MaterialTheme.colorScheme.surfaceContainerHigh
-    val gridColor = MaterialTheme.colorScheme.outline
-    val playerColor = MaterialTheme.colorScheme.onSurface
-    val playerBorder = MaterialTheme.colorScheme.background
-    val exitColor = MaterialTheme.colorScheme.tertiaryContainer
-    val exitTextColor = MaterialTheme.colorScheme.onTertiaryContainer.toArgb()
+    val colors = LocalBciColors.current
+    val wallColor = colors.dim.copy(alpha = 0.45f).compositeOver(colors.bg)
+    val pathColor = colors.panel
+    val gridColor = colors.line
+    val playerColor = colors.text
+    val playerBorder = colors.bg
+    val exitColor = colors.focus
+    val exitTextColor = colors.bg.toArgb()
     val exitTextPaint = remember(exitTextColor) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = exitTextColor
@@ -138,8 +135,22 @@ private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
                 origin.x + position.column * cell + cell / 2f,
                 origin.y + position.row * cell + cell / 2f
             )
-            drawCircle(AuroraOk, radius = cell * .28f, center = center(state.start), style = Stroke(cell * .08f))
-            drawCircle(AuroraViolet, radius = cell * .3f, center = center(state.finish))
+            drawCircle(colors.ok, radius = cell * .28f, center = center(state.start), style = Stroke(cell * .08f))
+            val finishCenter = center(state.finish)
+            val outerR = cell * .38f
+            val innerR = cell * .17f
+            val finishStar = Path().apply {
+                for (i in 0 until 10) {
+                    val angle = -PI / 2.0 + i * PI / 5.0
+                    val r = if (i % 2 == 0) outerR else innerR
+                    val x = finishCenter.x + (r * cos(angle)).toFloat()
+                    val y = finishCenter.y + (r * sin(angle)).toFloat()
+                    if (i == 0) moveTo(x, y) else lineTo(x, y)
+                }
+                close()
+            }
+            drawPath(finishStar, colors.ok)
+            drawPath(finishStar, colors.text, style = Stroke(cell * .04f))
             state.exitPoint?.let { exit ->
                 val topLeft = Offset(
                     origin.x + exit.column * cell + cell * .1f,
@@ -166,9 +177,9 @@ private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
                     origin.y + position.row * cell + cell * .18f
                 )
                 if (action == MazeAction.LEFT_RIGHT) {
-                    drawRect(AuroraBad, topLeft, Size(cell * .64f, cell * .64f))
+                    drawRect(colors.alarm, topLeft, Size(cell * .64f, cell * .64f))
                 } else {
-                    drawCircle(AuroraPink, radius = cell * .32f, center = center(position))
+                    drawCircle(colors.focus, radius = cell * .32f, center = center(position))
                 }
             }
             drawCircle(playerColor, radius = cell * .24f, center = center(state.player))
@@ -179,36 +190,6 @@ private fun MazeBoard(state: MazeState, modifier: Modifier = Modifier) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Text("\u5230\u8fbe\u7ec8\u70b9\uff01\u5373\u5c06\u5f00\u59cb\u65b0\u4e00\u5c40", modifier = Modifier.padding(18.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun MazeStatus(state: MazeState, controlStatus: String, modifier: Modifier = Modifier) {
-    GlassPanel(modifier = modifier) {
-        Column(
-            Modifier
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("\u63a7\u5236\u72b6\u6001", style = MaterialTheme.typography.titleMedium)
-            Text(controlStatus, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("\u6700\u8fd1\u52a8\u4f5c", style = MaterialTheme.typography.titleMedium)
-            Text(state.message)
-            Text("\u52a8\u4f5c\u8bf4\u660e", style = MaterialTheme.typography.titleMedium)
-            Text("\u54ac\u7259 = \u5411\u4e0a")
-            Text("\u5de6\u770b = \u5411\u5de6")
-            Text("\u53f3\u770b = \u5411\u53f3")
-            if (state.protocol == MazeProtocol.SIX_ACTION) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(14.dp).background(AuroraBad))
-                    Text("  \u5de6\u53f3 = \u6e05\u9664\u65b9\u5f62\u969c\u788d")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(14.dp).background(AuroraPink, CircleShape))
-                    Text("  \u53f3\u5de6 = \u6e05\u9664\u5706\u5f62\u969c\u788d")
-                }
             }
         }
     }

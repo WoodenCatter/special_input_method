@@ -19,51 +19,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 
-val AuroraDarkBackground = Night.bg
-val AuroraDarkSubtle = Night.mag
-val AuroraDarkSurface = Night.panel
-val AuroraDarkSurfaceStrong = Night.panel2
-val AuroraDarkAccentSoft = Night.focusTint
-val AuroraDarkOkSoft = Night.okTint
-val AuroraDarkWarnSoft = Night.focusTint
-val AuroraDarkBadSoft = Night.alarmTint
-val AuroraDarkInfoSoft = Night.focusTint
-val AuroraDarkBorder = Night.line
-val AuroraDarkBorderStrong = Night.dim
-val AuroraDarkText = Night.text
-val AuroraDarkTextSecondary = Night.muted
-val AuroraDarkTextTertiary = Night.dim
-val AuroraViolet = Night.focus
-val AuroraVioletBright = Night.focus
-val AuroraCyan = Night.focus
-val AuroraPink = Night.focus
-val AuroraOk = Night.ok
-val AuroraWarn = Night.focus
-val AuroraBad = Night.alarm
-val AuroraInfo = Night.muted
-val AuroraLightBackground = Day.bg
-val AuroraLightSubtle = Day.mag
-val AuroraLightSurface = Day.panel
-val AuroraLightSurfaceStrong = Day.panel2
-val AuroraLightBorder = Day.line
-val AuroraLightText = Day.text
-val AuroraLightTextSecondary = Day.muted
-val AuroraLightAccent = Day.focus
-
-// Compatibility aliases keep feature code token-driven while applying Aurora Glass everywhere.
-val DarkBackground = AuroraDarkBackground
-val SurfaceDark = AuroraDarkSurface
-val SurfaceElevated = AuroraDarkSurfaceStrong
-val PrimaryBlue = AuroraViolet
-val AccentGreen = AuroraOk
-val HighlightYellow = AuroraVioletBright
-val HighlightOrange = AuroraPink
-val TextWhite = AuroraDarkText
-val TextGray = AuroraDarkTextSecondary
-val BlockBorder = AuroraDarkBorder
-val ErrorRed = AuroraBad
-
-private val AuroraTypography = Typography(
+private val BciTypography = Typography(
     headlineLarge = TextStyle(fontFamily = BciType.chinese, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp),
     headlineMedium = TextStyle(fontFamily = BciType.chinese, fontWeight = FontWeight.Bold, fontSize = 26.sp, lineHeight = 32.sp),
     titleLarge = TextStyle(fontFamily = BciType.chinese, fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp),
@@ -73,7 +29,7 @@ private val AuroraTypography = Typography(
     labelLarge = TextStyle(fontFamily = BciType.chinese, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
 )
 
-private val AuroraShapes = Shapes(
+private val BciShapes = Shapes(
     extraSmall = RoundedCornerShape(12.dp),
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(16.dp),
@@ -83,7 +39,7 @@ private val AuroraShapes = Shapes(
 
 /** Shared background for pages still using the original component API. */
 @Composable
-fun AuroraBackground(
+fun BciBackground(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -94,7 +50,7 @@ fun AuroraBackground(
     }
 }
 
-fun Modifier.auroraBackground(): Modifier = composed {
+fun Modifier.bciBackground(): Modifier = composed {
     background(MaterialTheme.colorScheme.background)
 }
 
@@ -113,8 +69,8 @@ fun InputDSTheme(
             surfaceContainerHigh = colors.panel2, outline = colors.line, onSurface = colors.text,
             onBackground = colors.text, onSurfaceVariant = colors.muted, error = colors.alarm
         ),
-        typography = AuroraTypography,
-        shapes = AuroraShapes,
+        typography = BciTypography,
+        shapes = BciShapes,
     ) {
         CompositionLocalProvider(
             LocalBciColors provides colors,

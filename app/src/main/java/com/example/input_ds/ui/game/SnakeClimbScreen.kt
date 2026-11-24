@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.game
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -28,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -39,13 +42,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeCell
 import com.example.input_ds.game.SnakeClimbState
 import com.example.input_ds.game.SnakeDirection
 import com.example.input_ds.game.SnakeEndChoice
-import com.example.input_ds.ui.theme.AuroraVioletBright
-import com.example.input_ds.ui.theme.auroraBackground
+import com.example.input_ds.ui.theme.bciBackground
 import kotlinx.coroutines.delay
 
 @Composable
@@ -56,6 +61,7 @@ fun SnakeClimbScreen(
     onAction: (SnakeAction) -> Unit,
     onBack: () -> Unit
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(
         paused,
         state.step,
@@ -64,11 +70,14 @@ fun SnakeClimbScreen(
         state.exitConfirmation,
         state.exitSelected,
         state.exitRequested,
-        moveIntervalMs
+        moveIntervalMs,
+        lifecycleOwner
     ) {
         if (!paused && !state.exitRequested && !state.gameOver && !state.exitConfirmation) {
-            delay(moveIntervalMs.coerceIn(1_100L, 3_000L))
-            onAction(SnakeAction.TICK)
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                delay(moveIntervalMs.coerceIn(1_100L, 3_000L))
+                onAction(SnakeAction.TICK)
+            }
         }
     }
 
@@ -78,9 +87,7 @@ fun SnakeClimbScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .auroraBackground()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 18.dp, vertical = 12.dp),
+                .bciBackground(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
@@ -95,7 +102,7 @@ fun SnakeClimbScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
-                TextButton(onClick = onBack) { Text("返回首页") }
+                TextButton(onClick = onBack) { Text("返回娱乐") }
             }
 
             Box(
@@ -123,15 +130,15 @@ private fun SnakeLengthStatus(bodyLength: Int) {
     ) {
         Row(
             modifier = Modifier
-                .background(Color(0xCC142A20), RoundedCornerShape(22.dp))
-                .border(2.dp, Color(0xFF58C96F), RoundedCornerShape(22.dp))
+                .background(LocalBciColors.current.panel, RoundedCornerShape(22.dp))
+                .border(2.dp, LocalBciColors.current.ok, RoundedCornerShape(22.dp))
                 .padding(horizontal = 24.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("身体长度  ", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 bodyLength.toString(),
-                color = Color(0xFFB7F36A),
+                color = LocalBciColors.current.focus,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Black
             )
@@ -141,17 +148,17 @@ private fun SnakeLengthStatus(bodyLength: Int) {
 
 @Composable
 private fun SnakeBoard(state: SnakeClimbState, modifier: Modifier = Modifier) {
-    val boardBackground = Color(0xFF142A20)
-    val alternateCell = Color(0xFF193426)
-    val gridColor = Color(0xFF42614F)
-    val snakeBodyColor = Color(0xFF58C96F)
-    val snakeHeadColor = Color(0xFFB7F36A)
-    val appleColor = Color(0xFFE8564E)
-    val wallColor = Color(0xFF8E4C52)
-    val wallBorder = Color(0xFFD78678)
+    val boardBackground = LocalBciColors.current.panel
+    val alternateCell = LocalBciColors.current.panel2
+    val gridColor = LocalBciColors.current.line
+    val snakeBodyColor = LocalBciColors.current.ok
+    val snakeHeadColor = LocalBciColors.current.focus
+    val appleColor = LocalBciColors.current.alarm
+    val wallColor = LocalBciColors.current.muted
+    val wallBorder = LocalBciColors.current.text
 
     Box(
-        modifier = modifier,
+        modifier = modifier.clipToBounds(),
         contentAlignment = Alignment.Center
     ) {
         Canvas(
@@ -367,30 +374,18 @@ private fun SnakeBoard(state: SnakeClimbState, modifier: Modifier = Modifier) {
 private fun GameInstructions(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .background(Color(0xD91A2630), RoundedCornerShape(18.dp))
-            .border(2.dp, Color(0xFF42614F), RoundedCornerShape(18.dp))
+            .background(LocalBciColors.current.panel2, RoundedCornerShape(18.dp))
+            .border(2.dp, LocalBciColors.current.line, RoundedCornerShape(18.dp))
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             "游戏玩法",
-            color = Color(0xFFB7F36A),
+            color = LocalBciColors.current.focus,
             fontSize = 22.sp,
             fontWeight = FontWeight.Black
         )
         Text("蛇头固定在倒数第三行，地图和树木会随前进向下移动。", fontSize = 15.sp)
-        Text("左看：向左转", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text("右看：向右转", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text("咬牙：转向上方直行", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "直行时再次咬牙：打开退出游戏确认",
-            modifier = Modifier
-                .background(Color(0xFF6B3538), RoundedCornerShape(12.dp))
-                .padding(9.dp),
-            color = Color(0xFFFFE27A),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Black
-        )
         Text("吃到苹果，身体长度增加 1。", fontSize = 15.sp)
         Text("通过数字墙时，身体长度必须大于墙上的数字，通过后扣除相应长度。", fontSize = 15.sp)
         Text("撞到左右边界时长度减 1，并自动转向上方；长度降到 0 则结束。", fontSize = 15.sp)

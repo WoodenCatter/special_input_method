@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.bci
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,20 +61,12 @@ import com.example.input_ds.personalization.TrainingSession
 import com.example.input_ds.personalization.TrainingWorkScheduler
 import com.example.input_ds.personalization.UserModelManager
 import com.example.input_ds.model.ScanSettings
-import com.example.input_ds.ui.theme.AccentGreen
-import com.example.input_ds.ui.theme.DarkBackground
-import com.example.input_ds.ui.theme.ErrorRed
-import com.example.input_ds.ui.theme.HighlightYellow
-import com.example.input_ds.ui.theme.PrimaryBlue
-import com.example.input_ds.ui.theme.SurfaceElevated
-import com.example.input_ds.ui.theme.TextGray
-import com.example.input_ds.ui.theme.TextWhite
-import com.example.input_ds.ui.theme.auroraBackground
+import com.example.input_ds.ui.theme.bciBackground
 import com.example.input_ds.ui.theme.GlassPanel
 import com.example.input_ds.ui.theme.SelectableGlassPanel
-import com.example.input_ds.ui.theme.AuroraButton
-import com.example.input_ds.ui.theme.AuroraButtonStyle
-import com.example.input_ds.ui.theme.AuroraTextField
+import com.example.input_ds.ui.theme.BciButton
+import com.example.input_ds.ui.theme.BciButtonStyle
+import com.example.input_ds.ui.theme.BciTextField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -320,7 +314,7 @@ fun CollectionScreen(
                     deleteCandidate = null
                     refreshUsers(null)
                     status = "本地用户与本机数据已删除"
-                }) { Text("确认删除", color = ErrorRed) }
+                }) { Text("确认删除", color = LocalBciColors.current.alarm) }
             },
             dismissButton = { TextButton(onClick = { deleteCandidate = null }) { Text("取消") } }
         )
@@ -376,7 +370,7 @@ fun CollectionScreen(
                         deleteModelCandidate = null
                         status = "删除失败：${it.message}"
                     }
-                }) { Text("确认删除", color = ErrorRed) }
+                }) { Text("确认删除", color = LocalBciColors.current.alarm) }
             },
             dismissButton = {
                 TextButton(onClick = { deleteModelCandidate = null }) { Text("取消") }
@@ -397,7 +391,7 @@ fun CollectionScreen(
         return
     }
 
-    Column(Modifier.fillMaxSize().auroraBackground().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().bciBackground().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("☰", style = MaterialTheme.typography.titleLarge)
             Text("耳机设置", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -424,10 +418,10 @@ fun CollectionScreen(
                     SectionCard("扫描设置") {
                         Text(
                             "设置实时沟通及自动页面导航的扫描停留时间；页面手动/自动模式在应用设置中切换。",
-                            color = TextGray,
+                            color = LocalBciColors.current.muted,
                             style = MaterialTheme.typography.bodyMedium
                         )
-                        AuroraTextField(
+                        BciTextField(
                             value = scanIntervalText,
                             onValueChange = {
                                 scanIntervalText = it.filter(Char::isDigit).take(4)
@@ -440,7 +434,7 @@ fun CollectionScreen(
                             supportingText = scanIntervalError
                                 ?: "范围 ${ScanSettings.MIN_INTERVAL_MS}–${ScanSettings.MAX_INTERVAL_MS} ms"
                         )
-                        AuroraButton(
+                        BciButton(
                             text = "保存扫描设置",
                             onClick = {
                                 val interval = scanIntervalText.toLongOrNull()
@@ -454,7 +448,7 @@ fun CollectionScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            style = AuroraButtonStyle.PRIMARY
+                            style = BciButtonStyle.PRIMARY
                         )
                     }
                 }
@@ -472,10 +466,10 @@ fun CollectionScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("♙", color = PrimaryBlue)
+                                Text("♙", color = LocalBciColors.current.focus)
                                 Spacer(Modifier.width(10.dp))
                                 Text(user.displayName, modifier = Modifier.weight(1f))
-                                AuroraButton(
+                                BciButton(
                                     text = "同步",
                                     enabled = deviceBinding != null && !syncingProfile,
                                     onClick = {
@@ -497,10 +491,10 @@ fun CollectionScreen(
                                     minHeight = 36.dp
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                AuroraButton(
+                                BciButton(
                                     text = "删除",
                                     onClick = { deleteCandidate = user },
-                                    style = AuroraButtonStyle.DANGER,
+                                    style = BciButtonStyle.DANGER,
                                     minHeight = 36.dp
                                 )
                             }
@@ -514,7 +508,7 @@ fun CollectionScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("＋", color = PrimaryBlue, style = MaterialTheme.typography.titleLarge)
+                                Text("＋", color = LocalBciColors.current.focus, style = MaterialTheme.typography.titleLarge)
                                 Spacer(Modifier.width(12.dp))
                                 Text("创建新用户", style = MaterialTheme.typography.titleMedium)
                             }
@@ -525,23 +519,23 @@ fun CollectionScreen(
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(14.dp)
                         ) {
                             Text("创建新用户", style = MaterialTheme.typography.titleMedium)
-                            AuroraTextField(
+                            BciTextField(
                                 value = newUserName,
                                 onValueChange = { newUserName = it },
                                 label = "用户名称",
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                AuroraButton(
+                                BciButton(
                                     "取消",
                                     onClick = { creatingUser = false; newUserName = "" },
                                     modifier = Modifier.weight(1f)
                                 )
-                                AuroraButton(
+                                BciButton(
                                     "创建",
                                     onClick = ::createUserFromInput,
                                     modifier = Modifier.weight(1f),
-                                    style = AuroraButtonStyle.PRIMARY,
+                                    style = BciButtonStyle.PRIMARY,
                                     enabled = newUserName.isNotBlank()
                                 )
                             }
@@ -554,17 +548,17 @@ fun CollectionScreen(
                     SectionCard("") {
                         Text(
                             if (deviceBinding == null) "此设备未绑定" else "此设备已绑定：${deviceBinding?.serverUserId}",
-                            color = if (deviceBinding == null) HighlightYellow else AccentGreen,
+                            color = if (deviceBinding == null) LocalBciColors.current.focus else LocalBciColors.current.ok,
                             fontSize = 12.sp
                         )
                         if (deviceBinding == null) {
-                            AuroraTextField(
+                            BciTextField(
                                 value = serverUserId,
                                 onValueChange = { serverUserId = it },
                                 label = "服务端 user_id",
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            AuroraTextField(
+                            BciTextField(
                                 value = apiKey,
                                 onValueChange = { apiKey = it },
                                 label = "API Key",
@@ -572,7 +566,7 @@ fun CollectionScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 supportingText = "仅加密保存在本机"
                             )
-                            AuroraButton(
+                            BciButton(
                                 text = if (binding) "验证中…" else "验证并绑定",
                                 enabled = !binding && serverUserId.isNotBlank() && apiKey.isNotBlank(),
                                 onClick = {
@@ -597,18 +591,18 @@ fun CollectionScreen(
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                style = AuroraButtonStyle.PRIMARY
+                                style = BciButtonStyle.PRIMARY
                             )
                         } else {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                AuroraButton(
+                                BciButton(
                                     text = "解除设备绑定",
                                     onClick = {
                                     repository.unbindDeviceServer()
                                     deviceBinding = null
                                     status = "已解除此设备的服务端绑定，本地用户和数据均保留"
                                     },
-                                    style = AuroraButtonStyle.DANGER
+                                    style = BciButtonStyle.DANGER
                                 )
                             }
                         }
@@ -618,7 +612,7 @@ fun CollectionScreen(
                 selectedUser?.let { user ->
                     if (settingsSection == SettingsSection.PARAMETERS) {
                     SectionCard("") {
-                        Text("采集模式", fontSize = 12.sp, color = TextGray)
+                        Text("采集模式", fontSize = 12.sp, color = LocalBciColors.current.muted)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             SettingChoice(
                                 text = "四分类",
@@ -634,7 +628,7 @@ fun CollectionScreen(
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            AuroraTextField(
+                            BciTextField(
                                 value = roundsText,
                                 onValueChange = { roundsText = it.filter(Char::isDigit).take(3) },
                                 label = "采样轮次",
@@ -642,7 +636,7 @@ fun CollectionScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 supportingText = "4–100"
                             )
-                            AuroraTextField(
+                            BciTextField(
                                 value = trainingEpochsText,
                                 onValueChange = { trainingEpochsText = it.filter(Char::isDigit).take(2) },
                                 label = "训练轮次",
@@ -650,7 +644,7 @@ fun CollectionScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 supportingText = "1–50"
                             )
-                            AuroraTextField(
+                            BciTextField(
                                 value = actionSecondsText,
                                 onValueChange = { candidate ->
                                     if (candidate.matches(Regex("\\d?(\\.\\d?)?"))) {
@@ -663,13 +657,13 @@ fun CollectionScreen(
                                 supportingText = "0.8–5.0"
                             )
                         }
-                        Text("模型选择", fontSize = 12.sp, color = TextGray)
+                        Text("模型选择", fontSize = 12.sp, color = LocalBciColors.current.muted)
                         val compatibleModels = models.filter { selectedProtocol in it.supportedProtocols }
                         val compatibleModelKeys = compatibleModels.mapTo(mutableSetOf()) { it.key }
                         val hasCompatibleSelection = selectedModels.isNotEmpty() &&
                             selectedModels.all { it in compatibleModelKeys }
                         if (compatibleModels.isEmpty()) {
-                            Text("服务端暂无支持当前采集模式的训练模型", color = ErrorRed, fontSize = 11.sp)
+                            Text("服务端暂无支持当前采集模式的训练模型", color = LocalBciColors.current.alarm, fontSize = 11.sp)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             compatibleModels.forEach { model ->
@@ -681,7 +675,7 @@ fun CollectionScreen(
                                 )
                             }
                         }
-                        AuroraButton(
+                        BciButton(
                             text = if (running) "采集中…" else "开始采集",
                             enabled = !running && hasCompatibleSelection && bleState == NaoyunBleManager.State.READY,
                             onClick = startCollection@{
@@ -723,10 +717,10 @@ fun CollectionScreen(
                                 collector.start(user.localId, settings)
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            style = AuroraButtonStyle.PRIMARY
+                            style = BciButtonStyle.PRIMARY
                         )
                         if (running) {
-                            TextButton(onClick = { collector.stop(); running = false }) { Text("停止本次采集", color = ErrorRed) }
+                            TextButton(onClick = { collector.stop(); running = false }) { Text("停止本次采集", color = LocalBciColors.current.alarm) }
                         }
                     }
                     }
@@ -739,7 +733,7 @@ fun CollectionScreen(
                 Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                if (sessions.isEmpty()) Text("暂无记录", color = TextGray)
+                if (sessions.isEmpty()) Text("暂无记录", color = LocalBciColors.current.muted)
                 sessions.forEach { session ->
                     SessionCard(
                         session = session,
@@ -781,7 +775,7 @@ private fun SettingsNavigation(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(section.symbol, color = if (section == selected) PrimaryBlue else TextGray)
+                    Text(section.symbol, color = if (section == selected) LocalBciColors.current.focus else LocalBciColors.current.muted)
                     Text(section.label, fontWeight = if (section == selected) FontWeight.SemiBold else FontWeight.Normal)
                 }
             }
@@ -806,7 +800,7 @@ private fun SettingChoice(
             text,
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
-            color = if (selected) PrimaryBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (selected) LocalBciColors.current.focus else MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
         )
     }
@@ -834,7 +828,7 @@ private fun FocusedCollectionScreen(
     val fraction = (completed.toFloat() / total.coerceAtLeast(1)).coerceIn(0f, 1f)
 
     Box(
-        Modifier.fillMaxSize().auroraBackground().padding(horizontal = 56.dp, vertical = 28.dp),
+        Modifier.fillMaxSize().bciBackground().padding(horizontal = 56.dp, vertical = 28.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -849,7 +843,7 @@ private fun FocusedCollectionScreen(
                 progress?.detail?.takeIf(String::isNotBlank)?.let { detail ->
                     Text(
                         detail,
-                        color = HighlightYellow,
+                        color = LocalBciColors.current.focus,
                         fontSize = 20.sp,
                         textAlign = TextAlign.Center,
                         maxLines = 1
@@ -858,7 +852,7 @@ private fun FocusedCollectionScreen(
             }
             Text(
                 prompt,
-                color = TextWhite,
+                color = LocalBciColors.current.text,
                 fontSize = 58.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
@@ -866,11 +860,11 @@ private fun FocusedCollectionScreen(
             LinearProgressIndicator(
                 progress = { fraction },
                 modifier = Modifier.fillMaxWidth(0.6f).height(5.dp),
-                color = PrimaryBlue,
-                trackColor = SurfaceElevated
+                color = LocalBciColors.current.focus,
+                trackColor = LocalBciColors.current.panel2
             )
-            Text("$completed / $total", color = TextGray, fontSize = 13.sp)
-            TextButton(onClick = onStop) { Text("停止采集", color = TextGray) }
+            Text("$completed / $total", color = LocalBciColors.current.muted, fontSize = 13.sp)
+            TextButton(onClick = onStop) { Text("停止采集", color = LocalBciColors.current.muted) }
         }
     }
 }
@@ -878,14 +872,14 @@ private fun FocusedCollectionScreen(
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = SurfaceElevated),
+        colors = CardDefaults.cardColors(containerColor = LocalBciColors.current.panel2),
         modifier = Modifier.fillMaxWidth(),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         shape = MaterialTheme.shapes.large
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (title.isNotBlank()) {
-                Text(title, color = PrimaryBlue, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(title, color = LocalBciColors.current.focus, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
             content()
         }
@@ -910,9 +904,9 @@ private fun SessionCard(
                 "${if (session.protocol == ClassificationProtocol.SIX_ACTION) "六分类" else "四分类"} · " +
                     "${session.collectedAtIso} · 采集${session.rounds}轮 · 训练${session.trainingEpochs}轮 · ${session.actionSeconds}秒",
                 fontSize = 11.sp,
-                color = TextGray
+                color = LocalBciColors.current.muted
             )
-            Text("状态：${session.status.name}", fontSize = 12.sp, color = TextGray)
+            Text("状态：${session.status.name}", fontSize = 12.sp, color = LocalBciColors.current.muted)
             session.modelRuns.forEach { run ->
                 val isActive = run.modelFile != null && run.modelFile == activeModelFile
                 HorizontalDivider()
@@ -921,21 +915,21 @@ private fun SessionCard(
                         (run.accuracy?.let { " · accuracy ${"%.1f".format(it * 100)}%" } ?: "") +
                         if (isActive) " · 当前启用" else "",
                     fontSize = 11.sp,
-                    color = if (isActive) AccentGreen else MaterialTheme.colorScheme.onSurface
+                    color = if (isActive) LocalBciColors.current.ok else MaterialTheme.colorScheme.onSurface
                 )
-                run.error?.let { Text(it, fontSize = 10.sp, color = ErrorRed) }
+                run.error?.let { Text(it, fontSize = 10.sp, color = LocalBciColors.current.alarm) }
                 if ((run.status == "succeeded" && run.modelFile != null) || run.status == "failed") {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (run.status == "succeeded" && run.modelFile != null && !isActive) {
                             TextButton(onClick = { onActivate(run) }) { Text("启用此模型") }
                         }
                         TextButton(onClick = { onDelete(run) }) {
-                            Text("删除", color = ErrorRed)
+                            Text("删除", color = LocalBciColors.current.alarm)
                         }
                     }
                 }
             }
-            session.error?.let { Text(it, fontSize = 10.sp, color = HighlightYellow) }
+            session.error?.let { Text(it, fontSize = 10.sp, color = LocalBciColors.current.focus) }
         }
     }
 }

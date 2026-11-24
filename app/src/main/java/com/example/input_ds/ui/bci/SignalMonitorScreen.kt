@@ -1,5 +1,9 @@
 package com.example.input_ds.ui.bci
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
+import androidx.compose.ui.graphics.toArgb
+import com.example.input_ds.ui.theme.BciColors
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
@@ -30,15 +34,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.input_ds.bci.EegScopePlotBuffer
 import com.example.input_ds.bci.EegPreprocessor
 import com.example.input_ds.bci.NaoyunBleManager
-import com.example.input_ds.ui.theme.DarkBackground
-import com.example.input_ds.ui.theme.ErrorRed
-import com.example.input_ds.ui.theme.HighlightOrange
-import com.example.input_ds.ui.theme.HighlightYellow
-import com.example.input_ds.ui.theme.PrimaryBlue
-import com.example.input_ds.ui.theme.SurfaceDark
-import com.example.input_ds.ui.theme.TextGray
-import com.example.input_ds.ui.theme.TextWhite
-import com.example.input_ds.ui.theme.auroraBackground
+import com.example.input_ds.ui.theme.bciBackground
 
 @Composable
 fun BleScanScreen(
@@ -52,19 +48,19 @@ fun BleScanScreen(
 
     LaunchedEffect(Unit) { bleManager.startScan() }
 
-    Column(Modifier.fillMaxSize().auroraBackground().padding(20.dp)) {
+    Column(Modifier.fillMaxSize().bciBackground().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, androidx.compose.ui.Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← 返回", color = PrimaryBlue) }
+            TextButton(onClick = onBack) { Text("← 返回", color = LocalBciColors.current.focus) }
             Text(
                 "BLE 设备扫描",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = PrimaryBlue
+                color = LocalBciColors.current.focus
             )
             Spacer(Modifier.width(64.dp))
         }
         Spacer(Modifier.height(8.dp))
-        Text("仅显示名称包含“Naoyun Pods BLE”的设备", fontSize = 13.sp, color = TextGray)
+        Text("仅显示名称包含“Naoyun Pods BLE”的设备", fontSize = 13.sp, color = LocalBciColors.current.muted)
 
         val errorMessage = when (scanError) {
             NaoyunBleManager.ScanError.BT_OFF -> "⚠️ 请先打开手机蓝牙"
@@ -79,7 +75,7 @@ fun BleScanScreen(
         if (errorMessage != null) {
             Text(
                 errorMessage,
-                color = ErrorRed,
+                color = LocalBciColors.current.alarm,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -100,7 +96,7 @@ fun BleScanScreen(
             )
         }
         if (state == NaoyunBleManager.State.SCANNING) {
-            Text("正在扫描...", fontSize = 13.sp, color = HighlightYellow)
+            Text("正在扫描...", fontSize = 13.sp, color = LocalBciColors.current.focus)
         }
         Spacer(Modifier.height(8.dp))
 
@@ -110,12 +106,12 @@ fun BleScanScreen(
                     onClick = { bleManager.connect(device.device) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = SurfaceDark
+                        containerColor = LocalBciColors.current.panel
                     )
                 ) {
                     Column(Modifier.padding(4.dp)) {
-                        Text(device.name, color = TextWhite, fontWeight = FontWeight.Bold)
-                        Text(device.address, fontSize = 11.sp, color = TextGray)
+                        Text(device.name, color = LocalBciColors.current.text, fontWeight = FontWeight.Bold)
+                        Text(device.address, fontSize = 11.sp, color = LocalBciColors.current.muted)
                     }
                 }
             }
@@ -130,7 +126,7 @@ fun BleScanScreen(
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 CircularProgressIndicator(
                     Modifier.size(24.dp),
-                    color = PrimaryBlue
+                    color = LocalBciColors.current.focus
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
@@ -139,12 +135,12 @@ fun BleScanScreen(
                     } else {
                         "正在初始化脑电数据流…"
                     },
-                    color = TextGray
+                    color = LocalBciColors.current.muted
                 )
             }
         }
         if (state == NaoyunBleManager.State.ERROR) {
-            Text("连接初始化失败，请重新扫描", color = ErrorRed)
+            Text("连接初始化失败，请重新扫描", color = LocalBciColors.current.alarm)
         }
     }
 }
@@ -159,42 +155,42 @@ fun SignalMonitorScreen(
     val deviceInfo by bleManager.deviceInfo.collectAsState()
     val streamDiagnostics by bleManager.streamDiagnostics.collectAsState()
 
-    Column(Modifier.fillMaxSize().auroraBackground().padding(12.dp)) {
+    Column(Modifier.fillMaxSize().bciBackground().padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
             Text(
                 "双通道实时耳电信号",
                 fontSize = 18.sp,
-                color = TextWhite,
+                color = LocalBciColors.current.text,
                 fontWeight = FontWeight.Bold
             )
             Row {
                 TextButton(onClick = onStartCollect) {
-                    Text("采集管理", color = HighlightOrange)
+                    Text("采集管理", color = LocalBciColors.current.focus)
                 }
                 TextButton(onClick = onDisconnect) {
-                    Text("断开耳机", color = ErrorRed)
+                    Text("断开耳机", color = LocalBciColors.current.alarm)
                 }
                 TextButton(onClick = onBack) {
-                    Text("返回", color = PrimaryBlue)
+                    Text("返回", color = LocalBciColors.current.focus)
                 }
             }
         }
         Text(
             "设备状态页已屏蔽耳电控制命令，连接、波形和采集保持运行",
             fontSize = 10.sp,
-            color = TextGray
+            color = LocalBciColors.current.muted
         )
         Text(
             "500 Hz | 5 秒窗口 | 固定量程 ±200 µV | 1–45 Hz 带通 | $deviceInfo",
             fontSize = 10.sp,
-            color = TextGray
+            color = LocalBciColors.current.muted
         )
         if (streamDiagnostics.leftLeadOff != null || streamDiagnostics.rightLeadOff != null) {
             Text(
                 "电极接触原始值 L:${streamDiagnostics.leftLeadOff ?: "--"} " +
                     "R:${streamDiagnostics.rightLeadOff ?: "--"}（数值突变时优先检查佩戴）",
                 fontSize = 10.sp,
-                color = TextGray
+                color = LocalBciColors.current.muted
             )
         }
         if (streamDiagnostics.leftRateHz != null && streamDiagnostics.rightRateHz != null) {
@@ -204,7 +200,7 @@ fun SignalMonitorScreen(
                     "拟合P95 ${"%.1f".format(streamDiagnostics.leftClockResidualMs ?: 0.0)}/" +
                     "${"%.1f".format(streamDiagnostics.rightClockResidualMs ?: 0.0)} ms",
                 fontSize = 10.sp,
-                color = TextGray
+                color = LocalBciColors.current.muted
             )
         }
         Spacer(Modifier.height(4.dp))
@@ -215,19 +211,21 @@ fun SignalMonitorScreen(
                     "R:${streamDiagnostics.rightAgeMs ?: "--"}ms " +
                     "配对:${streamDiagnostics.pairAgeMs ?: "--"}ms",
                 fontSize = 10.sp,
-                color = ErrorRed
+                color = LocalBciColors.current.alarm
             )
         }
+        val scopeColors = LocalBciColors.current
         AndroidView(
+            update = { it.setPalette(scopeColors) },
             factory = { EegStereoView(it, bleManager) },
             modifier = Modifier.weight(1f).fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .border(1.dp, com.example.input_ds.ui.theme.BlockBorder, RoundedCornerShape(16.dp))
+                .border(1.dp, LocalBciColors.current.line, RoundedCornerShape(16.dp))
         )
     }
 }
 
-/** Aurora glass styled, fixed-range five-second rolling timeline. */
+/** Bci glass styled, fixed-range five-second rolling timeline. */
 @SuppressLint("ViewConstructor")
 internal class EegStereoView(
     context: Context,
@@ -243,61 +241,59 @@ internal class EegStereoView(
     private val rightPath = Path()
     private var refreshRunning = false
 
-    private val panelBackground = android.graphics.Color.parseColor("#0B1025")
-    private val headerBackground = android.graphics.Color.parseColor("#121936")
-    private val gridColor = android.graphics.Color.parseColor("#242C51")
-    private val zeroLineColor = android.graphics.Color.parseColor("#51608D")
-    private val leftColor = android.graphics.Color.parseColor("#B9A7FF")
-    private val rightColor = android.graphics.Color.parseColor("#7DD3FC")
-    private val textColor = android.graphics.Color.parseColor("#D8DCF4")
-
     private val backgroundPaint = Paint().apply {
-        color = panelBackground
         style = Paint.Style.FILL
     }
     private val headerPaint = Paint().apply {
-        color = headerBackground
         style = Paint.Style.FILL
     }
     private val gridPaint = Paint().apply {
-        color = gridColor
         strokeWidth = 1f
         style = Paint.Style.STROKE
     }
     private val zeroPaint = Paint().apply {
-        color = zeroLineColor
         strokeWidth = 1.25f
         style = Paint.Style.STROKE
     }
     private val leftPaint = Paint().apply {
-        color = leftColor
         strokeWidth = 2.1f
         style = Paint.Style.STROKE
         isAntiAlias = true
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    private val rightPaint = Paint(leftPaint).apply { color = rightColor }
+    private val rightPaint = Paint(leftPaint)
     private val leftNamePaint = Paint().apply {
-        color = leftColor
         textSize = 26f
         isAntiAlias = true
     }
-    private val rightNamePaint = Paint(leftNamePaint).apply { color = rightColor }
+    private val rightNamePaint = Paint(leftNamePaint)
     private val statsPaint = Paint().apply {
-        color = textColor
         textSize = 22f
         isAntiAlias = true
     }
     private val axisPaint = Paint().apply {
-        color = android.graphics.Color.parseColor("#8E96BD")
         textSize = 20f
         isAntiAlias = true
     }
     private val emptyPaint = Paint().apply {
-        color = android.graphics.Color.parseColor("#AEB5D7")
         textSize = 32f
         isAntiAlias = true
+    }
+
+    fun setPalette(colors: BciColors) {
+        backgroundPaint.color = colors.panel.toArgb()
+        headerPaint.color = colors.panel2.toArgb()
+        gridPaint.color = colors.line.toArgb()
+        zeroPaint.color = colors.dim.toArgb()
+        leftPaint.color = colors.focus.toArgb()
+        rightPaint.color = colors.ok.toArgb()
+        leftNamePaint.color = leftPaint.color
+        rightNamePaint.color = rightPaint.color
+        statsPaint.color = colors.text.toArgb()
+        axisPaint.color = colors.muted.toArgb()
+        emptyPaint.color = axisPaint.color
+        invalidate()
     }
 
     private val refreshRunnable = object : Runnable {

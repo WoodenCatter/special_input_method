@@ -1,5 +1,7 @@
 package com.example.input_ds.ui.components
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -104,7 +106,7 @@ internal fun FloatingEegSignalWindow(
             diagnostics.delayed -> "数据延迟"
             else -> "实时"
         }
-        val statusColor = if (warning) Color(0xFFFFB36B) else Color(0xFF85E6BA)
+        val statusColor = if (warning) LocalBciColors.current.alarm else LocalBciColors.current.ok
         val shape = RoundedCornerShape(14.dp)
 
         Column(
@@ -117,8 +119,8 @@ internal fun FloatingEegSignalWindow(
                 }
                 .size(panelWidth, panelHeight)
                 .clip(shape)
-                .background(Color(0xF20B1025))
-                .border(1.dp, Color(0xFF6D7CA9), shape)
+                .background(LocalBciColors.current.panel)
+                .border(1.dp, LocalBciColors.current.line, shape)
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -135,14 +137,16 @@ internal fun FloatingEegSignalWindow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("⠿  耳机波形", color = Color(0xFFE6EAF6), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("⠿  耳机波形", color = LocalBciColors.current.text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Text(status, color = statusColor, fontSize = 12.sp)
             }
 
             // A fresh view after an acquisition gap prevents an old trace from
             // looking like current data while the new timeline fills up.
             key(bleManager, dataEpoch) {
+                val scopeColors = LocalBciColors.current
                 AndroidView(
+                    update = { it.setPalette(scopeColors) },
                     factory = {
                         EegStereoView(it, bleManager, refreshIntervalMs = 100L, compactMode = true)
                     },
@@ -152,7 +156,7 @@ internal fun FloatingEegSignalWindow(
             }
             Text(
                 "1–45 Hz · 延迟 L:${diagnostics.leftAgeMs ?: "--"} ms  R:${diagnostics.rightAgeMs ?: "--"} ms",
-                color = if (warning) statusColor else Color(0xFFB5C0DB),
+                color = if (warning) statusColor else LocalBciColors.current.muted,
                 fontSize = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

@@ -1,8 +1,11 @@
 package com.example.input_ds.ui.music
 
+import com.example.input_ds.ui.theme.LocalBciColors
+
 import com.example.input_ds.ui.design.*
 import android.content.Context
 import android.media.AudioManager
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +70,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -74,8 +78,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.ScanMode
+import com.example.input_ds.model.runScanTimer
 import com.example.input_ds.music.MusicInputBus
 import com.example.input_ds.music.MusicLibrary
 import com.example.input_ds.music.MusicPlaybackController
@@ -83,22 +92,11 @@ import com.example.input_ds.music.MusicPlaybackMode
 import com.example.input_ds.music.MusicPlaybackStore
 import com.example.input_ds.music.MusicSignalSink
 import com.example.input_ds.music.MusicTrack
-import com.example.input_ds.ui.theme.AuroraBad
-import com.example.input_ds.ui.theme.AuroraCyan
-import com.example.input_ds.ui.theme.AuroraDarkBorderStrong
-import com.example.input_ds.ui.theme.AuroraDarkSurface
-import com.example.input_ds.ui.theme.AuroraDarkSurfaceStrong
-import com.example.input_ds.ui.theme.AuroraInfo
-import com.example.input_ds.ui.theme.AuroraOk
-import com.example.input_ds.ui.theme.AuroraPink
-import com.example.input_ds.ui.theme.AuroraViolet
-import com.example.input_ds.ui.theme.AuroraVioletBright
 import com.example.input_ds.ui.theme.GlassPanel
-import com.example.input_ds.ui.theme.auroraBackground
+import com.example.input_ds.ui.theme.bciBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class MusicFocusMode { CONTROLS, PLAYLIST, VOLUME, SETTINGS, DELETE_LIST }
 private enum class MusicControlIcon { TEXT, VOLUME, PLAYBACK_MODE }
 
 private const val CONTROL_SETTINGS = 0
@@ -122,7 +120,10 @@ fun MusicScreen(
     initialTrackId: String? = null,
     onConfirmation: (ConfirmOverlaySpec) -> Unit,
     paused: Boolean,
-    fromAssistant: Boolean = false
+    frozen: Boolean = false,
+    fromAssistant: Boolean = false,
+    onToast: (String, Boolean) -> Unit = { _, _ -> },
+    onBoundary: () -> Unit = {}
 ) {
     val returnLabel = if (fromAssistant) "返回助手" else "返回娱乐"
     val settingsLabels = remember(returnLabel) { listOf("返回音乐", "删除音乐", returnLabel) }
@@ -139,21 +140,13 @@ fun MusicScreen(
         audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
     }
     val currentOnBack by rememberUpdatedState(onBack)
+    val currentOnToast by rememberUpdatedState(onToast)
+    val currentOnBoundary by rememberUpdatedState(onBoundary)
 
     var tracks by remember { mutableStateOf(emptyList<MusicTrack>()) }
     var playbackMode by remember { mutableStateOf(playbackStore.playbackMode()) }
     var shuffleOrder by remember { mutableStateOf(emptyList<String>()) }
-    var focusMode by remember { mutableStateOf(MusicFocusMode.CONTROLS) }
-    var controlIndex by remember { mutableIntStateOf(CONTROL_PLAY_PAUSE) }
-    var controlDirection by remember { mutableIntStateOf(1) }
-    var playlistIndex by remember { mutableIntStateOf(0) }
-    var playlistDirection by remember { mutableIntStateOf(1) }
-    var volumeIndex by remember { mutableIntStateOf(0) }
-    var volumeDirection by remember { mutableIntStateOf(1) }
-    var settingsIndex by remember { mutableIntStateOf(0) }
-    var settingsDirection by remember { mutableIntStateOf(1) }
-    var deleteIndex by remember { mutableIntStateOf(0) }
-    var deleteDirection by remember { mutableIntStateOf(1) }
+    var scanState by remember { mutableStateOf(MusicScanState()) }
     var importing by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var volume by remember {
@@ -163,19 +156,21 @@ fun MusicScreen(
 
     val currentTrack = tracks.firstOrNull { it.id == player.currentTrackId } ?: tracks.firstOrNull()
     val scanDelay = scanIntervalMs.coerceIn(1_100L, 3_000L)
+    val activeCursor = scanState.activeCursor()
+    val activeTargetIndex = scanState.activeTargetIndex()
 
-    val (item, direction) = when (focusMode) {
-        MusicFocusMode.CONTROLS -> when (controlIndex) {
+    val item = when (scanState.focusMode) {
+        MusicFocusMode.CONTROLS -> when (activeTargetIndex) {
             CONTROL_PLAY_PAUSE -> if (player.isPlaying) "暂停" else "播放"
             CONTROL_MODE -> playbackMode.displayName
-            else -> CONTROL_LABELS[controlIndex]
-        } to controlDirection
-        MusicFocusMode.PLAYLIST -> tracks.getOrNull(playlistIndex)?.title.orEmpty() to playlistDirection
-        MusicFocusMode.VOLUME -> VOLUME_LABELS[volumeIndex] to volumeDirection
-        MusicFocusMode.SETTINGS -> settingsLabels[settingsIndex] to settingsDirection
-        MusicFocusMode.DELETE_LIST -> (tracks.getOrNull(deleteIndex-1)?.title ?: "返回") to deleteDirection
+            else -> CONTROL_LABELS[activeTargetIndex]
+        }
+        MusicFocusMode.PLAYLIST -> tracks.getOrNull(activeTargetIndex)?.title.orEmpty()
+        MusicFocusMode.VOLUME -> VOLUME_LABELS[activeTargetIndex]
+        MusicFocusMode.SETTINGS -> settingsLabels[activeTargetIndex]
+        MusicFocusMode.DELETE_LIST -> tracks.getOrNull(activeTargetIndex - 1)?.title ?: "返回"
     }
-    ReportActionHints(ActionHints.list(item, scanMode, direction))
+    ReportActionHints(ActionHints.list(item, scanMode, activeCursor.direction))
 
     fun persistOrders() {
         playbackStore.saveTrackOrder(tracks)
@@ -190,10 +185,10 @@ fun MusicScreen(
     fun playTrackAt(index: Int) {
         if (tracks.isEmpty()) return
         val safeIndex = (index + tracks.size) % tracks.size
-        playlistIndex = safeIndex
         startTrack(tracks[safeIndex])
-        focusMode = MusicFocusMode.CONTROLS
-        controlIndex = CONTROL_PLAY_PAUSE
+        val wasInControls = scanState.focusMode == MusicFocusMode.CONTROLS
+        scanState = scanState.syncTrackCount(tracks.size).enterControls(CONTROL_PLAY_PAUSE)
+        if (!wasInControls) currentOnBoundary()
     }
 
     fun moveTrack(offset: Int) {
@@ -206,26 +201,29 @@ fun MusicScreen(
         val currentOrderIndex = orderedIds.indexOf(player.currentTrackId).takeIf { it >= 0 } ?: 0
         val nextId = orderedIds[(currentOrderIndex + offset + orderedIds.size) % orderedIds.size]
         val nextIndex = tracks.indexOfFirst { it.id == nextId }.takeIf { it >= 0 } ?: 0
-        playlistIndex = nextIndex
         startTrack(tracks[nextIndex])
     }
 
     fun openPlaylist() {
-        playlistIndex = tracks.indexOfFirst { it.id == player.currentTrackId }.takeIf { it >= 0 } ?: 0
-        playlistDirection = 1
-        focusMode = MusicFocusMode.PLAYLIST
+        if (tracks.isEmpty()) {
+            notice = "当前播放列表为空"
+            scanState = scanState.syncTrackCount(0).commitControlSelection(CONTROL_PLAYLIST)
+            return
+        }
+        val trackIdx = tracks.indexOfFirst { it.id == player.currentTrackId }.takeIf { it >= 0 } ?: 0
+        scanState = scanState.syncTrackCount(tracks.size).enterPlaylist(trackIdx)
+        currentOnBoundary()
     }
 
     fun openSettings() {
-        settingsIndex = 0
-        settingsDirection = 1
-        focusMode = MusicFocusMode.SETTINGS
+        scanState = scanState.syncTrackCount(tracks.size).enterSettings(0)
+        currentOnBoundary()
     }
 
     fun openVolume() {
-        volumeIndex = 0
         volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        focusMode = MusicFocusMode.VOLUME
+        scanState = scanState.enterVolume(0)
+        currentOnBoundary()
     }
 
     fun changeVolume(delta: Int) {
@@ -239,9 +237,8 @@ fun MusicScreen(
             notice = "当前没有可以删除的音乐"
             return
         }
-        deleteIndex = 0
-        deleteDirection = 1
-        focusMode = MusicFocusMode.DELETE_LIST
+        scanState = scanState.syncTrackCount(tracks.size).enterDeleteList(0)
+        currentOnBoundary()
     }
 
     fun performDelete(target: MusicTrack) {
@@ -257,12 +254,12 @@ fun MusicScreen(
             notice = if (deleted) "已删除《${target.title}》及 APP 内的音乐文件" else "删除失败"
             if (wasCurrent && tracks.isNotEmpty()) startTrack(tracks[oldIndex.coerceAtMost(tracks.lastIndex)])
             if (wasCurrent && tracks.isEmpty()) playbackStore.saveLastTrack(null)
+            val synced = scanState.syncTrackCount(tracks.size)
             if (tracks.isEmpty()) {
-                focusMode = MusicFocusMode.SETTINGS
-                settingsIndex = 0
+                scanState = synced.enterSettings(0)
+                currentOnBoundary()
             } else {
-                deleteIndex = deleteIndex.coerceIn(0, tracks.size)
-                focusMode = MusicFocusMode.DELETE_LIST
+                scanState = synced.enterDeleteList(synced.deleteCursor.index.coerceIn(0, tracks.size))
             }
         }
     }
@@ -284,21 +281,39 @@ fun MusicScreen(
         when (index) {
             CONTROL_SETTINGS -> openSettings()
             CONTROL_VOLUME -> openVolume()
-            CONTROL_PREVIOUS -> moveTrack(-1)
-            CONTROL_PLAY_PAUSE -> player.togglePlayPause()
-            CONTROL_NEXT -> moveTrack(1)
-            CONTROL_MODE -> cyclePlaybackMode()
+            CONTROL_PREVIOUS -> {
+                moveTrack(-1)
+                scanState = scanState.commitControlSelection(index)
+            }
+            CONTROL_PLAY_PAUSE -> {
+                player.togglePlayPause()
+                scanState = scanState.commitControlSelection(index)
+            }
+            CONTROL_NEXT -> {
+                moveTrack(1)
+                scanState = scanState.commitControlSelection(index)
+            }
+            CONTROL_MODE -> {
+                cyclePlaybackMode()
+                scanState = scanState.commitControlSelection(index)
+            }
             CONTROL_PLAYLIST -> openPlaylist()
         }
     }
 
     fun executeVolume(index: Int) {
         when (index) {
-            0 -> changeVolume(-1)
-            1 -> changeVolume(1)
+            0 -> {
+                changeVolume(-1)
+                scanState = scanState.commitVolumeSelection(0)
+            }
+            1 -> {
+                changeVolume(1)
+                scanState = scanState.commitVolumeSelection(1)
+            }
             2 -> {
-                focusMode = MusicFocusMode.CONTROLS
-                controlIndex = CONTROL_VOLUME
+                scanState = scanState.enterControls(CONTROL_VOLUME)
+                currentOnBoundary()
             }
         }
     }
@@ -306,40 +321,39 @@ fun MusicScreen(
     fun executeSetting(index: Int) {
         when (index) {
             0 -> {
-                focusMode = MusicFocusMode.CONTROLS
-                controlIndex = CONTROL_SETTINGS
+                scanState = scanState.enterControls(CONTROL_SETTINGS)
+                currentOnBoundary()
             }
             1 -> openDeleteList()
-            2 -> currentOnBack()
+            2 -> {
+                currentOnBoundary()
+                currentOnBack()
+            }
         }
     }
 
-    fun moveSettingsFocus(offset: Int) {
-        val available = if (tracks.isEmpty()) listOf(0, 2) else SETTINGS_LABELS.indices.toList()
-        val position = available.indexOf(settingsIndex).takeIf { it >= 0 } ?: 0
-        settingsIndex = available[(position + offset + available.size) % available.size]
-    }
-
     fun returnFromOverlay() {
-        when (focusMode) {
-            MusicFocusMode.CONTROLS -> currentOnBack()
+        when (scanState.focusMode) {
+            MusicFocusMode.CONTROLS -> {
+                currentOnBoundary()
+                currentOnBack()
+            }
             MusicFocusMode.PLAYLIST -> {
-                focusMode = MusicFocusMode.CONTROLS
-                controlIndex = CONTROL_PLAYLIST
+                scanState = scanState.enterControls(CONTROL_PLAYLIST)
+                currentOnBoundary()
             }
             MusicFocusMode.VOLUME -> {
-                focusMode = MusicFocusMode.CONTROLS
-                controlIndex = CONTROL_VOLUME
+                scanState = scanState.enterControls(CONTROL_VOLUME)
+                currentOnBoundary()
             }
             MusicFocusMode.SETTINGS -> {
-                focusMode = MusicFocusMode.CONTROLS
-                controlIndex = CONTROL_SETTINGS
+                scanState = scanState.enterControls(CONTROL_SETTINGS)
+                currentOnBoundary()
             }
             MusicFocusMode.DELETE_LIST -> {
-                focusMode = MusicFocusMode.SETTINGS
-                settingsIndex = 1
+                scanState = scanState.syncTrackCount(tracks.size).enterSettings(1)
+                currentOnBoundary()
             }
-
         }
     }
 
@@ -352,6 +366,7 @@ fun MusicScreen(
             val result = library.importTracks(uris)
             tracks = playbackStore.orderTracks(library.reloadTracks())
             shuffleOrder = playbackStore.reconcileShuffleOrder(tracks)
+            scanState = scanState.syncTrackCount(tracks.size)
             persistOrders()
             importing = false
             notice = buildString {
@@ -362,77 +377,44 @@ fun MusicScreen(
     }
 
     val signalHandler = rememberUpdatedState<(ControlSignal) -> Unit> { signal ->
-        when (focusMode) {
-            MusicFocusMode.CONTROLS -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    controlDirection = -1
-                    if (scanMode == ScanMode.MANUAL) controlIndex = (controlIndex - 1 + CONTROL_LABELS.size) % CONTROL_LABELS.size
+        when (signal) {
+            ControlSignal.LEFT_LOOK -> scanState = scanState.look(-1, scanMode)
+            ControlSignal.RIGHT_LOOK -> scanState = scanState.look(1, scanMode)
+            ControlSignal.BITE -> {
+                val grace = if (frozen) 0L else AppUiSettings.graceMs(context)
+                val selection = scanState.selectOnBite(
+                    nowMs = SystemClock.elapsedRealtime(),
+                    graceMs = grace,
+                    mode = scanMode
+                ) ?: return@rememberUpdatedState
+                if (selection.compensated && !frozen) {
+                    currentOnToast("已按上一项执行（延迟补偿）", false)
                 }
-                ControlSignal.RIGHT_LOOK -> {
-                    controlDirection = 1
-                    if (scanMode == ScanMode.MANUAL) controlIndex = (controlIndex + 1) % CONTROL_LABELS.size
+                when (scanState.focusMode) {
+                    MusicFocusMode.CONTROLS -> executeControl(selection.targetIndex)
+                    MusicFocusMode.PLAYLIST -> playTrackAt(selection.targetIndex)
+                    MusicFocusMode.VOLUME -> executeVolume(selection.targetIndex)
+                    MusicFocusMode.SETTINGS -> executeSetting(selection.targetIndex)
+                    MusicFocusMode.DELETE_LIST -> {
+                        if (selection.targetIndex == 0) {
+                            returnFromOverlay()
+                        } else {
+                            scanState = scanState.commitDeleteSelection(selection.slotIndex)
+                            tracks.getOrNull(selection.targetIndex - 1)?.let(::requestDelete)
+                        }
+                    }
                 }
-                ControlSignal.BITE -> executeControl(controlIndex)
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
-            MusicFocusMode.PLAYLIST -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    playlistDirection = -1
-                    if (scanMode == ScanMode.MANUAL && tracks.isNotEmpty()) playlistIndex = (playlistIndex - 1 + tracks.size) % tracks.size
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    playlistDirection = 1
-                    if (scanMode == ScanMode.MANUAL && tracks.isNotEmpty()) playlistIndex = (playlistIndex + 1) % tracks.size
-                }
-                ControlSignal.BITE -> playTrackAt(playlistIndex)
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-            }
-            MusicFocusMode.VOLUME -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    volumeDirection = -1
-                    if (scanMode == ScanMode.MANUAL) volumeIndex = (volumeIndex - 1 + VOLUME_LABELS.size) % VOLUME_LABELS.size
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    volumeDirection = 1
-                    if (scanMode == ScanMode.MANUAL) volumeIndex = (volumeIndex + 1) % VOLUME_LABELS.size
-                }
-                ControlSignal.BITE -> executeVolume(volumeIndex)
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-            }
-            MusicFocusMode.SETTINGS -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    settingsDirection = -1
-                    if (scanMode == ScanMode.MANUAL) moveSettingsFocus(-1)
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    settingsDirection = 1
-                    if (scanMode == ScanMode.MANUAL) moveSettingsFocus(1)
-                }
-                ControlSignal.BITE -> executeSetting(settingsIndex)
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-            }
-            MusicFocusMode.DELETE_LIST -> when (signal) {
-                ControlSignal.LEFT_LOOK -> {
-                    deleteDirection = -1
-                    if (scanMode == ScanMode.MANUAL) deleteIndex = (deleteIndex - 1 + tracks.size + 1) % (tracks.size + 1)
-                }
-                ControlSignal.RIGHT_LOOK -> {
-                    deleteDirection = 1
-                    if (scanMode == ScanMode.MANUAL) deleteIndex = (deleteIndex + 1) % (tracks.size + 1)
-                }
-                ControlSignal.BITE -> {
-                    if (deleteIndex == 0) returnFromOverlay()
-                    else tracks.getOrNull(deleteIndex - 1)?.let(::requestDelete)
-                }
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
-            }
-
+            ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
         }
+    }
+    val tickHandler = rememberUpdatedState<() -> Unit> {
+        scanState = scanState.advance(SystemClock.elapsedRealtime(), ScanMode.AUTO)
     }
     val signalSink = remember { MusicSignalSink { signalHandler.value(it) } }
 
     DisposableEffect(signalSink) {
-        MusicInputBus.attach(signalSink)
+        MusicInputBus.attach(signalSink, onTick = { tickHandler.value() })
         onDispose {
             MusicInputBus.detach(signalSink)
             player.release()
@@ -465,6 +447,7 @@ fun MusicScreen(
         tracks = playbackStore.orderTracks(library.initializeAndLoadTracks())
         playbackStore.saveTrackOrder(tracks)
         shuffleOrder = playbackStore.reconcileShuffleOrder(tracks)
+        scanState = scanState.syncTrackCount(tracks.size)
         val initialTrack = if (initialTrackId != null) {
             tracks.firstOrNull { it.id == initialTrackId }
         } else {
@@ -472,8 +455,7 @@ fun MusicScreen(
         }
         initialTrack?.let(::startTrack)
         if (initialTrackId != null) {
-            focusMode = MusicFocusMode.CONTROLS
-            controlIndex = CONTROL_PLAY_PAUSE
+            scanState = scanState.enterControls(CONTROL_PLAY_PAUSE)
         }
         notice = if (initialTrackId != null && initialTrack == null) "指定歌曲已不在本地曲库" else null
         while (true) {
@@ -482,154 +464,167 @@ fun MusicScreen(
         }
     }
 
-    LaunchedEffect(paused, scanMode, focusMode, controlIndex, controlDirection, scanDelay) {
-        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.CONTROLS) {
-            delay(scanDelay)
-            controlIndex = (controlIndex + controlDirection + CONTROL_LABELS.size) % CONTROL_LABELS.size
-        }
+    LaunchedEffect(paused) {
+        scanState = scanState.resetForPauseBoundary()
     }
 
-    LaunchedEffect(paused, scanMode, focusMode, playlistIndex, playlistDirection, tracks.size, scanDelay) {
-        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.PLAYLIST && tracks.isNotEmpty()) {
-            delay(scanDelay)
-            playlistIndex = (playlistIndex + playlistDirection + tracks.size) % tracks.size
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(
+        paused,
+        frozen,
+        scanMode,
+        scanState.focusMode,
+        activeCursor.size,
+        scanState.dwellRevision,
+        scanDelay,
+        lifecycleOwner
+    ) {
+        if (!paused && !frozen && scanMode == ScanMode.AUTO && activeCursor.size > 0) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                scanState = scanState.clearActiveGrace()
+                runScanTimer(
+                    interval = { scanDelay },
+                    onFailure = { android.util.Log.e("ScanCursor", "Music tick failed", it) }
+                ) {
+                    scanState = scanState.advance(SystemClock.elapsedRealtime(), ScanMode.AUTO)
+                }
+            }
         }
     }
-
-    LaunchedEffect(paused, scanMode, focusMode, volumeIndex, volumeDirection, scanDelay) {
-        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.VOLUME) {
-            delay(scanDelay)
-            volumeIndex = (volumeIndex + volumeDirection + VOLUME_LABELS.size) % VOLUME_LABELS.size
-        }
-    }
-
-    LaunchedEffect(paused, scanMode, focusMode, settingsIndex, settingsDirection, tracks.size, scanDelay) {
-        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.SETTINGS) {
-            delay(scanDelay)
-            moveSettingsFocus(settingsDirection)
-        }
-    }
-
-    LaunchedEffect(paused, scanMode, focusMode, deleteIndex, deleteDirection, tracks.size, scanDelay) {
-        if (!paused && scanMode == ScanMode.AUTO && focusMode == MusicFocusMode.DELETE_LIST && tracks.isNotEmpty()) {
-            delay(scanDelay)
-            val candidateCount = tracks.size + 1
-            deleteIndex = (deleteIndex + deleteDirection + candidateCount) % candidateCount
-        }
-    }
-
-
 
     BackHandler(enabled = !paused) { returnFromOverlay() }
 
-    Box(Modifier.fillMaxSize().auroraBackground()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            MusicHeader(
-                track = currentTrack,
-                importing = importing,
-                notice = notice ?: player.errorMessage,
-                onImport = {
-                    importLauncher.launch(
-                        arrayOf("audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/ogg", "audio/flac")
-                    )
-                }
-            )
-            Row(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                VinylPanel(currentTrack, player.isPlaying, Modifier.weight(.30f).fillMaxHeight())
-                LyricsPanel(currentTrack, Modifier.weight(.38f).fillMaxHeight())
-                PlaylistPanel(
-                    tracks = tracks,
-                    currentTrackId = player.currentTrackId,
-                    focusIndex = playlistIndex,
-                    focusActive = focusMode == MusicFocusMode.PLAYLIST,
-                    onTrackClick = ::playTrackAt,
-                    modifier = Modifier.weight(.32f).fillMaxHeight()
-                )
-            }
-            PlaybackProgress(
-                positionMs = player.positionMs,
-                durationMs = player.durationMs,
-                draggedProgress = draggedProgress,
-                onProgressChange = { draggedProgress = it },
-                onProgressFinished = {
-                    draggedProgress?.let { player.seekTo((it * player.durationMs).toInt()) }
-                    draggedProgress = null
-                }
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CONTROL_LABELS.forEachIndexed { index, label ->
-                    val displayedLabel = when (index) {
-                        CONTROL_PLAY_PAUSE -> if (player.isPlaying) "暂停" else "播放"
-                        CONTROL_MODE -> playbackMode.displayName
-                        else -> label
-                    }
-                    MusicControlButton(
-                        symbol = if (index == CONTROL_PLAY_PAUSE) {
-                            if (player.isPlaying) "Ⅱ" else "▶"
-                        } else CONTROL_SYMBOLS[index],
-                        label = displayedLabel,
-                        focused = focusMode == MusicFocusMode.CONTROLS && controlIndex == index,
-                        icon = when (index) {
-                            CONTROL_VOLUME -> MusicControlIcon.VOLUME
-                            CONTROL_MODE -> MusicControlIcon.PLAYBACK_MODE
-                            else -> MusicControlIcon.TEXT
-                        },
-                        playbackMode = playbackMode,
-                        onClick = {
-                            controlIndex = index
-                            executeControl(index)
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+    val activeDirection = if (scanMode == ScanMode.AUTO) activeCursor.direction else 0
+    val dwell = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(
+        scanState.focusMode,
+        activeCursor.index,
+        activeCursor.ticks,
+        activeCursor.direction,
+        scanState.dwellRevision,
+        activeDirection,
+        paused,
+        frozen,
+        scanDelay,
+        lifecycleOwner
+    ) {
+        when {
+            frozen -> dwell.snapTo(if (activeDirection != 0 && activeCursor.size > 0) 0.5f else 0f)
+            paused || activeDirection == 0 || activeCursor.size <= 0 -> dwell.snapTo(0f)
+            else -> lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                dwell.snapTo(0f)
+                dwell.animateTo(1f, tween(scanDelay.toInt(), easing = LinearEasing))
             }
         }
+    }
+    val progress: () -> Float? = { if (activeDirection != 0 && activeCursor.size > 0 && (!paused || frozen)) dwell.value else null }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalMusicDirection provides activeDirection,
+        LocalMusicProgress provides progress,
+        LocalMusicPaused provides paused
+    ) {
+        Box(Modifier.fillMaxSize().bciBackground()) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                MusicHeader(
+                    track = currentTrack,
+                    importing = importing,
+                    notice = notice ?: player.errorMessage,
+                    onImport = {
+                        importLauncher.launch(
+                            arrayOf("audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/ogg", "audio/flac")
+                        )
+                    }
+                )
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    VinylPanel(currentTrack, player.isPlaying && !frozen, Modifier.weight(.30f).fillMaxHeight())
+                    LyricsPanel(currentTrack, Modifier.weight(.38f).fillMaxHeight())
+                    PlaylistPanel(
+                        tracks = tracks,
+                        currentTrackId = player.currentTrackId,
+                        focusIndex = scanState.playlistCursor.index,
+                        focusActive = scanState.focusMode == MusicFocusMode.PLAYLIST,
+                        onTrackClick = ::playTrackAt,
+                        modifier = Modifier.weight(.32f).fillMaxHeight()
+                    )
+                }
+                PlaybackProgress(
+                    positionMs = player.positionMs,
+                    durationMs = player.durationMs,
+                    draggedProgress = draggedProgress,
+                    onProgressChange = { draggedProgress = it },
+                    onProgressFinished = {
+                        draggedProgress?.let { player.seekTo((it * player.durationMs).toInt()) }
+                        draggedProgress = null
+                    }
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CONTROL_LABELS.forEachIndexed { index, label ->
+                        val displayedLabel = when (index) {
+                            CONTROL_PLAY_PAUSE -> if (player.isPlaying) "暂停" else "播放"
+                            CONTROL_MODE -> playbackMode.displayName
+                            else -> label
+                        }
+                        MusicControlButton(
+                            symbol = if (index == CONTROL_PLAY_PAUSE) {
+                                if (player.isPlaying) "Ⅱ" else "▶"
+                            } else CONTROL_SYMBOLS[index],
+                            label = displayedLabel,
+                            focused = scanState.focusMode == MusicFocusMode.CONTROLS && scanState.controlCursor.index == index,
+                            icon = when (index) {
+                                CONTROL_VOLUME -> MusicControlIcon.VOLUME
+                                CONTROL_MODE -> MusicControlIcon.PLAYBACK_MODE
+                                else -> MusicControlIcon.TEXT
+                            },
+                            playbackMode = playbackMode,
+                            onClick = { executeControl(index) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
 
-        when (focusMode) {
-            MusicFocusMode.VOLUME -> VolumeOverlay(
-                selectedIndex = volumeIndex,
-                volume = volume,
-                maxVolume = maxVolume,
-                onSelect = { index ->
-                    volumeIndex = index
-                    executeVolume(index)
-                }
-            )
-            MusicFocusMode.SETTINGS -> SettingsOverlay(
-                labels = settingsLabels,
-                selectedIndex = settingsIndex,
-                hasMusic = tracks.isNotEmpty(),
-                onSelect = { index ->
-                    settingsIndex = index
-                    executeSetting(index)
-                }
-            )
-            MusicFocusMode.DELETE_LIST -> DeleteListOverlay(
-                tracks = tracks,
-                selectedIndex = deleteIndex,
-                onBack = ::returnFromOverlay,
-                onSelect = { index ->
-                    deleteIndex = index + 1
-                    tracks.getOrNull(index)?.let(::requestDelete)
-                }
-            )
+            when (scanState.focusMode) {
+                MusicFocusMode.VOLUME -> VolumeOverlay(
+                    selectedIndex = scanState.volumeCursor.index,
+                    volume = volume,
+                    maxVolume = maxVolume,
+                    onSelect = ::executeVolume
+                )
+                MusicFocusMode.SETTINGS -> SettingsOverlay(
+                    labels = settingsLabels,
+                    selectedIndex = scanState.targetIndexForSlot(scanState.settingsCursor.index),
+                    hasMusic = tracks.isNotEmpty(),
+                    onSelect = ::executeSetting
+                )
+                MusicFocusMode.DELETE_LIST -> DeleteListOverlay(
+                    tracks = tracks,
+                    selectedIndex = scanState.deleteCursor.index,
+                    onBack = ::returnFromOverlay,
+                    onSelect = { index ->
+                        scanState = scanState.commitDeleteSelection(index + 1)
+                        tracks.getOrNull(index)?.let(::requestDelete)
+                    }
+                )
 
-            MusicFocusMode.CONTROLS, MusicFocusMode.PLAYLIST -> Unit
+                MusicFocusMode.CONTROLS, MusicFocusMode.PLAYLIST -> Unit
+            }
         }
     }
 }
 
+private val LocalMusicDirection = androidx.compose.runtime.compositionLocalOf { 0 }
+private val LocalMusicProgress = androidx.compose.runtime.compositionLocalOf<(() -> Float?)?> { null }
+private val LocalMusicPaused = androidx.compose.runtime.compositionLocalOf { false }
+
 @Composable
 private fun MusicHeader(track: MusicTrack?, importing: Boolean, notice: String?, onImport: () -> Unit) {
+    val paused = LocalMusicPaused.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("音乐", style = MaterialTheme.typography.headlineMedium)
@@ -640,10 +635,10 @@ private fun MusicHeader(track: MusicTrack?, importing: Boolean, notice: String?,
                 overflow = TextOverflow.Ellipsis
             )
             notice?.let {
-                Text(it, color = AuroraInfo, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(it, color = LocalBciColors.current.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        TextButton(onClick = onImport, enabled = !importing) {
+        TextButton(onClick = onImport, enabled = !importing && !paused) {
             Text(if (importing) "正在导入…" else "＋ 导入音乐")
         }
     }
@@ -680,6 +675,7 @@ private fun VinylPanel(track: MusicTrack?, isPlaying: Boolean, modifier: Modifie
 
 @Composable
 private fun VinylRecord(isPlaying: Boolean, label: String, modifier: Modifier = Modifier) {
+    val focusColor = LocalBciColors.current.focus
     val transition = rememberInfiniteTransition(label = "vinyl")
     val animatedAngle by transition.animateFloat(
         initialValue = 0f,
@@ -700,7 +696,7 @@ private fun VinylRecord(isPlaying: Boolean, label: String, modifier: Modifier = 
             listOf(.93f, .82f, .70f, .58f).forEach { ratio ->
                 drawCircle(Color(0xFF4B4D5D), radius * ratio, style = Stroke(1.2f))
             }
-            drawCircle(Brush.radialGradient(listOf(AuroraPink, AuroraViolet, AuroraCyan)), radius * .34f)
+            drawCircle(focusColor, radius * .34f)
             drawCircle(Color(0xFF10121A), radius * .065f)
         }
         Text(label.ifBlank { "♪" }, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Black)
@@ -710,7 +706,7 @@ private fun VinylRecord(isPlaying: Boolean, label: String, modifier: Modifier = 
 @Composable
 private fun LyricsPanel(track: MusicTrack?, modifier: Modifier = Modifier) {
     GlassPanel(modifier, contentPadding = PaddingValues(18.dp)) {
-        Text("歌词", color = AuroraVioletBright, style = MaterialTheme.typography.titleMedium)
+        Text("歌词", color = LocalBciColors.current.focus, style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.weight(.4f))
         Text(
             track?.title ?: "暂无歌曲",
@@ -724,7 +720,7 @@ private fun LyricsPanel(track: MusicTrack?, modifier: Modifier = Modifier) {
             track?.artist.orEmpty(),
             Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
-            color = AuroraInfo,
+            color = LocalBciColors.current.muted,
             fontSize = 17.sp
         )
         Text(
@@ -757,11 +753,6 @@ private fun PlaylistPanel(
             Text("播放列表", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             Text("${tracks.size} 首", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(
-            if (focusActive) "自动选择中 · 左看/右看改变方向 · 咬牙播放" else "点击列表按键后可用耳机选歌",
-            color = if (focusActive) AuroraOk else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp
-        )
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
             state = listState,
@@ -781,19 +772,17 @@ private fun PlaylistPanel(
 
 @Composable
 private fun PlaylistRow(track: MusicTrack, current: Boolean, focused: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(12.dp)
+    val paused = LocalMusicPaused.current
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(if (current) Color(0x3322D3EE) else AuroraDarkSurface)
-            .border(if (focused) 4.dp else 1.dp, if (focused) AuroraOk else AuroraDarkBorderStrong, shape)
-            .clickable(onClick = onClick)
+            .scanItem(focused, LocalMusicDirection.current, false, if (focused) LocalMusicProgress.current else null, cornerRadius = 12.dp, customFillColor = if (current) LocalBciColors.current.okTint else null)
+            .clickable(enabled = !paused, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp)
     ) {
-        Text(if (current) "▶" else "♪", color = if (current) AuroraCyan else AuroraVioletBright)
+        Text(if (current) "▶" else "♪", color = if (current) LocalBciColors.current.ok else LocalBciColors.current.focus)
         Column(Modifier.weight(1f)) {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
             Text(
@@ -839,15 +828,20 @@ private fun MusicControlButton(
     icon: MusicControlIcon = MusicControlIcon.TEXT,
     playbackMode: MusicPlaybackMode = MusicPlaybackMode.SEQUENTIAL
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val paused = LocalMusicPaused.current
     Column(
         modifier
-            .height(68.dp)
-            .clip(shape)
-            .background(if (focused) Color(0x3334D399) else AuroraDarkSurfaceStrong)
-            .border(if (focused) 4.dp else 1.dp, if (focused) AuroraOk else AuroraDarkBorderStrong, shape)
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp),
+            .height(76.dp)
+            .scanItem(
+                focused = focused,
+                direction = LocalMusicDirection.current,
+                picked = false,
+                progress = if (focused) LocalMusicProgress.current else null,
+                cornerRadius = 16.dp,
+                dwellBottom = 5.dp
+            )
+            .clickable(enabled = !paused, onClick = onClick)
+            .padding(top = 4.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -951,13 +945,12 @@ private fun VolumeOverlay(
 ) {
     MusicOverlay(widthFraction = .52f) {
         Text("音量调节", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text("调节音量不会暂停歌曲 · 左看/右看移动焦点 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("音量：$volume / $maxVolume", fontWeight = FontWeight.Bold)
         LinearProgressIndicator(
             progress = { volume.toFloat() / maxVolume },
             modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape),
-            color = AuroraCyan,
-            trackColor = AuroraDarkSurfaceStrong
+            color = LocalBciColors.current.focus,
+            trackColor = LocalBciColors.current.panel2
         )
         VOLUME_LABELS.forEachIndexed { index, label ->
             FocusOptionButton(
@@ -978,7 +971,6 @@ private fun SettingsOverlay(
 ) {
     MusicOverlay(widthFraction = .52f) {
         Text("音乐设置", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-        Text("进入设置不会暂停歌曲 · 光标自动跳转 · 左看/右看改变方向 · 咬牙选择", color = MaterialTheme.colorScheme.onSurfaceVariant)
         labels.forEachIndexed { index, label ->
             val enabled = index != 1 || hasMusic
             FocusOptionButton(
@@ -1007,7 +999,6 @@ private fun DeleteListOverlay(
     }
     MusicOverlay(widthFraction = .68f) {
         Text("删除音乐", style = MaterialTheme.typography.headlineMedium)
-        Text("光标自动跳转 · 左看/右看改变方向 · 咬牙选择后再次确认", color = MaterialTheme.colorScheme.onSurfaceVariant)
         FocusOptionButton(
             text = "返回设置",
             focused = selectedIndex == 0,
@@ -1039,21 +1030,13 @@ private fun FocusOptionButton(
     enabled: Boolean = true,
     danger: Boolean = false
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    val background = when {
-        !enabled -> Color(0x15111111)
-        danger -> Color(0x35FB7185)
-        focused -> Color(0x3334D399)
-        else -> AuroraDarkSurfaceStrong
-    }
+    val paused = LocalMusicPaused.current
     Box(
         modifier
             .fillMaxWidth()
             .height(54.dp)
-            .clip(shape)
-            .background(background)
-            .border(if (focused) 4.dp else 1.dp, if (focused) AuroraOk else AuroraDarkBorderStrong, shape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .scanItem(focused, LocalMusicDirection.current, false, if (focused) LocalMusicProgress.current else null, cornerRadius = 14.dp, enabled = enabled, customFillColor = if (danger) LocalBciColors.current.alarmTint else null)
+            .clickable(enabled = enabled && !paused, onClick = onClick)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -1061,7 +1044,7 @@ private fun FocusOptionButton(
             text,
             color = if (!enabled) {
                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .45f)
-            } else if (danger) AuroraBad else MaterialTheme.colorScheme.onSurface,
+            } else if (danger) LocalBciColors.current.alarm else MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             maxLines = 1,
@@ -1078,16 +1061,26 @@ private fun MusicOverlay(
     Box(
         Modifier
             .fillMaxSize()
-            .zIndex(80f)
-            .background(Color(0xB80A0D1E))
-            .clickable { },
+            .zIndex(80f),
         contentAlignment = Alignment.Center
     ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(LocalBciColors.current.ov)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent().changes.forEach { it.consume() }
+                        }
+                    }
+                }
+        )
         Surface(
             modifier = Modifier.fillMaxWidth(widthFraction),
             shape = RoundedCornerShape(24.dp),
-            color = Color(0xFF171B32),
-            border = androidx.compose.foundation.BorderStroke(2.dp, AuroraViolet)
+            color = LocalBciColors.current.panel,
+            border = androidx.compose.foundation.BorderStroke(2.dp, LocalBciColors.current.focus)
         ) {
             Column(
                 Modifier.padding(22.dp),

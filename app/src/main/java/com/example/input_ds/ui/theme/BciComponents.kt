@@ -37,8 +37,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-enum class AuroraButtonStyle { PRIMARY, SECONDARY, GHOST, DANGER, SUCCESS }
-enum class AuroraBadgeStyle { NEUTRAL, SUCCESS, WARNING, DANGER, INFO }
+enum class BciButtonStyle { PRIMARY, SECONDARY, GHOST, DANGER, SUCCESS }
+enum class BciBadgeStyle { NEUTRAL, SUCCESS, WARNING, DANGER, INFO }
 
 @Composable
 fun GlassPanel(
@@ -83,34 +83,34 @@ fun SelectableGlassPanel(
 }
 
 @Composable
-fun AuroraButton(
+fun BciButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    style: AuroraButtonStyle = AuroraButtonStyle.SECONDARY,
+    style: BciButtonStyle = BciButtonStyle.SECONDARY,
     enabled: Boolean = true,
     leading: String? = null,
     minHeight: Dp = 48.dp
 ) {
     val shape = MaterialTheme.shapes.medium
     val background = when (style) {
-        AuroraButtonStyle.PRIMARY -> Brush.linearGradient(listOf(LocalBciColors.current.text, LocalBciColors.current.text))
-        AuroraButtonStyle.SUCCESS -> Brush.linearGradient(listOf(LocalBciColors.current.ok, LocalBciColors.current.ok))
-        AuroraButtonStyle.DANGER -> Brush.linearGradient(listOf(LocalBciColors.current.alarmTint, LocalBciColors.current.alarmTint))
-        AuroraButtonStyle.GHOST -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-        AuroraButtonStyle.SECONDARY -> Brush.linearGradient(listOf(LocalBciColors.current.panel2, LocalBciColors.current.panel2))
+        BciButtonStyle.PRIMARY -> Brush.linearGradient(listOf(LocalBciColors.current.text, LocalBciColors.current.text))
+        BciButtonStyle.SUCCESS -> Brush.linearGradient(listOf(LocalBciColors.current.ok, LocalBciColors.current.ok))
+        BciButtonStyle.DANGER -> Brush.linearGradient(listOf(LocalBciColors.current.alarmTint, LocalBciColors.current.alarmTint))
+        BciButtonStyle.GHOST -> Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+        BciButtonStyle.SECONDARY -> Brush.linearGradient(listOf(LocalBciColors.current.panel2, LocalBciColors.current.panel2))
     }
     val border = when (style) {
-        AuroraButtonStyle.PRIMARY -> Color.Transparent
-        AuroraButtonStyle.DANGER -> LocalBciColors.current.alarm.copy(alpha = .55f)
-        AuroraButtonStyle.SUCCESS -> LocalBciColors.current.ok.copy(alpha = .55f)
-        AuroraButtonStyle.GHOST -> Color.Transparent
-        AuroraButtonStyle.SECONDARY -> LocalBciColors.current.dim
+        BciButtonStyle.PRIMARY -> Color.Transparent
+        BciButtonStyle.DANGER -> LocalBciColors.current.alarm.copy(alpha = .55f)
+        BciButtonStyle.SUCCESS -> LocalBciColors.current.ok.copy(alpha = .55f)
+        BciButtonStyle.GHOST -> Color.Transparent
+        BciButtonStyle.SECONDARY -> LocalBciColors.current.dim
     }
     val foreground = when (style) {
-        AuroraButtonStyle.DANGER -> LocalBciColors.current.alarm
-        AuroraButtonStyle.PRIMARY, AuroraButtonStyle.SUCCESS -> LocalBciColors.current.bg
-        AuroraButtonStyle.GHOST -> LocalBciColors.current.focus
+        BciButtonStyle.DANGER -> LocalBciColors.current.alarm
+        BciButtonStyle.PRIMARY, BciButtonStyle.SUCCESS -> LocalBciColors.current.bg
+        BciButtonStyle.GHOST -> LocalBciColors.current.focus
         else -> LocalBciColors.current.text
     }
     Box(
@@ -137,17 +137,17 @@ fun AuroraButton(
 }
 
 @Composable
-fun AuroraBadge(
+fun BciBadge(
     text: String,
     modifier: Modifier = Modifier,
-    style: AuroraBadgeStyle = AuroraBadgeStyle.NEUTRAL
+    style: BciBadgeStyle = BciBadgeStyle.NEUTRAL
 ) {
     val (background, foreground) = when (style) {
-        AuroraBadgeStyle.SUCCESS -> LocalBciColors.current.okTint to LocalBciColors.current.ok
-        AuroraBadgeStyle.WARNING -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
-        AuroraBadgeStyle.DANGER -> LocalBciColors.current.alarmTint to LocalBciColors.current.alarm
-        AuroraBadgeStyle.INFO -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
-        AuroraBadgeStyle.NEUTRAL -> LocalBciColors.current.panel2 to LocalBciColors.current.muted
+        BciBadgeStyle.SUCCESS -> LocalBciColors.current.okTint to LocalBciColors.current.ok
+        BciBadgeStyle.WARNING -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
+        BciBadgeStyle.DANGER -> LocalBciColors.current.alarmTint to LocalBciColors.current.alarm
+        BciBadgeStyle.INFO -> LocalBciColors.current.focusTint to LocalBciColors.current.muted
+        BciBadgeStyle.NEUTRAL -> LocalBciColors.current.panel2 to LocalBciColors.current.muted
     }
     Surface(
         modifier = modifier,
@@ -190,7 +190,7 @@ fun SectionHeader(
 }
 
 @Composable
-fun AuroraEmptyState(
+fun BciEmptyState(
     message: String,
     modifier: Modifier = Modifier,
     symbol: String = "◇"
@@ -206,7 +206,7 @@ fun AuroraEmptyState(
 }
 
 @Composable
-fun AuroraTextField(
+fun BciTextField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,

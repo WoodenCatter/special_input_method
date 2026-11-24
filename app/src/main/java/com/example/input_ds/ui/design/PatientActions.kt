@@ -1,11 +1,13 @@
 package com.example.input_ds.ui.design
 
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.*
 import com.example.input_ds.communication.*
 import com.example.input_ds.data.LetterBlockMapping
 import com.example.input_ds.model.*
 
 val LocalActionHints = staticCompositionLocalOf<(ActionHints) -> Unit> { {} }
+val LocalStageOverlay = staticCompositionLocalOf<(((@Composable BoxScope.() -> Unit)?) -> Unit)?> { null }
 
 @Composable
 fun ReportActionHints(hints: ActionHints) {

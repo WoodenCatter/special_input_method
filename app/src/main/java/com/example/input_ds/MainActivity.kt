@@ -85,6 +85,7 @@ import com.example.input_ds.ui.chess.ChineseChessScreen
 import com.example.input_ds.mahjong.MahjongInputBus
 import com.example.input_ds.ui.doudizhu.DoudizhuScreen
 import com.example.input_ds.ui.mahjong.MahjongScreen
+import com.example.input_ds.game.SnakeDirection
 import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
 import com.example.input_ds.ui.assistant.AssistantInputBus
@@ -109,7 +110,7 @@ import com.example.input_ds.ui.settings.AppSettingsLogic
 import com.example.input_ds.ui.settings.AppSettingsScreen
 import com.example.input_ds.ui.tv.TvScreen
 import com.example.input_ds.ui.theme.InputDSTheme
-import com.example.input_ds.ui.theme.AuroraBackground
+import com.example.input_ds.ui.theme.BciBackground
 import com.example.input_ds.tv.TvInputBus
 import com.example.input_ds.viewmodel.InputMethodViewModel
 import kotlinx.coroutines.delay
@@ -540,6 +541,8 @@ class MainActivity : ComponentActivity() {
                             destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(EntertainmentHubModule.entries[entCursor.index].displayName, scanMode.value, entCursor.direction, true)
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
                             destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
+                            destination.value == AppDestination.SNAKE_CLIMB -> ActionHints("向左转", if (snakeState.value.direction == SnakeDirection.UP) "离开游戏…" else "转向上方", "向右转")
+                            destination.value == AppDestination.ASYNC_MAZE -> ActionHints("向左", "向上", "向右")
                             destination.value == AppDestination.TV -> ActionHints("上一台", "打开菜单", "下一台")
                             else -> ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
                         }
@@ -856,7 +859,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            AppDestination.WIZARD_GAME -> AuroraBackground {
+            AppDestination.WIZARD_GAME -> BciBackground {
                 Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Text("魔法师游戏运行中…", style = MaterialTheme.typography.headlineMedium)
                 }
@@ -895,17 +898,24 @@ class MainActivity : ComponentActivity() {
                 scanMode = scanMode.value,
                 onBack = { navigateTo(mediaParent()) },
                 initialChannelId = assistantMediaId,
-                fromAssistant = assistantMediaId != null
+                fromAssistant = assistantMediaId != null,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
+                onToast = { message, ok -> feedback.toast(message, ok) },
+                onBoundary = { bciController?.invalidatePendingCommands() }
             )
 
             AppDestination.MUSIC -> MusicScreen(
                 onConfirmation = ::openConfirmation,
-                paused = careOpen || hasActiveCall || confirmOverlay != null || frozen,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
                 scanIntervalMs = inputState.scanIntervalMs,
                 scanMode = scanMode.value,
                 onBack = { navigateTo(mediaParent()) },
                 initialTrackId = assistantMediaId,
-                fromAssistant = assistantMediaId != null
+                fromAssistant = assistantMediaId != null,
+                onToast = { message, ok -> feedback.toast(message, ok) },
+                onBoundary = { bciController?.invalidatePendingCommands() }
             )
 
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
@@ -1471,6 +1481,13 @@ class MainActivity : ComponentActivity() {
                 )
                 dwellRevision++
             }
+            "nav tv" -> {
+                clearTransientOverlaysForNav()
+                assistantMediaId = null
+                navigateTo(AppDestination.TV)
+                TvInputBus.reset()
+                dwellRevision++
+            }
             "nav settings" -> {
                 clearTransientOverlaysForNav()
                 settingsInitialIndex = AppSettingsLogic.INITIAL_INDEX
@@ -1538,6 +1555,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     destination.value == AppDestination.LIFE_ASSISTANT -> AssistantInputBus.debugTick()
+                    destination.value == AppDestination.TV -> if (!TvInputBus.debugTick()) return "pending: page cursor"
+                    destination.value == AppDestination.MUSIC -> if (!com.example.input_ds.music.MusicInputBus.debugTick()) return "pending: page cursor"
                     else -> return "pending: page cursor"
                 }
             }

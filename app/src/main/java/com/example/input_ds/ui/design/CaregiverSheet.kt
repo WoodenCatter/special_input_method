@@ -321,6 +321,7 @@ internal fun CaregiverSheet(
                 }
 
                 AndroidView(
+                    update = { it.setPalette(com.example.input_ds.ui.theme.Night) },
                     factory = { EegStereoView(it, bleManager, compactMode = true) },
                     modifier = Modifier
                         .fillMaxWidth()
