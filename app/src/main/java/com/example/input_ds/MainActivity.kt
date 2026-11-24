@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -274,8 +275,15 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(chat, destination.value) {
                     chat.setScreenActive(destination.value == AppDestination.COMMUNICATION)
                 }
-                LaunchedEffect(chat, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, call != null) {
-                    chat.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || adjustOverlay != null || call != null)
+                val inputCovered = careOpen || nurseCall != null || speakOverlay != null ||
+                    confirmOverlay != null || adjustOverlay != null || call != null
+                LifecycleResumeEffect(chat, vm, inputCovered) {
+                    chat.setPaused(inputCovered)
+                    vm.setPaused(inputCovered)
+                    onPauseOrDispose {
+                        chat.setPaused(true)
+                        vm.setPaused(true)
+                    }
                 }
                 LaunchedEffect(call?.id, call?.status, video.connected, video.camera, video.confirmEnd) {
                     if (call != null) {
@@ -325,9 +333,6 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(vm, scanMode.value) { vm.setScanMode(scanMode.value) }
                 LaunchedEffect(vm, frozen) { vm.setFrozen(frozen) }
-                LaunchedEffect(vm, careOpen, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, call != null) {
-                    vm.setPaused(careOpen || nurseCall != null || speakOverlay != null || confirmOverlay != null || adjustOverlay != null || call != null)
-                }
                 LaunchedEffect(destination.value) {
                     if (destination.value == AppDestination.ENTERTAINMENT || liveMusicCount == 0) {
                         liveMusicCount = MusicLibrary(applicationContext).reloadTracks().size
@@ -762,8 +767,10 @@ class MainActivity : ComponentActivity() {
             destination.value != AppDestination.DEVICE_STATUS
         ) {
             BackHandler(enabled = !hasActiveCall && !careOpen && adjustOverlay == null && confirmOverlay == null && speakOverlay == null && nurseCall == null) {
-                if (destination.value == AppDestination.INPUT_METHOD) {
-                    inputViewModel?.handleBackPress()
+                if (destination.value == AppDestination.INPUT_METHOD ||
+                    (destination.value == AppDestination.COMMUNICATION && chat.state.value.stage == CommunicationStage.CHAT_INPUT)
+                ) {
+                    vm.handleBackPress()
                     return@BackHandler
                 }
                 if (destination.value == AppDestination.COMMUNICATION) {
@@ -824,9 +831,6 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm, hasActiveCall)
             AppDestination.COMMUNICATION -> {
-                androidx.compose.runtime.DisposableEffect(vm) {
-                    onDispose { vm.deactivate() }
-                }
                 CommunicationScreen(
                     chat = chat,
                     input = vm,

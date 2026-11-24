@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.input_ds.MainActivity
@@ -75,6 +76,55 @@ class EntertainmentEntryTest {
         } finally {
             uiAutomation.dropShellPermissionIdentity()
         }
+    }
+
+    @Test
+    fun talkComposerContinuesScanningAfterLeavingContactsInManualMode() {
+        bci("scan manual")
+        bci("freeze off")
+        bci("nav contacts")
+        composeRule.onAllNodesWithText("当面说话")[0].performClick()
+        composeRule.onNodeWithText("沟通 › 当面说话").assertIsDisplayed()
+        composeRule.waitUntil(timeoutMillis = 8_000) {
+            composeRule.onAllNodesWithText("选「DEF」").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun systemBackFromChatPhrasesReturnsToLettersBeforeLeavingChat() {
+        bci("freeze on")
+        bci("fake contacts")
+        bci("nav chat")
+        composeRule.onNodeWithText("沟通 › 妈妈 › 文字消息").assertIsDisplayed()
+        composeRule.onNodeWithText("打开常用语").assertIsDisplayed()
+        bci("signal B")
+        composeRule.onNodeWithText("选「叫医生」").assertIsDisplayed()
+        fun pressBack() = composeRule.runOnUiThread {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        pressBack()
+        composeRule.onNodeWithText("沟通 › 妈妈 › 文字消息").assertIsDisplayed()
+        composeRule.onNodeWithText("选「ABC」").assertIsDisplayed()
+        pressBack()
+        composeRule.onNodeWithText("选「文字消息」").assertIsDisplayed()
+    }
+
+    @Test
+    fun contactsKeepFocusAndResumeScanningForwardAfterCareSheet() {
+        bci("freeze on")
+        bci("scan auto")
+        bci("fake contacts")
+        bci("nav contacts")
+        composeRule.onNodeWithText("选「妈妈」").assertIsDisplayed()
+        bci("signal L")
+        composeRule.onNodeWithText("左看 · 当前方向").assertIsDisplayed()
+        bci("care on")
+        composeRule.onNodeWithText("照护面板").assertIsDisplayed()
+        bci("care off")
+        composeRule.onNodeWithText("右看 · 当前方向").assertIsDisplayed()
+        composeRule.onNodeWithText("选「妈妈」").assertIsDisplayed()
+        bci("tick")
+        composeRule.onNodeWithText("选「小雨」").assertIsDisplayed()
     }
 
     @Test

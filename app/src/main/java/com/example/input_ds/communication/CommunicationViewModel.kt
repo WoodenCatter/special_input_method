@@ -154,7 +154,10 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
     fun setPaused(value: Boolean) {
         if (paused == value) return
         paused = value
-        resetPreviousIndices()
+        listCursor = listCursor.copy(direction = 1, previousIndex = -1)
+        actionCursor = actionCursor.copy(direction = 1, previousIndex = -1)
+        pairingCursor = pairingCursor.copy(direction = 1, previousIndex = -1)
+        _state.value = _state.value.copy(listDirection = 1, actionDirection = 1, pairingDirection = 1)
         if (paused) {
             stopScanTimer()
         } else {

@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.input_ds.assistant.AssistantCareStore
@@ -607,7 +608,10 @@ internal fun AssistantScreen(
     }
 
     LaunchedEffect(scanMode) { input.setScanMode(scanMode) }
-    LaunchedEffect(paused) { input.setPaused(paused) }
+    LifecycleResumeEffect(input, paused) {
+        input.setPaused(paused)
+        onPauseOrDispose { input.setPaused(true) }
+    }
     LaunchedEffect(frozen) { input.setFrozen(frozen) }
     LaunchedEffect(scanIntervalMs) { input.setScanInterval(scanIntervalMs) }
 

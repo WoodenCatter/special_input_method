@@ -111,7 +111,8 @@ class InputMethodViewModel(
     fun setPaused(value: Boolean) {
         if (paused == value) return
         paused = value
-        activeCursor = activeCursor.copy(previousIndex = -1)
+        activeCursor = activeCursor.copy(previousIndex = -1, direction = 1)
+        _state.value = _state.value.copy(charScanDirection = 1)
         if (paused) {
             stopActiveTimer()
         } else {
@@ -230,12 +231,7 @@ class InputMethodViewModel(
             triggerBack()
             return true
         }
-        if (s.phase == InputPhase.LEVEL_2_LETTER_SELECT && s.isCharFocused) {
-            val backIdx = (s.pinyinCombinations.indexOf(s.currentPinyin) + 1).coerceAtLeast(1)
-            focusPinyinLayer(backIdx)
-        } else {
-            returnToLevel1()
-        }
+        returnToLevel1()
         return true
     }
 
