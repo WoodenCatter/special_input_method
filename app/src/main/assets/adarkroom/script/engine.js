@@ -429,7 +429,8 @@
       if(typeof Storage != 'undefined' && localStorage) {
         var prestige = Prestige.get();
         window.State = {};
-        localStorage.clear();
+        // Only remove A Dark Room's own save key so other offline games sharing this origin are preserved.
+        localStorage.removeItem('gameState');
         Prestige.set(prestige);
       }
       if(!noReload) {

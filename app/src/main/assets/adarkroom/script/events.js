@@ -160,6 +160,7 @@ var Events = {
 		Events.startEnemyAttacks();
 		Events._specialTimers = (scene.specials ?? []).map(s => Engine.setInterval(
 			() => {
+				if (window.__bciAdrPaused) return;
 				const enemy = $('#enemy');
 				const text = s.action(enemy);
 				Events.updateFighterDiv(enemy);
@@ -333,7 +334,7 @@ var Events = {
 			cost: { 'hypo': 1 }
 		});
 
-		if((Path.outfit['hypo'] ?? 0) > 0) {
+		if((Path.outfit['hypo'] ?? 0) === 0) {
 			Button.setDisabled(btn, true);
 		}
 
@@ -408,7 +409,20 @@ var Events = {
 		var canHeal = (World.health < World.getMaxHealth());
 		healBtns.each(function(i){
 			const btn = $(this);
-			Button.setDisabled(btn, !canHeal && btn.attr('id') !== 'shld');
+			const id = btn.attr('id');
+			if (id === 'shld') {
+				Button.setDisabled(btn, false);
+			} else if (id === 'use-stim' || id === 'stim') {
+				Button.setDisabled(btn, (Path.outfit['stim'] || 0) <= 0);
+			} else if (id === 'eat') {
+				Button.setDisabled(btn, !canHeal || (Path.outfit['cured meat'] || 0) <= 0);
+			} else if (id === 'meds') {
+				Button.setDisabled(btn, !canHeal || (Path.outfit['medicine'] || 0) <= 0);
+			} else if (id === 'hypo') {
+				Button.setDisabled(btn, !canHeal || (Path.outfit['hypo'] || 0) <= 0);
+			} else {
+				Button.setDisabled(btn, !canHeal);
+			}
 		});
 		return canHeal;
 	},
@@ -459,8 +473,14 @@ var Events = {
 	},
 
 	useStim: btn => {
+		if ((Path.outfit['stim'] || 0) <= 0) return;
+		Path.outfit['stim']--;
+		World.updateSupplies();
+		if (Path.outfit['stim'] <= 0) {
+			Button.setDisabled(btn, true);
+		}
 		const player = $('#wanderer');
-		player.data('status', 'boost');
+		Events.setStatus(player, 'boost');
 		Events.dotDamage(player, Events.BOOST_DAMAGE);
 		Events.updateFighterDiv(player);
 	},
@@ -580,18 +600,48 @@ var Events = {
 		}
 	},
 
+	cancelExplode: () => {
+		Events._explodeToken = (Events._explodeToken || 0) + 1;
+		if (Events._explodeTimer) {
+			clearTimeout(Events._explodeTimer);
+			Events._explodeTimer = null;
+		}
+	},
+
 	explode: (enemy, player, dmg) => {
 		Events.clearTimeouts();
+		Events.cancelExplode();
+		const token = Events._explodeToken;
 		enemy.addClass('exploding');
-		setTimeout(() => {
+		let remaining = Events.EXPLOSION_DURATION;
+		let resolved = false;
+		const tick = () => {
+			if (resolved || token !== Events._explodeToken) return;
+			if (!Events.activeEvent() || !enemy[0] || !enemy[0].isConnected) {
+				resolved = true;
+				return;
+			}
+			if (window.__bciAdrPaused) {
+				Events._explodeTimer = setTimeout(tick, 100);
+				return;
+			}
+			remaining -= 100;
+			if (remaining > 0) {
+				Events._explodeTimer = setTimeout(tick, 100);
+				return;
+			}
+			resolved = true;
+			Events._explodeTimer = null;
 			enemy.removeClass('exploding');
 			$('.label', enemy).text('*');
 			Events.damage(enemy, player, dmg, 'ranged', () => {
+				if (token !== Events._explodeToken) return;
 				if (!Events.checkPlayerDeath()) {
 					Events.winFight();
 				}
 			});
-		}, Events.EXPLOSION_DURATION);
+		};
+		Events._explodeTimer = setTimeout(tick, 100);
 	},
 
 	dotDamage: (target, dmg) => {
@@ -611,6 +661,9 @@ var Events = {
 	},
 
 	damage: function(fighter, enemy, dmg, type, cb) {
+		if (window.__bciAdrPaused && fighter && fighter.attr && fighter.attr('id') === 'enemy') {
+			return;
+		}
 		var enemyHp = enemy.data('hp');
 		const maxHp = enemy.data('maxHp');
 		var msg = "";
@@ -644,6 +697,7 @@ var Events = {
 				if (venomous && !shielded) {
 					clearInterval(Events._dotTimer);
 					Events._dotTimer = setInterval(() => {
+						if (window.__bciAdrPaused) return;
 						Events.dotDamage(enemy, Math.floor(dmg / 2));
 					}, Events.DOT_TICK);
 				}
@@ -732,6 +786,7 @@ var Events = {
 
 	enemyAttack: function() {
 		// Events.togglePause($('#pause'),'auto');
+		if (window.__bciAdrPaused) return;
 
 		var scene = Events.activeEvent().scenes[Events.activeScene];
 		const enemy = $('#enemy');
@@ -1418,6 +1473,8 @@ var Events = {
 	},
 
 	endEvent: function() {
+		Events.cancelExplode();
+		Events.clearTimeouts();
 		AudioEngine.stopEventMusic();
 		Events.eventPanel().animate({opacity:0}, Events._PANEL_FADE, 'linear', function() {
 			Events.eventPanel().remove();

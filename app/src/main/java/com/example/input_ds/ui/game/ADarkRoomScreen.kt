@@ -43,6 +43,8 @@ fun ADarkRoomScreen(
     scanIntervalMs: Long,
     scanMode: ScanMode,
     paused: Boolean,
+    frozen: Boolean = false,
+    hidden: Boolean = false,
     onFeedback: (String) -> Unit,
     onBoundary: () -> Unit,
     onBack: () -> Unit
@@ -61,9 +63,11 @@ fun ADarkRoomScreen(
     var actionHints by remember {
         mutableStateOf(ActionHints("", "正在进入小黑屋…", ""))
     }
-    ReportActionHints(actionHints)
+    if (!hidden) {
+        ReportActionHints(actionHints)
+    }
 
-    val effectivePaused = paused || !lifecycleResumed
+    val effectivePaused = paused || hidden || !lifecycleResumed
 
     LifecycleResumeEffect(Unit) {
         lifecycleResumed = true
@@ -75,7 +79,6 @@ fun ADarkRoomScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            activeSignalSink?.saveAndPause()
             activeSignalSink?.let(ADarkRoomInputBus::detach)
             activeSignalSink = null
             activeWebView?.apply {
@@ -104,6 +107,7 @@ fun ADarkRoomScreen(
                     addJavascriptInterface(
                         ADarkRoomHostBridge(
                             webView = this,
+                            onReady = { signalSink.onAdapterReady() },
                             onScanState = { left, bite, right, dir ->
                                 actionHints = ActionHints(left, bite, right, dir)
                             },
@@ -129,18 +133,18 @@ fun ADarkRoomScreen(
                         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                         cacheMode = WebSettings.LOAD_NO_CACHE
                     }
-                    webViewClient = OfflineADarkRoomWebViewClient(context.assets) {
-                        signalSink.onPageReady()
-                    }
+                    webViewClient = OfflineADarkRoomWebViewClient(context.assets)
                     loadUrl(ADR_URL)
                 }
             },
             update = { webView ->
+                webView.visibility = if (hidden) android.view.View.GONE else android.view.View.VISIBLE
                 webView.setBackgroundColor(bgArgb)
                 activeSignalSink?.configure(
                     intervalMs = scanIntervalMs,
                     manual = scanMode == ScanMode.MANUAL,
                     paused = effectivePaused,
+                    frozen = frozen,
                     graceMs = AppUiSettings.graceMs(webView.context),
                     isDark = isDark
                 )
@@ -150,8 +154,7 @@ fun ADarkRoomScreen(
 }
 
 private class OfflineADarkRoomWebViewClient(
-    private val assets: android.content.res.AssetManager,
-    private val onPageReady: () -> Unit
+    private val assets: android.content.res.AssetManager
 ) : WebViewClient() {
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         !request.url.isAdrAssetUrl()
@@ -187,36 +190,33 @@ private class OfflineADarkRoomWebViewClient(
             adrNotFoundResponse()
         }
     }
-
-    override fun onPageFinished(view: WebView, url: String) {
-        super.onPageFinished(view, url)
-        if (Uri.parse(url).isAdrAssetUrl()) onPageReady()
-    }
 }
 
 private class ADarkRoomWebSignalSink(
     private val webView: WebView
 ) : ADarkRoomSignalSink {
     @Volatile
-    private var pageReady = false
+    private var adapterReady = false
     private var scanIntervalMs = 1_500L
     private var manual = false
     private var paused = false
+    private var frozen = false
     private var graceMs = 400L
     private var isDark = false
     private var configuredOnce = false
 
-    fun onPageReady() {
-        pageReady = true
+    fun onAdapterReady() {
+        adapterReady = true
         pushConfig()
     }
 
-    fun configure(intervalMs: Long, manual: Boolean, paused: Boolean, graceMs: Long, isDark: Boolean) {
+    fun configure(intervalMs: Long, manual: Boolean, paused: Boolean, frozen: Boolean, graceMs: Long, isDark: Boolean) {
         val clamped = intervalMs.coerceIn(1_100L, 3_000L)
         if (configuredOnce &&
             clamped == scanIntervalMs &&
             this.manual == manual &&
             this.paused == paused &&
+            this.frozen == frozen &&
             this.graceMs == graceMs &&
             this.isDark == isDark
         ) {
@@ -226,13 +226,14 @@ private class ADarkRoomWebSignalSink(
         scanIntervalMs = clamped
         this.manual = manual
         this.paused = paused
+        this.frozen = frozen
         this.graceMs = graceMs
         this.isDark = isDark
-        if (pageReady) pushConfig()
+        if (adapterReady) pushConfig()
     }
 
     fun saveAndPause() {
-        if (!pageReady) return
+        if (!adapterReady) return
         webView.post {
             webView.evaluateJavascript("window.inputDsAdr?.saveAndPause()", null)
         }
@@ -245,14 +246,14 @@ private class ADarkRoomWebSignalSink(
             ControlSignal.BITE -> "bite"
             ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> return
         }
-        if (!pageReady) return
+        if (!adapterReady) return
         webView.post {
             webView.evaluateJavascript("window.inputDsAdr?.handleAction('$action')", null)
         }
     }
 
     override fun onDebugTick() {
-        if (!pageReady) return
+        if (!adapterReady) return
         webView.post {
             webView.evaluateJavascript("window.inputDsAdr?.debugTick()", null)
         }
@@ -261,7 +262,7 @@ private class ADarkRoomWebSignalSink(
     private fun pushConfig() {
         webView.post {
             webView.evaluateJavascript(
-                "window.inputDsAdr?.configure($scanIntervalMs, $manual, $paused, $graceMs, $isDark)",
+                "window.inputDsAdr?.configure($scanIntervalMs, $manual, $paused, $frozen, $graceMs, $isDark)",
                 null
             )
         }
@@ -270,11 +271,17 @@ private class ADarkRoomWebSignalSink(
 
 private class ADarkRoomHostBridge(
     private val webView: WebView,
+    private val onReady: () -> Unit,
     private val onScanState: (String, String, String, Int) -> Unit,
     private val onBoundary: () -> Unit,
     private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
+    @JavascriptInterface
+    fun onAdapterReady() {
+        webView.post { onReady() }
+    }
+
     @JavascriptInterface
     fun scanState(left: String, bite: String, right: String, direction: Int) {
         webView.post { onScanState(left, bite, right, direction) }

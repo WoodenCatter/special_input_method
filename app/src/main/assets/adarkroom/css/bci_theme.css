@@ -106,7 +106,7 @@ body, .tooltip, select.menuBtn {
 /* Main centered tablet wrapper: 356px notifications + 24px gap + 700px game stage = 1080px */
 div#wrapper {
 	margin: 0 auto !important;
-	width: 700px !important;
+	width: 1080px !important;
 	padding: 10px 0 0 380px !important;
 	height: 100%;
 	box-sizing: border-box;
@@ -173,12 +173,19 @@ div#content {
 div#outerSlider > div {
 	width: 700px !important;
 	height: calc(100vh - 20px) !important;
-	overflow: hidden !important;
+	overflow-y: auto !important;
+	overflow-x: hidden !important;
+	box-sizing: border-box;
+	padding-bottom: 48px;
 }
 
 /* Tabs header */
 div#header {
-	padding: 4px 0 14px 0 !important;
+	position: sticky;
+	top: 0;
+	z-index: 32;
+	background: var(--adr-bg);
+	padding: 4px 0 12px 0 !important;
 	height: auto !important;
 	min-height: 44px;
 	border-bottom: 1px solid var(--adr-line);
@@ -212,18 +219,15 @@ div.headerButton.selected:hover {
 	text-decoration: none !important;
 }
 
-/* Active location panel scrolls cleanly if content grows tall */
+/* Keep div.location overflow visible so #storesContainer sliding from Room onto Outside/Path is NEVER clipped! */
 div#locationSlider {
 	top: 62px;
-	height: calc(100vh - 88px);
 }
 
 div.location {
 	width: 700px !important;
-	height: calc(100vh - 88px);
-	overflow-y: auto;
-	overflow-x: hidden;
-	padding: 8px 6px 40px 6px;
+	overflow: visible !important;
+	padding: 8px 6px 56px 6px;
 	box-sizing: border-box;
 }
 
@@ -299,7 +303,7 @@ div.button div.cooldown {
 	padding: 0 6px;
 }
 
-/* Tooltips remain legible in both Day and Night */
+/* Tooltips remain legible in both Day and Night, and appear automatically on BCI focus! */
 div.tooltip {
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
@@ -307,7 +311,73 @@ div.tooltip {
 	border-radius: 12px;
 	padding: 6px 10px !important;
 	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16) !important;
-	z-index: 30;
+	z-index: 38;
+}
+
+.bci-focus > div.tooltip {
+	display: block !important;
+	border-color: var(--adr-focus) !important;
+}
+
+/* Drop menu items when backpack is full during loot */
+#dropMenu {
+	background: var(--adr-panel) !important;
+	border: 2px solid var(--adr-focus) !important;
+	border-radius: 12px;
+	padding: 6px !important;
+	z-index: 70 !important;
+	min-width: 180px;
+}
+
+#dropMenu > div {
+	position: relative;
+	padding: 8px 12px !important;
+	margin: 4px 0 !important;
+	border-radius: 10px;
+	border: 2px solid var(--adr-line);
+	background: var(--adr-panel2);
+	color: var(--adr-text);
+	font-size: 17px !important;
+	font-weight: 700;
+}
+
+/* Ending & Expansion outro containers */
+.outroContainer {
+	background: var(--adr-bg) !important;
+	color: var(--adr-text) !important;
+	padding: 40px 64px !important;
+	box-sizing: border-box;
+}
+
+.outroContainer .outro {
+	color: var(--adr-text) !important;
+	font-size: 24px !important;
+	line-height: 1.7 !important;
+}
+
+.centerCont {
+	padding-top: 80px !important;
+	color: var(--adr-text) !important;
+}
+
+.centerCont .endGame {
+	color: var(--adr-text) !important;
+	font-size: 26px !important;
+}
+
+.centerCont .endGameOption {
+	display: inline-block;
+	position: relative;
+	padding: 12px 28px !important;
+	margin-top: 14px;
+	border-radius: 14px;
+	border: 2px solid var(--adr-line);
+	background: var(--adr-panel);
+	color: var(--adr-text) !important;
+	font-size: 24px !important;
+	font-weight: 800;
+	cursor: pointer;
+	overflow: hidden;
 }
 
 /* Make worker & outfit +/- buttons larger and BCI-scannable */
@@ -413,6 +483,8 @@ div#buttons .button {
 #worldPanel {
 	background: var(--adr-bg) !important;
 	color: var(--adr-text) !important;
+	overflow-y: auto !important;
+	padding-bottom: 92px !important;
 }
 
 #map {

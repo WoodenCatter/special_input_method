@@ -50,47 +50,72 @@ var StateManager = {
 		$.Dispatch('stateUpdate').subscribe($SM.handleStateUpdates);
 	},
 
-	//create all parents and then set state
-	createState: function(stateName, value) {
-		var words = stateName.split(/[.\[\]'"]+/);
-		//for some reason there are sometimes empty strings
-		for (var j = 0; j < words.length; j++) {
-			if (words[j] === '') {
-				words.splice(j, 1);
-				j--;
+	// Parse dot/bracket state paths (e.g. 'stores["cured meat"]', 'outfit[cured meat]', 'game.fire.value')
+	// without dynamic code evaluation, so strict Content-Security-Policy never breaks state access.
+	parsePath: function(stateName) {
+		var keys = [];
+		var i = 0;
+		var len = stateName.length;
+		while (i < len) {
+			var ch = stateName.charAt(i);
+			if (ch === '.') {
+				i++;
+				continue;
+			}
+			if (ch === '[') {
+				i++;
+				var quote = stateName.charAt(i);
+				if (quote === '"' || quote === "'") {
+					i++;
+					var startQ = i;
+					while (i < len && stateName.charAt(i) !== quote) i++;
+					keys.push(stateName.substring(startQ, i));
+					if (i < len && stateName.charAt(i) === quote) i++;
+					if (i < len && stateName.charAt(i) === ']') i++;
+				} else {
+					var startB = i;
+					while (i < len && stateName.charAt(i) !== ']') i++;
+					keys.push(stateName.substring(startB, i));
+					if (i < len && stateName.charAt(i) === ']') i++;
+				}
+			} else {
+				var startD = i;
+				while (i < len && stateName.charAt(i) !== '.' && stateName.charAt(i) !== '[') i++;
+				keys.push(stateName.substring(startD, i));
 			}
 		}
+		return keys;
+	},
+
+	//create all parents and then set state
+	createState: function(stateName, value) {
+		var words = $SM.parsePath(stateName);
+		if (words.length === 0) return State;
 		var obj = State;
-		var w = null;
-		for(var i=0, len=words.length-1;i<len;i++){
-			w = words[i];
-			if(obj[w] === undefined ) obj[w] = {};
+		for (var i = 0, len = words.length - 1; i < len; i++) {
+			var w = words[i];
+			if (obj[w] === undefined || obj[w] === null || typeof obj[w] !== 'object') {
+				obj[w] = {};
+			}
 			obj = obj[w];
 		}
-		obj[words[i]] = value;
+		obj[words[words.length - 1]] = value;
 		return obj;
 	},
 
 	//set single state
 	//if noEvent is true, the update event won't trigger, useful for setting multiple states first
 	set: function(stateName, value, noEvent) {
-		var fullPath = $SM.buildPath(stateName);
-
 		//make sure the value isn't over the engine maximum
 		if(typeof value == 'number' && value > $SM.MAX_STORE) value = $SM.MAX_STORE;
 
-		try{
-			eval('('+fullPath+') = value');
-		} catch (e) {
-			//parent doesn't exist, so make parent
-			$SM.createState(stateName, value);
-		}
-
 		//stores values can not be negative
-		if(stateName.indexOf('stores') === 0 && $SM.get(stateName, true) < 0) {
-			eval('('+fullPath+') = 0');
+		if(stateName.indexOf('stores') === 0 && typeof value === 'number' && value < 0) {
+			value = 0;
 			Engine.log('WARNING: state:' + stateName + ' can not be a negative value. Set to 0 instead.');
 		}
+
+		$SM.createState(stateName, value);
 
 		if(!noEvent) {
 			Engine.saveGame();
@@ -158,18 +183,18 @@ var StateManager = {
 
 	//return state, undefined or 0
 	get: function(stateName, requestZero) {
-		var whichState = null;
-		var fullPath = $SM.buildPath(stateName);
-
-		//catch errors if parent of state doesn't exist
-		try{
-			eval('whichState = ('+fullPath+')');
-		} catch (e) {
-			whichState = undefined;
+		var keys = $SM.parsePath(stateName);
+		var whichState = State;
+		for (var i = 0; i < keys.length; i++) {
+			if (whichState === undefined || whichState === null) {
+				whichState = undefined;
+				break;
+			}
+			whichState = whichState[keys[i]];
 		}
 
 		//prevents repeated if undefined, null, false or {}, then x = 0 situations
-		if((!whichState || whichState == {}) && requestZero) return 0;
+		if((!whichState || (typeof whichState === 'object' && $.isEmptyObject(whichState))) && requestZero) return 0;
 		else return whichState;
 	},
 
@@ -177,16 +202,25 @@ var StateManager = {
 	//since set does not fail, we know state exists and can simply return the object
 	setget: function(stateName, value, noEvent){
 		$SM.set(stateName, value, noEvent);
-		return eval('('+$SM.buildPath(stateName)+')');
+		return $SM.get(stateName);
 	},
 
 	remove: function(stateName, noEvent) {
-		var whichState = $SM.buildPath(stateName);
-		try{
-			eval('(delete '+whichState+')');
-		} catch (e) {
-			//it didn't exist in the first place
-			Engine.log('WARNING: Tried to remove non-existant state \''+stateName+'\'.');
+		var keys = $SM.parsePath(stateName);
+		if (keys.length > 0) {
+			var obj = State;
+			for (var i = 0; i < keys.length - 1; i++) {
+				if (obj === undefined || obj === null) {
+					obj = null;
+					break;
+				}
+				obj = obj[keys[i]];
+			}
+			if (obj && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, keys[keys.length - 1])) {
+				delete obj[keys[keys.length - 1]];
+			} else {
+				Engine.log('WARNING: Tried to remove non-existant state \''+stateName+'\'.');
+			}
 		}
 		if(!noEvent){
 			Engine.saveGame();

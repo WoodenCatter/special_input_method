@@ -905,6 +905,21 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val keepAdrAlive = destination.value == AppDestination.A_DARK_ROOM ||
+            (destination.value == AppDestination.ENTERTAINMENT_MARKET && marketReturnDestination == AppDestination.A_DARK_ROOM)
+        if (keepAdrAlive) {
+            ADarkRoomScreen(
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
+                hidden = destination.value != AppDestination.A_DARK_ROOM,
+                onFeedback = { message -> if (!frozen) feedback.toast(message) },
+                onBoundary = { bciController?.invalidatePendingCommands() },
+                onBack = { confirmGameExit() }
+            )
+        }
+
         when (destination.value) {
             AppDestination.HOME -> HomeScreen(
                 selection = HomeSelectionState(cursor.index, cursor.direction),
@@ -1061,14 +1076,7 @@ class MainActivity : ComponentActivity() {
                 onStopSpeech = { speechOutput.stop() }
             )
 
-            AppDestination.A_DARK_ROOM -> ADarkRoomScreen(
-                scanIntervalMs = inputState.scanIntervalMs,
-                scanMode = scanMode.value,
-                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null || frozen,
-                onFeedback = { message -> if (!frozen) feedback.toast(message) },
-                onBoundary = { bciController?.invalidatePendingCommands() },
-                onBack = { confirmGameExit() }
-            )
+            AppDestination.A_DARK_ROOM -> Unit
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,

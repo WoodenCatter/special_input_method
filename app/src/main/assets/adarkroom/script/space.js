@@ -99,7 +99,17 @@ var Space = {
 		$('div#hullRemaining div.row_val', Space.panel).text(Space.hull + '/' + Ship.getMaxHull());
 	},
 	
+	_asteroids: [],
+	_asteroidTimer: null,
+
 	createAsteroid: function(noNext) {
+		if (Space.done) return;
+		if (window.__bciAdrPaused) {
+			if (!noNext) {
+				Engine.setTimeout(Space.createAsteroid, 400, true);
+			}
+			return;
+		}
 		var r = Math.random();
 		var c;
 		if(r < 0.2)
@@ -114,81 +124,85 @@ var Space = {
 			c = 'H';
 		
 		var x = Math.floor(Math.random() * 700);
-		var a = $('<div>').addClass('asteroid').text(c).appendTo('#spacePanel').css('left', x + 'px');
-		a.data({
+		var a = $('<div>').addClass('asteroid').text(c).appendTo('#spacePanel').css({ left: x + 'px', top: '0px' });
+		var duration = Space.BASE_ASTEROID_SPEED - Math.floor(Math.random() * (Space.BASE_ASTEROID_SPEED * 0.65));
+		var speedPxPerSec = 740 / Math.max(0.4, duration / 1000);
+		Space._asteroids.push({
+			el: a,
 			xMin: x,
-			xMax: x + a.width(),
-			height: a.height()
-		});
-		a.animate({
-			top: '740px'
-		}, {
-			duration: Space.BASE_ASTEROID_SPEED - Math.floor(Math.random() * (Space.BASE_ASTEROID_SPEED * 0.65)),
-			easing: 'linear', 
-			progress: function() {
-				// Collision detection
-				var t = $(this);
-				if(t.data('xMin') <= Space.shipX && t.data('xMax') >= Space.shipX) {
-					var aY = t.css('top');
-					aY = parseFloat(aY.substring(0, aY.length - 2));
-					
-					if(aY <= Space.shipY && aY + t.data('height') >= Space.shipY) {
-						// Collision
-						Engine.log('collision');
-						t.remove();
-						Space.hull--;
-						Space.updateHull();
-
-						// play audio on asteroid hit
-						// higher altitudes play higher frequency hits
-						var r = Math.floor(Math.random() * 2);
-						if(Space.altitude > 40) {
-							r += 6;
-							AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
-						} else if(Space.altitude > 20) {
-							r += 4;
-							AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
-						} else  {
-							r += 1;
-							AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
-						}
-
-						if(Space.hull === 0) {
-							Space.crash();
-						}
-					}
-				}
-			},
-			complete: function() {
-				$(this).remove();
-			}
+			xMax: x + Math.max(12, a.width()),
+			height: Math.max(14, a.height()),
+			y: 0,
+			speed: speedPxPerSec
 		});
 		if(!noNext) {
-			
-			// Harder
 			if(Space.altitude > 10) {
 				Space.createAsteroid(true);
 			}
-			
-			// HARDER
 			if(Space.altitude > 20) {
 				Space.createAsteroid(true);
 				Space.createAsteroid(true);
 			}
-			
-			// HAAAAAARDERRRRR!!!!1
 			if(Space.altitude > 40) {
 				Space.createAsteroid(true);
 				Space.createAsteroid(true);
 			}
-			
 			if(!Space.done) {
 				Engine.setTimeout(Space.createAsteroid, 1000 - (Space.altitude * 10), true);
 			}
 		}
 	},
+
+	stepAsteroids: function() {
+		if (Space.done || window.__bciAdrPaused) return;
+		var dt = 0.033;
+		for (var i = Space._asteroids.length - 1; i >= 0; i--) {
+			var ast = Space._asteroids[i];
+			ast.y += ast.speed * dt;
+			ast.el.css('top', ast.y + 'px');
+			if (ast.xMin <= Space.shipX && ast.xMax >= Space.shipX && ast.y <= Space.shipY && ast.y + ast.height >= Space.shipY) {
+				Engine.log('collision');
+				ast.el.remove();
+				Space._asteroids.splice(i, 1);
+				Space.hull--;
+				Space.updateHull();
+
+				var r = Math.floor(Math.random() * 2);
+				if(Space.altitude > 40) {
+					r += 6;
+					AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
+				} else if(Space.altitude > 20) {
+					r += 4;
+					AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
+				} else  {
+					r += 1;
+					AudioEngine.playSound(AudioLibrary['ASTEROID_HIT_' + r]);
+				}
+
+				if(Space.hull <= 0) {
+					Space.crash();
+					return;
+				}
+				continue;
+			}
+			if (ast.y >= 740) {
+				ast.el.remove();
+				Space._asteroids.splice(i, 1);
+			}
+		}
+	},
+
+	clearAsteroids: function() {
+		clearInterval(Space._asteroidTimer);
+		Space._asteroidTimer = null;
+		for (var i = 0; i < Space._asteroids.length; i++) {
+			Space._asteroids[i].el.remove();
+		}
+		Space._asteroids = [];
+	},
 	
 	moveShip: function() {
+		if (Space.done || window.__bciAdrPaused) return;
 		var x = Space.ship.css('left');
 		x = parseFloat(x.substring(0, x.length - 2));
 		var y = Space.ship.css('top');
@@ -243,47 +257,20 @@ var Space = {
 	},
 	
 	startAscent: function() {
-		var body_color;
-		var to_color;
-		if (Engine.isLightsOff()) {
-			body_color = '#272823';
-			to_color = '#EEEEEE';
-		}
-		else {
-			body_color = '#FFFFFF';
-			to_color = '#000000';
-		}
-
-		$('body').addClass('noMask').css({backgroundColor: body_color}).animate({
-			backgroundColor: to_color
-		}, {
-			duration: Space.FTB_SPEED, 
-			easing: 'linear',
-			progress: function() {
-				var cur = $('body').css('background-color');
-				var s = 'linear-gradient(rgba' + cur.substring(3, cur.length - 1) + ', 0) 0%, rgba' + 
-					cur.substring(3, cur.length - 1) + ', 1) 100%)';
-				$('#notifyGradient').attr('style', 'background-color:'+cur+';background:-webkit-' + s + ';background:' + s);
-			},
-			complete: Space.endGame
-		});
+		Space.clearAsteroids();
 		Space.drawStars();
+		Space._asteroidTimer = setInterval(Space.stepAsteroids, 33);
 		Space._timer = setInterval(function() {
+			if (window.__bciAdrPaused || Space.done) return;
 			Space.altitude += 1;
 			if(Space.altitude % 10 === 0) {
 				Space.setTitle();
 			}
-			if(Space.altitude > 60) {
+			if(Space.altitude >= 60) {
 				clearInterval(Space._timer);
+				Space.endGame();
 			}
 		}, 1000);
-		
-		Space._panelTimeout = Engine.setTimeout(function() {
-			if (Engine.isLightsOff())
-				$('#spacePanel, .menu, select.menuBtn').animate({color: '#272823'}, 500, 'linear');
-			else
-				$('#spacePanel, .menu, select.menuBtn').animate({color: 'white'}, 500, 'linear');
-		}, Space.FTB_SPEED / 2, true);
 		
 		Space.createAsteroid();
 	},
@@ -340,6 +327,7 @@ var Space = {
 		if(Space.done) return;
 		Engine.keyLock = true;
 		Space.done = true;
+		Space.clearAsteroids();
 		clearInterval(Space._timer);
 		clearInterval(Space._shipTimer);
 		clearInterval(Space._volumeTimer);
@@ -383,6 +371,7 @@ var Space = {
 		if(Space.done) return;
 		Engine.event('progress', 'win');
 		Space.done = true;
+		Space.clearAsteroids();
 		clearInterval(Space._timer);
 		clearInterval(Space._shipTimer);
 		clearInterval(Space._volumeTimer);
@@ -466,7 +455,7 @@ var Space = {
 			setTimeout(() => {
 				$('<div>')
 					.addClass('outro')
-					.html('the beacon pulses gently as the ship glides through space.<br>coordinates are locked. nothing to do but wait.')
+					.html(_('the beacon pulses gently as the ship glides through space.<br>coordinates are locked. nothing to do but wait.'))
 					.appendTo(c)
 					.animate({ opacity: 1}, 500);
 			}, 2000);
@@ -474,7 +463,7 @@ var Space = {
 			setTimeout(() => {
 				$('<div>')
 					.addClass('outro')
-					.html('the beacon glows a solid blue, and then goes dim. the ship slows.<br>gradually, the vast wanderer homefleet comes into view.<br>massive worldships drift unnaturally through clouds of debris, scarred and dead.')
+					.html(_('the beacon glows a solid blue, and then goes dim. the ship slows.<br>gradually, the vast wanderer homefleet comes into view.<br>massive worldships drift unnaturally through clouds of debris, scarred and dead.'))
 					.appendTo(c)
 					.animate({ opacity: 1}, 500);
 			}, 7000);
@@ -482,7 +471,7 @@ var Space = {
 			setTimeout(() => {
 				$('<div>')
 					.addClass('outro')
-					.text('the air is running out.')
+					.text(_('the air is running out.'))
 					.appendTo(c)
 					.animate({ opacity: 1}, 500);
 			}, 14000);
@@ -490,7 +479,7 @@ var Space = {
 			setTimeout(() => {
 				$('<div>')
 					.addClass('outro')
-					.text('the capsule is cold.')
+					.text(_('the capsule is cold.'))
 					.appendTo(c)
 					.animate({ opacity: 1}, 500);
 			}, 17000);
@@ -532,38 +521,12 @@ var Space = {
 		$('<br />')
 			.appendTo('.centerCont');
 		$('<span>')
+			.attr('id', 'adrRestartOption')
 			.addClass('endGame endGameOption')
 			.text(_('restart.'))
 			.click(Engine.confirmDelete)
 			.appendTo('.centerCont')
 			.animate({opacity:1},1500);
-		$('<br />')
-			.appendTo('.centerCont');
-		$('<br />')
-				.appendTo('.centerCont');
-		$('<span>')
-				.addClass('endGame')
-				.text(_('expanded story. alternate ending. behind the scenes commentary. get the app.'))
-				.appendTo('.centerCont')
-				.animate({opacity:1}, 1500);
-		$('<br />')
-				.appendTo('.centerCont');
-		$('<br />')
-				.appendTo('.centerCont');
-		$('<span>')
-			.addClass('endGame endGameOption')
-			.text(_('iOS.'))
-			.click(function() { window.open('https://itunes.apple.com/app/apple-store/id736683061?pt=2073437&ct=gameover&mt=8'); })
-			.appendTo('.centerCont')
-			.animate({opacity:1},1500);
-		$('<br />')
-				.appendTo('.centerCont');
-		$('<span>')
-				.addClass('endGame endGameOption')
-				.text(_('android.'))
-				.click(function() { window.open('https://play.google.com/store/apps/details?id=com.yourcompany.adarkroom'); })
-				.appendTo('.centerCont')
-				.animate({opacity:1},1500);
 	},
 	
 	keyDown: function(event) {
@@ -621,7 +584,7 @@ var Space = {
 	},
 	
 	lowerVolume: function () {
-		if (Space.done) return;
+		if (Space.done || window.__bciAdrPaused) return;
 		
 		// lower audio as ship gets further into space
 		var progress = Space.altitude / 60;

@@ -48,9 +48,29 @@ class ADarkRoomTest {
             "zh_cn strings should translate A Dark Room to 小黑屋",
             strings.contains("\"A Dark Room\": \"\\u5c0f\\u9ed1\\u5c4b\"") || strings.contains("小黑屋")
         )
+        assertTrue("zh_cn strings should translate Sound Available!", strings.contains("\"Sound Available!\""))
+        assertTrue("zh_cn strings should translate wait button", strings.contains("\"wait\""))
         val licenseInAssets = File(dir, "LICENSE.md")
         assertTrue("MPL-2.0 LICENSE.md must be packaged in assets/adarkroom/", licenseInAssets.isFile)
         assertTrue(licenseInAssets.readText(Charsets.UTF_8).contains("Mozilla Public License"))
+
+        // Regression checks for strict CSP, cross-game storage safety, and BCI adapter invariants
+        val stateManager = File(dir, "script/state_manager.js").readText(Charsets.UTF_8)
+        assertFalse("state_manager.js must not use eval() under strict WebView CSP", stateManager.contains("eval("))
+
+        val engineJs = File(dir, "script/engine.js").readText(Charsets.UTF_8)
+        assertFalse("engine.js must not call localStorage.clear() across shared game origin", engineJs.contains("localStorage.clear()"))
+
+        val spaceJs = File(dir, "script/space.js").readText(Charsets.UTF_8)
+        assertTrue("space.js must respect host pause flag", spaceJs.contains("__bciAdrPaused"))
+        assertFalse("space.js must not link to external app stores", spaceJs.contains("itunes.apple.com") || spaceJs.contains("play.google.com"))
+
+        val adapterJs = File(dir, "script/bci_adapter.js").readText(Charsets.UTF_8)
+        assertTrue("bci_adapter.js must use bounds-safe World.moveNorth", adapterJs.contains("World.moveNorth()"))
+        assertFalse("bci_adapter.js must not call World.useSupplies for item healing", adapterJs.contains("World.useSupplies"))
+        assertTrue("bci_adapter.js must guard adapter DOM mutations against observer self-trigger", adapterJs.contains("takeRecords()"))
+        assertTrue("bci_adapter.js must support expansion outro and ending options", adapterJs.contains("#wait-btn") && adapterJs.contains(".endGameOption"))
+        assertTrue("bci_adapter.js must support #dropMenu loot discard scanning", adapterJs.contains("#dropMenu"))
 
         // Verify BCI adapter & theme files exist
         assertTrue(File(dir, "script/bci_adapter.js").isFile)
