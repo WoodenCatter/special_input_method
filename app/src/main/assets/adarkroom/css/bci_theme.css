@@ -249,7 +249,7 @@ div.button {
 	font-size: 17px !important;
 	font-weight: 700 !important;
 	width: 136px !important;
-	padding: 10px 10px !important;
+	padding: 9px 11px 14px 11px !important;
 	margin-bottom: 10px !important;
 	box-sizing: border-box;
 	text-decoration: none !important;
@@ -266,7 +266,7 @@ div.button {
 div#buildBtns,
 div#craftBtns,
 div#buyBtns {
-	top: 76px !important;
+	top: 102px !important;
 }
 
 div#buildBtns:before,
@@ -368,7 +368,7 @@ div.button div.cooldown {
 	padding: 0 6px;
 }
 
-/* Tooltips remain legible in both Day and Night, and appear automatically on BCI focus! */
+/* Tooltips on non-button rows (stores, workers, perks, map landmarks) stay legible in Day & Night */
 div.tooltip {
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
@@ -379,9 +379,63 @@ div.tooltip {
 	z-index: 38;
 }
 
-.bci-focus > div.tooltip {
-	display: block !important;
-	border-color: var(--adr-focus) !important;
+/*
+ * Button cost tooltips: render inline inside each button as a clean secondary cost row
+ * instead of floating over adjacent buttons / hiding the BCI dwell bar.
+ */
+div.button > div.tooltip,
+div.button:hover > div.tooltip,
+div.button.disabled > div.tooltip,
+div.button.disabled:hover > div.tooltip,
+div.button.bci-focus > div.tooltip {
+	display: grid !important;
+	grid-template-columns: 1fr auto;
+	column-gap: 6px;
+	row-gap: 2px;
+	position: static !important;
+	top: auto !important;
+	left: auto !important;
+	right: auto !important;
+	bottom: auto !important;
+	width: auto !important;
+	min-width: 0 !important;
+	margin: 6px 0 0 0 !important;
+	padding: 5px 0 0 0 !important;
+	border: none !important;
+	border-top: 1px solid var(--adr-line) !important;
+	border-radius: 0 !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--adr-muted) !important;
+	font-size: 13px !important;
+	font-weight: 500 !important;
+	line-height: 1.35 !important;
+	text-align: left !important;
+	z-index: auto !important;
+}
+
+div.button.bci-focus > div.tooltip {
+	border-top-color: var(--adr-focus-ring) !important;
+}
+
+div.button > div.tooltip:empty,
+div.button.free > div.tooltip,
+div.button.free:hover > div.tooltip {
+	display: none !important;
+}
+
+div.button > div.tooltip .row_key,
+div.button > div.tooltip .row_val {
+	float: none !important;
+	clear: none !important;
+}
+
+div.button > div.tooltip .row_val {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	font-weight: 700;
+	color: var(--adr-text);
+	opacity: 0.82;
 }
 
 /* Drop menu items when backpack is full during loot */
