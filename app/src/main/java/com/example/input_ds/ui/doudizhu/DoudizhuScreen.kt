@@ -41,8 +41,15 @@ fun DoudizhuScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean, on
     val currentOnBack by rememberUpdatedState(onBack)
 
     var confirmLabel by remember { mutableStateOf("") }
-    ReportActionHints(if (confirmLabel.isEmpty()) ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
-        else confirmHints(confirmLabel, scanMode))
+    var scanLabel by remember { mutableStateOf("") }
+    var scanDirection by remember { mutableStateOf(0) }
+    ReportActionHints(
+        when {
+            confirmLabel.isNotEmpty() -> confirmHints(confirmLabel, scanMode)
+            scanLabel.isNotEmpty() -> ActionHints.list(scanLabel, ScanMode.AUTO, scanDirection)
+            else -> ActionHints("", "等待对方…", "")
+        }
+    )
 
     androidx.activity.compose.BackHandler(enabled = confirmLabel.isNotEmpty() && !paused) {
         activeWebView?.evaluateJavascript("window.inputDsDoudizhu?.cancelConfirmation()", null)
@@ -73,10 +80,18 @@ fun DoudizhuScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean, on
                     activeSignalSink = signalSink
                     DoudizhuInputBus.attach(signalSink)
                     addJavascriptInterface(
-                        DoudizhuHostBridge(this, { label ->
-                            if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
-                            confirmLabel = label
-                        }, onFeedback) { currentOnBack() },
+                        DoudizhuHostBridge(
+                            webView = this,
+                            onLabel = { label ->
+                                if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
+                                confirmLabel = label
+                            },
+                            onScanState = { label, direction ->
+                                scanLabel = label
+                                scanDirection = direction
+                            },
+                            onFeedback = onFeedback
+                        ) { currentOnBack() },
                         "InputDsDoudizhuHost"
                     )
                     setBackgroundColor(Color.rgb(18, 63, 39))
@@ -202,11 +217,15 @@ private class DoudizhuWebSignalSink(
 private class DoudizhuHostBridge(
     private val webView: WebView,
     private val onLabel: (String) -> Unit,
+    private val onScanState: (String, Int) -> Unit,
     private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
     @JavascriptInterface
     fun confirmationLabel(label: String) { webView.post { onLabel(label) } }
+
+    @JavascriptInterface
+    fun scanState(label: String, direction: Int) { webView.post { onScanState(label, direction) } }
 
     @JavascriptInterface
     fun notifyFeedback(message: String) { webView.post { onFeedback(message) } }

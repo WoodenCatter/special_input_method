@@ -550,9 +550,6 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                     }
                     ControlSignal.BITE -> {
                         val chosen = listCursor.selected(now, effectiveGrace, s.scanMode)
-                        if (chosen != listCursor.index && !frozen) {
-                            onToastCallback?.invoke("已按上一项执行（延迟补偿）", false)
-                        }
                         activateRow(chosen)
                     }
                     else -> CommunicationSignalOutcome.HANDLED
@@ -573,9 +570,6 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                     }
                     ControlSignal.BITE -> {
                         val chosen = actionCursor.selected(now, effectiveGrace, s.scanMode)
-                        if (chosen != actionCursor.index && !frozen) {
-                            onToastCallback?.invoke("已按上一项执行（延迟补偿）", false)
-                        }
                         chooseAction(chosen)
                         CommunicationSignalOutcome.HANDLED
                     }
@@ -597,9 +591,6 @@ class CommunicationViewModel(application: Application) : AndroidViewModel(applic
                     }
                     ControlSignal.BITE -> {
                         val chosen = pairingCursor.selected(now, effectiveGrace, s.scanMode)
-                        if (chosen != pairingCursor.index && !frozen) {
-                            onToastCallback?.invoke("已按上一项执行（延迟补偿）", false)
-                        }
                         choosePairing(chosen)
                         CommunicationSignalOutcome.HANDLED
                     }

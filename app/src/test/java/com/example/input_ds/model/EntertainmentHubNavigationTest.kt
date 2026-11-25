@@ -11,12 +11,14 @@ class EntertainmentHubNavigationTest {
                 EntertainmentHubModule.BACK,
                 EntertainmentHubModule.MAZE,
                 EntertainmentHubModule.SNAKE_CLIMB,
+                EntertainmentHubModule.WATERMELON,
                 EntertainmentHubModule.WIZARD_GAME,
                 EntertainmentHubModule.CHINESE_CHESS,
                 EntertainmentHubModule.DOUDIZHU,
                 EntertainmentHubModule.MAHJONG,
                 EntertainmentHubModule.TELEVISION,
-                EntertainmentHubModule.MUSIC
+                EntertainmentHubModule.MUSIC,
+                EntertainmentHubModule.NEWS_BRIEFING
             ),
             EntertainmentHubModule.entries
         )
@@ -48,12 +50,20 @@ class EntertainmentHubNavigationTest {
             EntertainmentHubModule.initialIndexForEntry(AppDestination.SNAKE_CLIMB)
         )
         assertEquals(
+            EntertainmentHubModule.WATERMELON.ordinal,
+            EntertainmentHubModule.initialIndexForEntry(AppDestination.WATERMELON)
+        )
+        assertEquals(
             EntertainmentHubModule.TELEVISION.ordinal,
             EntertainmentHubModule.initialIndexForEntry(AppDestination.TV)
         )
         assertEquals(
             EntertainmentHubModule.MUSIC.ordinal,
             EntertainmentHubModule.initialIndexForEntry(AppDestination.MUSIC)
+        )
+        assertEquals(
+            EntertainmentHubModule.NEWS_BRIEFING.ordinal,
+            EntertainmentHubModule.initialIndexForEntry(AppDestination.NEWS_BRIEFING)
         )
     }
 }

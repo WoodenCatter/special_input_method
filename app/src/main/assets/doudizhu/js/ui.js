@@ -88,7 +88,7 @@ function bciRestartTimer() {
       if (BciScan.cursor.confirmationExpired) {
         const label = BciScan.cursor.candidates[0].label;
         bciCancelConfirmation();
-        window.InputDsDoudizhuHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+        window.InputDsDoudizhuHost?.notifyFeedback(`已自动${label}`);
         return;
       }
       try { bciRender(); } finally { bciRestartTimer(); }
@@ -195,14 +195,18 @@ function bciPreview(move) {
 }
 
 function bciRender() {
-    window.InputDsDoudizhuHost?.confirmationLabel(BciScan.cursor.confirming ? BciScan.cursor.current()?.label || '' : '');
+  const cursor = BciScan.cursor;
+  const current = cursor.current();
+  window.InputDsDoudizhuHost?.confirmationLabel?.(cursor.confirming ? current?.label || '' : '');
+  window.InputDsDoudizhuHost?.scanState?.(
+    cursor.confirming || cursor.phase === 'waiting' ? '' : (current?.label || ''),
+    cursor.confirming || cursor.phase === 'waiting' ? 0 : (cursor.direction < 0 ? -1 : 1)
+  );
   const phaseEl = $('#bci-phase');
   const directionEl = $('#bci-direction');
   const wrap = $('#bci-candidates');
   if (!phaseEl || !directionEl || !wrap) return;
   bciClearVisualFocus();
-  const cursor = BciScan.cursor;
-  const current = cursor.current();
   phaseEl.textContent = bciPhaseTitle(cursor.phase);
   directionEl.textContent = cursor.orientation === 'vertical'
     ? (cursor.direction > 0 ? '向下轮转' : '向上轮转')
@@ -210,19 +214,19 @@ function bciRender() {
 
   if (cursor.phase === 'waiting') {
     wrap.className = 'bci-candidates';
-    wrap.innerHTML = '<span class="status">轮到玩家后自动开始扫描</span>';
+    wrap.innerHTML = '';
     return;
   }
 
   if (cursor.phase === 'settle') {
-    wrap.innerHTML = '<span class="status">结算选项正在轮转</span>';
+    wrap.innerHTML = '';
     const ids = { again: '#btn-again', exit: '#btn-settle-exit' };
     if (current) $(ids[current.kind])?.classList.add('bci-focus');
     return;
   }
 
   if (cursor.phase === 'settings') {
-    wrap.innerHTML = '<span class="status">设置选项正在纵向轮转</span>';
+    wrap.innerHTML = '';
     const ids = {
       return_selection: '#btn-return-selection', sound: '#btn-sound-toggle',
       confirmation: '#btn-confirm-toggle', restart: '#btn-restart-game', exit: '#btn-app-exit',
@@ -232,7 +236,7 @@ function bciRender() {
   }
 
   if (cursor.phase === 'confirm') {
-    wrap.innerHTML = '<span class="status">请在确认窗口中选择</span>';
+    wrap.innerHTML = '';
     if (current) $(current.kind === 'confirm' ? '#btn-bci-confirm' : '#btn-bci-cancel')?.classList.add('bci-focus');
     return;
   }
@@ -565,7 +569,6 @@ function handleDoudizhuBciAction(action) {
   }
   if (action === "bite") {
     const item = BciScan.cursor.chosen();
-    if (item !== BciScan.cursor.current()) window.InputDsDoudizhuHost?.notifyFeedback("已按上一项执行（延迟补偿）");
     bciActivate(item);
   }
 }

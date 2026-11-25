@@ -1,5 +1,7 @@
 package com.example.input_ds.wizard
 
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.Box
@@ -52,7 +54,44 @@ class WizardGameActivity : GodotActivity() {
         super.getCommandLine().toMutableList().apply {
             add("--main-pack")
             add("res://wizard_game.pck")
+            if (shouldUseCompatibilityRenderer()) {
+                add("--rendering-method")
+                add("gl_compatibility")
+                add("--rendering-driver")
+                add("opengl3")
+            }
         }
+
+    private fun shouldUseCompatibilityRenderer(): Boolean {
+        val hasVulkan11 = packageManager.hasSystemFeature(
+            PackageManager.FEATURE_VULKAN_HARDWARE_VERSION,
+            VULKAN_1_1_VERSION
+        )
+        return !hasVulkan11 || isEmulator()
+    }
+
+    private companion object {
+        const val VULKAN_1_1_VERSION = 0x401000
+
+        fun isEmulator(): Boolean {
+            val fingerprint = Build.FINGERPRINT.lowercase()
+            val model = Build.MODEL.lowercase()
+            val product = Build.PRODUCT.lowercase()
+            val hardware = Build.HARDWARE.lowercase()
+            val brand = Build.BRAND.lowercase()
+            val device = Build.DEVICE.lowercase()
+            return fingerprint.startsWith("generic") ||
+                fingerprint.contains("emulator") ||
+                model.contains("emulator") ||
+                model.contains("sdk_gphone") ||
+                model.contains("android sdk built for") ||
+                product.contains("sdk") ||
+                product.contains("emulator") ||
+                hardware.contains("goldfish") ||
+                hardware.contains("ranchu") ||
+                (brand.startsWith("generic") && device.startsWith("generic"))
+        }
+    }
 
     override fun getHostPlugins(godot: Godot): MutableSet<GodotPlugin> =
         super.getHostPlugins(godot).toMutableSet().apply {

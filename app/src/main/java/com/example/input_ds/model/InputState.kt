@@ -15,7 +15,7 @@ sealed interface InputMode {
     data object Talk : InputMode {
         override val draftKey: String = "talk"
         override val pillLabel: String? = null
-        override val placeholder: String = "想说什么？看向左右挑字母块，或咬牙打开常用语"
+        override val placeholder: String = "输入要说的话…"
         override val sendLabel: String = "说出"
         override val usesAssistantPhrases: Boolean = false
     }
@@ -23,7 +23,7 @@ sealed interface InputMode {
     data class Chat(val contactId: String, val contactName: String) : InputMode {
         override val draftKey: String = "chat:$contactId"
         override val pillLabel: String = "发给 $contactName"
-        override val placeholder: String = "写给${contactName}的话…（咬牙打开常用语）"
+        override val placeholder: String = "发给${contactName}…"
         override val sendLabel: String = "发送"
         override val usesAssistantPhrases: Boolean = false
     }
@@ -31,7 +31,7 @@ sealed interface InputMode {
     data object Assistant : InputMode {
         override val draftKey: String = "assistant"
         override val pillLabel: String = "问助手"
-        override val placeholder: String = "想问什么，或想让助手做什么？"
+        override val placeholder: String = "输入问题或指令…"
         override val sendLabel: String = "发送"
         override val usesAssistantPhrases: Boolean = true
     }

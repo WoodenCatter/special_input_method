@@ -106,7 +106,7 @@ class AppSettingsScreenTest {
         composeRule.onNodeWithText("12 题").assertIsDisplayed()
         assertEquals(2, composeRule.onAllNodesWithText("音量").fetchSemanticsNodes().size)
         assertEquals(2, composeRule.onAllNodesWithText("60%").fetchSemanticsNodes().size)
-        composeRule.onNodeWithText("整个应用的声音大小，包括朗读、通话和提示音。").assertIsDisplayed()
+        composeRule.onNodeWithText("朗读、通话与提示音音量").assertIsDisplayed()
 
         // Bite opens AdjustOverlay for 音量 focused on 增大 (index 1), step to 70%.
         bci("signal B")
@@ -195,7 +195,7 @@ class AppSettingsScreenTest {
         composeRule.waitForIdle()
         assertEquals(0, composeRule.onAllNodesWithText("接听").fetchSemanticsNodes().size)
         // Still focused on 音量 (row 1), not advanced during incoming video.
-        composeRule.onNodeWithText("整个应用的声音大小，包括朗读、通话和提示音。").assertIsDisplayed()
+        composeRule.onNodeWithText("朗读、通话与提示音音量").assertIsDisplayed()
 
         // 2. Open AdjustOverlay, launch incoming video, wait > dwell, press Back once -> rejects call only.
         bci("signal B")
@@ -227,7 +227,7 @@ class AppSettingsScreenTest {
         composeRule.waitUntil(3_000L) {
             composeRule.onAllNodesWithText("减小").fetchSemanticsNodes().isEmpty()
         }
-        composeRule.onNodeWithText("整个应用的声音大小，包括朗读、通话和提示音。").assertIsDisplayed()
+        composeRule.onNodeWithText("朗读、通话与提示音音量").assertIsDisplayed()
     }
 
     @Test
@@ -354,7 +354,7 @@ class AppSettingsScreenTest {
             composeRule.waitForIdle()
 
             // Returned to Settings focused on 速度练习 with 每项停留 updated to 1.1 秒.
-            composeRule.onNodeWithText("做 12 次目标选择，系统推荐合适的停留时间，由你决定是否采用。").assertIsDisplayed()
+            composeRule.onNodeWithText("12 次目标选择，测算推荐停留时长").assertIsDisplayed()
             composeRule.onNodeWithText("1.1 秒").assertIsDisplayed()
             assertEquals(1_100L, ScanSettings.read(target))
         } finally {
@@ -396,6 +396,6 @@ class AppSettingsScreenTest {
         assertEquals(0, composeRule.onAllNodesWithText("减小").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithText("增大").fetchSemanticsNodes().size)
         assertEquals(0, composeRule.onAllNodesWithText("完成").fetchSemanticsNodes().size)
-        composeRule.onNodeWithText("整个应用的声音大小，包括朗读、通话和提示音。").assertIsDisplayed()
+        composeRule.onNodeWithText("朗读、通话与提示音音量").assertIsDisplayed()
     }
 }

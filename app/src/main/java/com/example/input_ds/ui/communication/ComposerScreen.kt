@@ -430,55 +430,20 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                 val block = blocks.getOrNull(state.highlightedBlockIndex) ?: 2
                 val isFn = LetterBlockMapping.isFunctionBlock(block)
                 val talkMode = state.mode is InputMode.Talk
-                val who = (state.mode as? InputMode.Chat)?.contactName.orEmpty()
-                val tag = if (state.scanSide == ScanSide.LEFT) "← 正在扫描左侧" else "正在扫描右侧 →"
                 val big = if (isFn) LetterBlockMapping.labelFor(block, talkMode)
                 else LetterBlockMapping.labelFor(block).toCharArray().joinToString(" ")
-                val hint = if (isFn) {
-                    when (block) {
-                        LetterBlockMapping.DELETE_BLOCK -> if (state.selectedBlocks.isNotEmpty()) "删掉最后一个字母块" else "删掉最后一个字"
-                        LetterBlockMapping.SEND_BLOCK -> when (state.mode) {
-                            is InputMode.Talk -> "朗读这句话，并放大给身边的人看"
-                            is InputMode.Assistant -> "把这句话发给生活助手"
-                            is InputMode.Chat -> "把这句话发给$who"
-                        }
-                        LetterBlockMapping.BACK_BLOCK -> when (state.mode) {
-                            is InputMode.Talk -> "回到联系人，没说完的话会保留"
-                            is InputMode.Assistant -> "回到生活助手，文字留在草稿里"
-                            is InputMode.Chat -> "回到$who，没写完的会保留"
-                        }
-                        else -> "打开常用语，挑一句直接写入"
-                    }
-                } else {
-                    if (state.scanSide == ScanSide.LEFT) "左看选它 · 右看切到右侧" else "右看选它 · 左看切到左侧"
-                }
 
-                MagTag(tag)
-                Column(
+                Text(
+                    text = big,
                     modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = big,
-                        color = c.focus,
-                        fontFamily = if (isFn) BciType.chinese else BciType.latin,
-                        fontWeight = FontWeight(if (isFn) 900 else 800),
-                        fontSize = if (isFn) 76.sp else 92.sp,
-                        letterSpacing = if (isFn) 0.06.em else 0.18.em,
-                        maxLines = 1,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = hint,
-                        color = c.muted,
-                        fontFamily = BciType.chinese,
-                        fontSize = 20.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                }
+                    color = c.focus,
+                    fontFamily = if (isFn) BciType.chinese else BciType.latin,
+                    fontWeight = FontWeight(if (isFn) 900 else 800),
+                    fontSize = if (isFn) 76.sp else 92.sp,
+                    letterSpacing = if (isFn) 0.06.em else 0.18.em,
+                    maxLines = 1,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
             }
 
             InputPhase.LEVEL_2_LETTER_SELECT -> if (!state.isCharFocused) {
@@ -492,12 +457,7 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                     else -> pinyin.orEmpty()
                 }
                 val isLatin = !isBack && !isInitial
-                val hint = when {
-                    isBack -> "回到字母块，已选的保留"
-                    isInitial -> "按已选字母块首字母匹配整句"
-                    else -> state.charCandidates.take(10).joinToString("  ")
-                }
-                MagTag("选拼音")
+                val previewChars = if (isLatin) state.charCandidates.take(10).joinToString("  ") else ""
                 Column(
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -512,10 +472,10 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                         maxLines = 1,
                         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                     )
-                    if (hint.isNotEmpty()) {
+                    if (previewChars.isNotEmpty()) {
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            text = hint,
+                            text = previewChars,
                             color = c.muted,
                             fontFamily = BciType.chinese,
                             fontSize = 20.sp,
@@ -529,7 +489,7 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                 val items = SelectionPaging.characterItems(state.charCandidates, state.charPage)
                 val item = items.getOrNull(state.highlightedCharIndex)
                 val isChar = item?.action == SelectionItemAction.SELECT
-                MagTag("${state.currentPinyin} · 选字")
+                if (state.currentPinyin.isNotEmpty()) MagTag(state.currentPinyin)
                 Text(
                     text = item?.label.orEmpty(),
                     modifier = Modifier.align(Alignment.Center),
@@ -546,7 +506,7 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                 val items = SelectionPaging.characterItems(state.charCandidates, state.charPage)
                 val item = items.getOrNull(state.highlightedCharIndex)
                 val isChar = item?.action == SelectionItemAction.SELECT
-                MagTag("${state.currentPinyin} · 选字")
+                if (state.currentPinyin.isNotEmpty()) MagTag(state.currentPinyin)
                 Text(
                     text = item?.label.orEmpty(),
                     modifier = Modifier.align(Alignment.Center),
@@ -571,12 +531,9 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                         SelectionPaging.predictionItems(state.predictionCandidates, state.mode.sendLabel)
                             .getOrNull(state.highlightedPredictionIndex)
                 }
-                val tag = when {
-                    state.phase == InputPhase.INITIAL_PREDICTION -> "首字母整句 · ${state.initialBlocksKey}"
-                    state.isCommonPhraseSelection -> "常用语"
-                    else -> "加上它，这句话会变成"
+                if (state.phase == InputPhase.INITIAL_PREDICTION && state.initialBlocksKey.isNotEmpty()) {
+                    MagTag(state.initialBlocksKey)
                 }
-                MagTag(tag)
                 if (item?.action == SelectionItemAction.SELECT) {
                     val tailPrefix = if (state.outputText.length > 10) "…" + state.outputText.takeLast(10) else state.outputText
                     Text(
@@ -599,40 +556,16 @@ private fun MagnifierBox(state: InputState, modifier: Modifier) {
                         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                     )
                 } else {
-                    val sendHint = when (state.mode) {
-                        is InputMode.Talk -> "朗读这句话并放大显示"
-                        is InputMode.Assistant -> "发给生活助手"
-                        is InputMode.Chat -> "发给${state.mode.contactName}"
-                    }
-                    val hint = when (item?.action) {
-                        SelectionItemAction.CONTINUE_INPUT -> "预测里没有，就回到字母块继续"
-                        SelectionItemAction.SEND -> sendHint
-                        SelectionItemAction.BACK -> "回到字母块继续打字"
-                        else -> "换一批"
-                    }
-                    Column(
+                    Text(
+                        text = item?.label.orEmpty(),
                         modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = item?.label.orEmpty(),
-                            color = c.focus,
-                            fontFamily = BciType.chinese,
-                            fontWeight = FontWeight(900),
-                            fontSize = 76.sp,
-                            maxLines = 1,
-                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = hint,
-                            color = c.muted,
-                            fontFamily = BciType.chinese,
-                            fontSize = 20.sp,
-                            maxLines = 1,
-                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                        )
-                    }
+                        color = c.focus,
+                        fontFamily = BciType.chinese,
+                        fontWeight = FontWeight(900),
+                        fontSize = 76.sp,
+                        maxLines = 1,
+                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    )
                 }
             }
         }
@@ -684,7 +617,7 @@ private fun CandidatesBox(
             InputPhase.LEVEL_1_SCANNING -> {
                 if (state.selectedBlocks.isNotEmpty()) {
                     CapRow(
-                        left = "可能的拼音和字 · 咬牙去挑选",
+                        left = "候选",
                         right = state.selectedBlocks.joinToString(" + ") { LetterBlockMapping.labelFor(it) }
                     )
                     if (state.pinyinCandidates.isNotEmpty()) {
@@ -702,15 +635,6 @@ private fun CandidatesBox(
                                 )
                             }
                         }
-                    } else {
-                        Text(
-                            text = "还不是完整拼音，可以继续选字母块",
-                            color = c.dim,
-                            fontFamily = BciType.chinese,
-                            fontWeight = FontWeight(500),
-                            fontSize = 26.sp,
-                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                        )
                     }
                     if (state.charCandidates.isNotEmpty()) {
                         PreviewCharsWrap(
@@ -718,19 +642,16 @@ private fun CandidatesBox(
                             onCharacterClick = onCharacterClick,
                             modifier = Modifier.weight(1f).fillMaxWidth()
                         )
-                    } else {
+                    } else if (state.pinyinCandidates.isEmpty()) {
                         Text(
-                            text = "没有对应的字，可用「删除」去掉最后一块",
+                            text = "无匹配汉字",
                             color = c.dim,
                             fontFamily = BciType.chinese,
                             fontSize = 24.sp
                         )
                     }
                 } else {
-                    CapRow(
-                        left = "常用语 · 咬牙打开",
-                        right = if (state.mode.usesAssistantPhrases) "助手常用指令" else "紧急语固定在最前"
-                    )
+                    CapRow(left = "常用语", right = "")
                     val topSix = phrases.take(6)
                     Column(
                         modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -760,7 +681,6 @@ private fun CandidatesBox(
             }
 
             InputPhase.LEVEL_2_LETTER_SELECT -> if (!state.isCharFocused) {
-                CapRow(left = "左右看改方向 · 咬牙确定拼音", right = "")
                 val items = buildList {
                     add(SelectionItem("返回", SelectionItemAction.BACK))
                     state.pinyinCombinations.forEachIndexed { i, py ->
@@ -803,7 +723,7 @@ private fun CandidatesBox(
                 )
             } else {
                 val items = SelectionPaging.characterItems(state.charCandidates, state.charPage)
-                CapRow(left = "咬牙写入高亮的字", right = "第 ${state.charPage + 1} 页")
+                CapRow(left = "选字", right = "第 ${state.charPage + 1} 页")
                 CandidateGrid(
                     items = items,
                     columns = 6,
@@ -820,7 +740,7 @@ private fun CandidatesBox(
 
             InputPhase.LEVEL_3_CHAR_SELECT -> {
                 val items = SelectionPaging.characterItems(state.charCandidates, state.charPage)
-                CapRow(left = "咬牙写入高亮的字", right = "第 ${state.charPage + 1} 页")
+                CapRow(left = "选字", right = "第 ${state.charPage + 1} 页")
                 CandidateGrid(
                     items = items,
                     columns = 6,
@@ -839,7 +759,7 @@ private fun CandidatesBox(
                 if (state.isCommonPhraseSelection) {
                     val urgentSet = if (state.mode.usesAssistantPhrases) emptySet() else CharacterDictionary.URGENT_PHRASE_SET
                     val items = SelectionPaging.commonPhraseItems(state.predictionCandidates, state.predictionPage, urgentSet)
-                    CapRow(left = "咬牙写入这句话", right = "第 ${state.predictionPage + 1} 页")
+                    CapRow(left = "常用语", right = "第 ${state.predictionPage + 1} 页")
                     CandidateGrid(
                         items = items,
                         columns = 4,
@@ -855,7 +775,7 @@ private fun CandidatesBox(
                 } else {
                     val items = SelectionPaging.predictionItems(state.predictionCandidates, state.mode.sendLabel)
                     val rows = if (items.size > 8) 3 else 2
-                    CapRow(left = "咬牙把词接到句子后面", right = "")
+                    CapRow(left = "联想词", right = "")
                     CandidateGrid(
                         items = items,
                         columns = 4,
@@ -873,7 +793,7 @@ private fun CandidatesBox(
 
             InputPhase.INITIAL_PREDICTION -> {
                 val items = SelectionPaging.initialSentenceItems(state.initialCandidates, state.initialPage)
-                CapRow(left = "咬牙写入整句", right = "第 ${state.initialPage + 1} 页")
+                CapRow(left = "整句候选", right = "第 ${state.initialPage + 1} 页")
                 CandidateGrid(
                     items = items,
                     columns = 4,

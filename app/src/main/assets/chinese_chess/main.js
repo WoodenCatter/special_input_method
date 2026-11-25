@@ -516,6 +516,8 @@ export class GameController {
         if (this.scanTimer) window.clearInterval(this.scanTimer);
         this.scanTimer = null;
         this.clearScanFocus();
+        window.InputDsChessHost?.confirmationLabel?.('');
+        window.InputDsChessHost?.scanState?.('', 0);
         const phaseEl = document.getElementById('scanPhase');
         const choiceEl = document.getElementById('scanChoice');
         if (phaseEl) phaseEl.textContent = '脑电扫描暂停';
@@ -552,7 +554,7 @@ export class GameController {
             if (this.scanCursor.confirmationExpired) {
               const label = this.scanCursor.candidates[0].label;
               this.cancelPendingAction();
-              window.InputDsChessHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+              window.InputDsChessHost?.notifyFeedback(`已自动${label}`);
               return;
             }
             try { this.renderScanFocus(); } finally { this.restartScanTimer(); }
@@ -580,7 +582,6 @@ export class GameController {
 
         const item = this.scanCursor.chosen();
         if (!item) return;
-        if (item !== this.scanCursor.current()) window.InputDsChessHost?.notifyFeedback("已按上一项执行（延迟补偿）");
         this.activateScanItem(item);
     }
 
@@ -646,13 +647,26 @@ export class GameController {
         document.getElementById('bciScanPanel')?.classList.remove('bci-virtual-focus');
     }
 
+    scanFocusLabel(item) {
+        if (!item) return '';
+        if (item.kind === 'menu') return '棋局操作';
+        if (this.scanCursor.phase === ScanPhase.COLUMN) return `第 ${9 - item.x} 路`;
+        if (this.scanCursor.phase === ScanPhase.ROW) return `${this.pieceLabel(item.piece)}（第 ${10 - item.y} 行）`;
+        if (this.scanCursor.phase === ScanPhase.TARGET) return `落到 ${9 - item.x} 路 ${10 - item.y} 行`;
+        return item.label || '';
+    }
+
     renderScanFocus() {
-    window.InputDsChessHost?.confirmationLabel(this.scanCursor.confirming ? this.scanCursor.current()?.label || '' : '');
+        const item = this.scanCursor.current();
+        window.InputDsChessHost?.confirmationLabel?.(this.scanCursor.confirming ? item?.label || '' : '');
+        window.InputDsChessHost?.scanState?.(
+            this.scanCursor.confirming || !item ? '' : this.scanFocusLabel(item),
+            this.scanCursor.confirming || !item ? 0 : (this.scanCursor.direction < 0 ? -1 : 1)
+        );
         this.clearScanFocus();
         const phaseEl = document.getElementById('scanPhase');
         const choiceEl = document.getElementById('scanChoice');
         const directionEl = document.getElementById('scanDirection');
-        const item = this.scanCursor.current();
         if (!item) return;
 
         if (directionEl) {

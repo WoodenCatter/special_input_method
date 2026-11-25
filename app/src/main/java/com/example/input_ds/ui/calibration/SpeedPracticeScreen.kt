@@ -135,9 +135,6 @@ fun SpeedPracticeScreen(
             ControlSignal.BITE -> {
                 val effectiveMode = if (state.phase == SpeedPracticePhase.PRACTICING) ScanMode.AUTO else scanMode
                 val chosen = state.cursor.selected(now, grace, effectiveMode)
-                if (chosen != state.cursor.index && !frozen) {
-                    currentOnToast("已按上一项执行（延迟补偿）", false)
-                }
                 val (next, outcome) = SpeedPracticeEngine.chooseIndex(state, chosen, now)
                 state = next
                 handleOutcome(outcome)
@@ -273,11 +270,10 @@ fun SpeedPracticeScreen(
             ) {
                 Text(
                     text = buildAnnotatedString {
-                        append("本题目标：")
+                        append("目标：")
                         withStyle(SpanStyle(color = c.ok, fontWeight = FontWeight(900))) {
                             append("第 ${state.targetIndex} 号")
                         }
-                        append(" · 光标扫到「目标」时咬牙选择")
                     },
                     color = c.text,
                     fontFamily = BciType.chinese,

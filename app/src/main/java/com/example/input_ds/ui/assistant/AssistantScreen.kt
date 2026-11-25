@@ -107,7 +107,7 @@ import java.io.Serializable
 private const val MAX_INPUT_LENGTH = 240
 private const val MAX_CHAT_ENTRIES = 50
 private const val WELCOME_MESSAGE =
-    "你好，我是生活助手。可以问我问题、点播音乐和电视，或者让我操作房间里的设备（演示为模拟）。"
+    "你好，我是生活助手。可以问我问题、点播音乐和电视，或控制房间设备。"
 
 internal val AssistantDwellProgressReaderKey =
     SemanticsPropertyKey<() -> Float?>("AssistantDwellProgressReader")
@@ -426,7 +426,6 @@ internal fun AssistantScreen(
                 submit(text)
             }
         } else {
-            if (text.isNotEmpty() && !frozen) onToast("文字已放进草稿", true)
             focusBarAction(
                 if (text.isNotBlank()) AssistantAction.SEND else AssistantAction.INPUT,
                 text
@@ -484,7 +483,7 @@ internal fun AssistantScreen(
                         flashKeys = emptySet()
                     }
                 }
-                "模拟：已执行「${action.describe(current)}」"
+                "已执行「${action.describe(current)}」"
             }
         }
         appendEntry(false, response)
@@ -496,7 +495,7 @@ internal fun AssistantScreen(
         if (confirmation == null) return
         val next = confirmCursor.advance(SystemClock.elapsedRealtime(), scanMode)
         if (next.timedOut(confirmation = true)) {
-            if (!frozen) onToast("三轮都没有选择，已按「取消」处理", false)
+            if (!frozen) onToast("已自动取消", false)
             resolveConfirm(0)
         } else {
             confirmCursor = next
@@ -528,9 +527,6 @@ internal fun AssistantScreen(
                     }
                     ControlSignal.BITE -> {
                         val chosen = confirmCursor.selected(now, grace, scanMode)
-                        if (chosen != confirmCursor.index && !frozen) {
-                            onToast("已按上一项执行（延迟补偿）", false)
-                        }
                         resolveConfirm(chosen)
                     }
                     else -> Unit
@@ -545,9 +541,6 @@ internal fun AssistantScreen(
                 }
                 ControlSignal.BITE -> {
                     val chosen = barCursor.selected(now, grace, scanMode)
-                    if (chosen != barCursor.index && !frozen) {
-                        onToast("已按上一项执行（延迟补偿）", false)
-                    }
                     availableActions.getOrNull(chosen)?.let(::chooseBarAction)
                 }
                 else -> Unit
@@ -651,7 +644,7 @@ internal fun AssistantScreen(
             val remaining = deadline - now
             if (remaining <= 0) {
                 home = home.expireTimer(now)
-                appendEntry(false, "模拟：定时到了，空调已关闭")
+                appendEntry(false, "定时到了，空调已关闭")
                 break
             }
             delay(1_000L)
@@ -851,18 +844,6 @@ internal fun AssistantScreen(
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = "「取消」先亮 · 右侧「模拟家居」预览变化 · 三轮不选按取消处理",
-                                    color = c.muted,
-                                    fontFamily = BciType.chinese,
-                                    fontSize = 15.sp,
-                                    lineHeight = 22.sp,
-                                    style = TextStyle(
-                                        lineHeightStyle = cssLineBox,
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    )
-                                )
                             }
                         }
                     }
@@ -903,7 +884,7 @@ internal fun AssistantScreen(
                     )
                 }
                 Text(
-                    text = draft.ifEmpty { "选「输入」开始，也可以直接用常用语" },
+                    text = draft.ifEmpty { "输入问题或指令…" },
                     modifier = Modifier.weight(1f),
                     color = if (draft.isEmpty()) c.dim else c.text,
                     fontFamily = BciType.chinese,
@@ -956,12 +937,10 @@ internal fun AssistantScreen(
             }
         }
 
-        // Right column: Simulated Home panel (330 dp).
+        // Right column: Room Devices panel (330 dp).
         SimulatedHomePanel(
             rows = previewRows,
             flashKeys = flashKeys,
-            confirming = confirmation != null,
-            previewingAction = focusedOption != null,
             modifier = Modifier
                 .width(330.dp)
                 .fillMaxHeight()
@@ -1018,8 +997,6 @@ private fun AssistantChatBubble(
 private fun SimulatedHomePanel(
     rows: List<HomePreviewRow>,
     flashKeys: Set<String>,
-    confirming: Boolean,
-    previewingAction: Boolean,
     modifier: Modifier = Modifier
 ) {
     val c = LocalBciColors.current
@@ -1038,24 +1015,13 @@ private fun SimulatedHomePanel(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "模拟家居",
+            text = "房间设备",
+            modifier = Modifier.padding(bottom = 6.dp),
             color = c.text,
             fontFamily = BciType.chinese,
             fontWeight = FontWeight(800),
             fontSize = 22.sp,
             lineHeight = 31.sp,
-            style = TextStyle(
-                lineHeightStyle = panelCssLineBox,
-                platformStyle = PlatformTextStyle(includeFontPadding = false)
-            )
-        )
-        Text(
-            text = "演示用，不控制真实家电",
-            modifier = Modifier.padding(bottom = 3.dp),
-            color = c.muted,
-            fontFamily = BciType.chinese,
-            fontSize = 15.sp,
-            lineHeight = 22.sp,
             style = TextStyle(
                 lineHeightStyle = panelCssLineBox,
                 platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -1128,23 +1094,6 @@ private fun SimulatedHomePanel(
                 }
             }
         }
-
-        Spacer(Modifier.weight(1f))
-
-        val note = when {
-            confirming && previewingAction -> "预览：确认后会这样变化"
-            confirming -> "取消：保持现状，不做改变"
-            else -> ""
-        }
-        Text(
-            text = note,
-            modifier = Modifier.heightIn(min = 22.dp),
-            color = c.focus,
-            fontFamily = BciType.chinese,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
     }
 }
 

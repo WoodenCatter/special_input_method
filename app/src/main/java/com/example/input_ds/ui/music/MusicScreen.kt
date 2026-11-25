@@ -251,7 +251,7 @@ fun MusicScreen(
             tracks = playbackStore.orderTracks(loaded)
             shuffleOrder = playbackStore.reconcileShuffleOrder(tracks)
             persistOrders()
-            notice = if (deleted) "已删除《${target.title}》及 APP 内的音乐文件" else "删除失败"
+            notice = if (deleted) "已删除《${target.title}》" else "删除失败"
             if (wasCurrent && tracks.isNotEmpty()) startTrack(tracks[oldIndex.coerceAtMost(tracks.lastIndex)])
             if (wasCurrent && tracks.isEmpty()) playbackStore.saveLastTrack(null)
             val synced = scanState.syncTrackCount(tracks.size)
@@ -265,8 +265,13 @@ fun MusicScreen(
     }
 
     fun requestDelete(track: MusicTrack) {
-        onConfirmation(ConfirmOverlaySpec("删除音乐？", track.title, "取消", "保留这首音乐", "确定删除", "删除应用内副本",
-            onConfirm = { performDelete(track) }, onCancel = {}))
+        onConfirmation(ConfirmOverlaySpec(
+            title = "删除《${track.title}》？",
+            cancelLabel = "取消",
+            confirmLabel = "删除",
+            onConfirm = { performDelete(track) },
+            onCancel = {}
+        ))
     }
 
     fun cyclePlaybackMode() {
@@ -387,9 +392,6 @@ fun MusicScreen(
                     graceMs = grace,
                     mode = scanMode
                 ) ?: return@rememberUpdatedState
-                if (selection.compensated && !frozen) {
-                    currentOnToast("已按上一项执行（延迟补偿）", false)
-                }
                 when (scanState.focusMode) {
                     MusicFocusMode.CONTROLS -> executeControl(selection.targetIndex)
                     MusicFocusMode.PLAYLIST -> playTrackAt(selection.targetIndex)
@@ -724,7 +726,7 @@ private fun LyricsPanel(track: MusicTrack?, modifier: Modifier = Modifier) {
             fontSize = 17.sp
         )
         Text(
-            "暂无歌词\n请欣赏音乐",
+            "暂无歌词",
             Modifier.fillMaxWidth().padding(top = 24.dp),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -786,7 +788,7 @@ private fun PlaylistRow(track: MusicTrack, current: Boolean, focused: Boolean, o
         Column(Modifier.weight(1f)) {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
             Text(
-                "${track.artist} · 本地音乐",
+                track.artist,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

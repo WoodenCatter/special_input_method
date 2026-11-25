@@ -15,7 +15,6 @@ import com.example.input_ds.assistant.AssistantCareStore
 import com.example.input_ds.model.InputMode
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.runScanTimer
-import com.example.input_ds.music.MusicLibrary
 import com.example.input_ds.speech.SpeechOutput
 import com.example.input_ds.ui.communication.ComposerScreen
 import com.example.input_ds.ui.design.*
@@ -69,6 +68,8 @@ import com.example.input_ds.model.HomeSelectionState
 import com.example.input_ds.model.ScanMode
 import com.example.input_ds.model.ScanSettings
 import com.example.input_ds.music.MusicInputBus
+import com.example.input_ds.news.NewsInputBus
+import com.example.input_ds.ui.news.NewsBriefingScreen
 import com.example.input_ds.settings.AppSettingsInputBus
 import com.example.input_ds.settings.SpeedPracticeInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
@@ -89,6 +90,11 @@ import com.example.input_ds.ui.mahjong.MahjongScreen
 import com.example.input_ds.game.SnakeDirection
 import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
+import com.example.input_ds.game.WatermelonAction
+import com.example.input_ds.game.WatermelonEngine
+import com.example.input_ds.game.WatermelonFocus
+import com.example.input_ds.game.WatermelonGame
+import com.example.input_ds.game.WatermelonUiState
 import com.example.input_ds.ui.assistant.AssistantInputBus
 import com.example.input_ds.ui.assistant.AssistantScreen
 import com.example.input_ds.ui.components.FloatingEegSignalSource
@@ -96,6 +102,7 @@ import com.example.input_ds.ui.components.FloatingEegSignalWindow
 import com.example.input_ds.wizard.WizardGameActivity
 import com.example.input_ds.wizard.WizardGameInputBus
 import com.example.input_ds.ui.game.SnakeClimbScreen
+import com.example.input_ds.ui.game.WatermelonScreen
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.communication.CommunicationScreen
 import com.example.input_ds.communication.CommunicationSignalOutcome
@@ -142,6 +149,9 @@ class MainActivity : ComponentActivity() {
 
     private val destination = mutableStateOf(AppDestination.HOME)
     private val snakeState = mutableStateOf(SnakeClimbGame.create())
+    private val watermelonEngine = WatermelonEngine()
+    private val watermelonState = mutableStateOf(watermelonEngine.uiState)
+    private var watermelonRenderRevision by androidx.compose.runtime.mutableLongStateOf(0L)
     private var assistantMediaId: String? = null
     private val homeModules = HomeModule.entries
     private var cursor by mutableStateOf(ScanCursor(homeModules.size))
@@ -155,7 +165,6 @@ class MainActivity : ComponentActivity() {
     private var settingsInitialIndex by mutableIntStateOf(AppSettingsLogic.INITIAL_INDEX)
     private var volumePercent by mutableIntStateOf(60)
     private var brightnessPercent by mutableIntStateOf(80)
-    private var liveMusicCount by mutableIntStateOf(0)
     private var assistantEditing by mutableStateOf(false)
     private var careOpen by mutableStateOf(false)
     private var feedbackSound by mutableStateOf(true)
@@ -333,11 +342,6 @@ class MainActivity : ComponentActivity() {
                 }
                 LaunchedEffect(vm, scanMode.value) { vm.setScanMode(scanMode.value) }
                 LaunchedEffect(vm, frozen) { vm.setFrozen(frozen) }
-                LaunchedEffect(destination.value) {
-                    if (destination.value == AppDestination.ENTERTAINMENT || liveMusicCount == 0) {
-                        liveMusicCount = MusicLibrary(applicationContext).reloadTracks().size
-                    }
-                }
                 val bleState by bleManager.state.collectAsState()
 
                 LaunchedEffect(bleState) {
@@ -546,10 +550,21 @@ class MainActivity : ComponentActivity() {
                             destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(EntertainmentHubModule.entries[entCursor.index].displayName, scanMode.value, entCursor.direction, true)
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
                             destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
-                            destination.value == AppDestination.SNAKE_CLIMB -> ActionHints("向左转", if (snakeState.value.direction == SnakeDirection.UP) "离开游戏…" else "转向上方", "向右转")
+                            destination.value == AppDestination.SNAKE_CLIMB -> ActionHints("向左转", if (snakeState.value.direction == SnakeDirection.UP) "退出游戏" else "转向上方", "向右转")
+                            destination.value == AppDestination.WATERMELON -> {
+                                val ws = watermelonState.value
+                                when (val f = ws.focus) {
+                                    WatermelonFocus.Exit -> ActionHints("移到最右", "离开游戏", "移到最左")
+                                    is WatermelonFocus.DropSlot -> ActionHints(
+                                        if (f.slot == 0) "离开游戏" else "向左移",
+                                        if (!ws.dropReady) "落稳中…" else "放下「${ws.currentTier.label}」",
+                                        if (f.slot == WatermelonGame.SLOT_COUNT - 1) "离开游戏" else "向右移"
+                                    )
+                                }
+                            }
                             destination.value == AppDestination.ASYNC_MAZE -> ActionHints("向左", "向上", "向右")
                             destination.value == AppDestination.TV -> ActionHints("上一台", "打开菜单", "下一台")
-                            else -> ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
+                            else -> ActionHints("向左轮转", "选择当前项", "向右轮转")
                         }
                         var pageHints by remember(destination.value) { mutableStateOf<ActionHints?>(null) }
                         val careInfo = remember(bleState, connectedDevice, telemetry, activeBciController, careOpen) {
@@ -635,11 +650,8 @@ class MainActivity : ComponentActivity() {
                                         ConfirmOverlay(
                                             spec = ConfirmOverlaySpec(
                                                 title = "挂断和${video.peerName}的视频？",
-                                                description = "通话会立即结束。",
                                                 cancelLabel = "继续通话",
-                                                cancelSub = "回到通话",
                                                 confirmLabel = "挂断",
-                                                confirmSub = "结束视频",
                                                 onConfirm = { chat.video.confirmEndCall(frozen) },
                                                 onCancel = {
                                                     chat.video.cancelEndConfirm()
@@ -683,7 +695,7 @@ class MainActivity : ComponentActivity() {
                                             feedback.toast("请先连接耳机后再启用耳机控制")
                                         } else {
                                             setHeadsetControlEnabled(enabled)
-                                            feedback.toast(if (enabled) "耳机控制已启用" else "耳机控制已停用，仅模拟输入")
+                                            feedback.toast(if (enabled) "耳机控制已启用" else "耳机控制已停用")
                                         }
                                     },
                                     onFeedbackSoundChange = { enabled ->
@@ -777,6 +789,10 @@ class MainActivity : ComponentActivity() {
                     if (!chat.back()) navigateTo(AppDestination.HOME)
                     return@BackHandler
                 }
+                if (destination.value == AppDestination.WATERMELON) {
+                    applyWatermelonAction(WatermelonAction.REQUEST_EXIT)
+                    return@BackHandler
+                }
                 if (destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB,
                         AppDestination.CHINESE_CHESS, AppDestination.MAHJONG, AppDestination.DOUDIZHU)) {
                     confirmGameExit()
@@ -786,10 +802,12 @@ class MainActivity : ComponentActivity() {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
                     AppDestination.ASYNC_MAZE,
                     AppDestination.SNAKE_CLIMB,
+                    AppDestination.WATERMELON,
                     AppDestination.WIZARD_GAME,
                     AppDestination.CHINESE_CHESS,
                     AppDestination.DOUDIZHU,
-                    AppDestination.MAHJONG -> AppDestination.ENTERTAINMENT
+                    AppDestination.MAHJONG,
+                    AppDestination.NEWS_BRIEFING -> AppDestination.ENTERTAINMENT
                     AppDestination.TV, AppDestination.MUSIC -> mediaParent()
                     AppDestination.SPEED_PRACTICE -> AppDestination.APP_SETTINGS
                     else -> AppDestination.HOME
@@ -819,7 +837,6 @@ class MainActivity : ComponentActivity() {
                 dwellRevision = dwellRevision,
                 paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
                 frozen = frozen,
-                liveMusicCount = liveMusicCount,
                 onSelect = { module ->
                     entCursor = entCursor.reset(
                         newSize = EntertainmentHubModule.entries.size,
@@ -889,6 +906,19 @@ class MainActivity : ComponentActivity() {
                 onBack = { confirmGameExit() }
             )
 
+            AppDestination.WATERMELON -> WatermelonScreen(
+                engine = watermelonEngine,
+                state = watermelonState.value,
+                externalRenderRevision = watermelonRenderRevision,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
+                soundEnabled = feedbackSound,
+                onStepPhysics = ::stepWatermelonPhysics,
+                onTouchAimAtX = ::aimWatermelonAtX,
+                onTouchDropAtX = ::dropWatermelonAtX,
+                onBack = { applyWatermelonAction(WatermelonAction.REQUEST_EXIT) }
+            )
+
             AppDestination.ASYNC_MAZE -> MazeScreen(
                 state = mazeState.value,
                 controlStatus = bciStatus.value,
@@ -920,6 +950,24 @@ class MainActivity : ComponentActivity() {
                 fromAssistant = assistantMediaId != null,
                 onToast = { message, ok -> feedback.toast(message, ok) },
                 onBoundary = { bciController?.invalidatePendingCommands() }
+            )
+
+            AppDestination.NEWS_BRIEFING -> NewsBriefingScreen(
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
+                onSpeak = { text, onDone ->
+                    speechOutput.speak(
+                        text = text,
+                        onUnavailable = { feedback.toast("朗读不可用", false) },
+                        onDone = onDone
+                    )
+                },
+                onStopSpeak = { speechOutput.stop() },
+                onToast = { message, ok -> feedback.toast(message, ok) },
+                onBoundary = { bciController?.invalidatePendingCommands() },
+                onBack = { navigateTo(AppDestination.ENTERTAINMENT) }
             )
 
             AppDestination.APP_SETTINGS -> AppSettingsScreen(
@@ -1146,7 +1194,7 @@ class MainActivity : ComponentActivity() {
         val next = currentCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
         if (next.timedOut(confirmation = true)) {
             confirmOverlay = null
-            if (!frozen) feedback.toast("三轮都没有选择，已按「${spec.cancelLabel}」处理")
+            if (!frozen) feedback.toast("已自动${spec.cancelLabel}")
             spec.onCancel()
             dwellRevision++
         } else {
@@ -1168,11 +1216,8 @@ class MainActivity : ComponentActivity() {
             2 -> {
                 val spec = ConfirmOverlaySpec(
                     title = "清空这句话？",
-                    description = "清空后不能恢复。",
                     cancelLabel = "取消",
-                    cancelSub = "保留这句话",
                     confirmLabel = "清空",
-                    confirmSub = "开始新的一句",
                     onConfirm = {
                         confirmOverlay = null
                         speakOverlay = null
@@ -1294,8 +1339,11 @@ class MainActivity : ComponentActivity() {
 
     private fun confirmGameExit(onCancel: () -> Unit = {}, onExit: () -> Unit = { navigateTo(AppDestination.ENTERTAINMENT) }) {
         openConfirmation(ConfirmOverlaySpec(
-            "离开游戏？", "退出后返回娱乐。", "继续游戏", "留在游戏中", "退出游戏", "返回娱乐",
-            onConfirm = onExit, onCancel = onCancel
+            title = "离开游戏？",
+            cancelLabel = "继续游戏",
+            confirmLabel = "退出游戏",
+            onConfirm = onExit,
+            onCancel = onCancel
         ))
     }
 
@@ -1310,11 +1358,80 @@ class MainActivity : ComponentActivity() {
                 onExit = { applySnakeAction(SnakeAction.CONFIRM_EXIT) }
             )
             next.gameOver && !previous.gameOver -> openConfirmation(ConfirmOverlaySpec(
-                "游戏结束", next.message, "重新开始", "再玩一局", "退出游戏", "返回娱乐",
+                title = "游戏结束",
+                description = next.message,
+                cancelLabel = "重新开始",
+                confirmLabel = "退出游戏",
                 onConfirm = { applySnakeAction(SnakeAction.CONFIRM_EXIT) },
                 onCancel = { applySnakeAction(SnakeAction.RESTART) }
             ))
         }
+    }
+
+    private fun readWatermelonBestScore(): Int =
+        getSharedPreferences("watermelon_game", Context.MODE_PRIVATE).getInt("best_score", 0)
+
+    private fun saveWatermelonBestScore(score: Int) {
+        val prefs = getSharedPreferences("watermelon_game", Context.MODE_PRIVATE)
+        if (score > prefs.getInt("best_score", 0)) {
+            prefs.edit().putInt("best_score", score).apply()
+        }
+    }
+
+    private fun handleWatermelonStateTransition(
+        previous: WatermelonUiState,
+        next: WatermelonUiState
+    ) {
+        if (next != previous) {
+            watermelonState.value = next
+        }
+        if (next.bestScore > previous.bestScore) {
+            saveWatermelonBestScore(next.bestScore)
+        }
+        when {
+            next.exitRequested -> navigateTo(AppDestination.ENTERTAINMENT)
+            next.exitConfirmation && !previous.exitConfirmation -> confirmGameExit(
+                onCancel = { applyWatermelonAction(WatermelonAction.CANCEL_EXIT) },
+                onExit = { applyWatermelonAction(WatermelonAction.CONFIRM_EXIT) }
+            )
+            next.gameOver && !previous.gameOver -> openConfirmation(ConfirmOverlaySpec(
+                title = "游戏结束",
+                description = next.message,
+                cancelLabel = "再来一局",
+                confirmLabel = "退出游戏",
+                onConfirm = { applyWatermelonAction(WatermelonAction.CONFIRM_EXIT) },
+                onCancel = { applyWatermelonAction(WatermelonAction.RESTART) }
+            ))
+        }
+    }
+
+    private fun applyWatermelonAction(action: WatermelonAction) {
+        val previous = watermelonState.value
+        val next = watermelonEngine.applyAction(action)
+        watermelonRenderRevision++
+        handleWatermelonStateTransition(previous, next)
+    }
+
+    private fun stepWatermelonPhysics(dtSeconds: Float): Boolean {
+        val previous = watermelonState.value
+        val stepped = watermelonEngine.step(dtSeconds)
+        if (stepped) {
+            handleWatermelonStateTransition(previous, watermelonEngine.uiState)
+        }
+        return stepped
+    }
+
+    private fun aimWatermelonAtX(worldX: Float) {
+        val previous = watermelonState.value
+        val next = watermelonEngine.aimAtX(worldX)
+        handleWatermelonStateTransition(previous, next)
+    }
+
+    private fun dropWatermelonAtX(worldX: Float) {
+        val previous = watermelonState.value
+        val next = watermelonEngine.aimAndDropAtX(worldX)
+        watermelonRenderRevision++
+        handleWatermelonStateTransition(previous, next)
     }
 
     private fun enterEntertainmentModule(module: EntertainmentHubModule) {
@@ -1328,6 +1445,14 @@ class MainActivity : ComponentActivity() {
                 snakeState.value = SnakeClimbGame.create()
                 navigateTo(AppDestination.SNAKE_CLIMB)
             }
+            EntertainmentHubModule.WATERMELON -> {
+                watermelonState.value = watermelonEngine.reset(
+                    seed = System.nanoTime(),
+                    bestScoreOverride = readWatermelonBestScore()
+                )
+                watermelonRenderRevision++
+                navigateTo(AppDestination.WATERMELON)
+            }
             EntertainmentHubModule.WIZARD_GAME -> {
                 navigateTo(AppDestination.WIZARD_GAME)
                 wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
@@ -1337,6 +1462,7 @@ class MainActivity : ComponentActivity() {
             EntertainmentHubModule.MAHJONG -> navigateTo(AppDestination.MAHJONG)
             EntertainmentHubModule.TELEVISION -> navigateTo(AppDestination.TV)
             EntertainmentHubModule.MUSIC -> navigateTo(AppDestination.MUSIC)
+            EntertainmentHubModule.NEWS_BRIEFING -> navigateTo(AppDestination.NEWS_BRIEFING)
             EntertainmentHubModule.BACK -> navigateTo(AppDestination.HOME)
         }
     }
@@ -1415,7 +1541,7 @@ class MainActivity : ComponentActivity() {
         val next = videoConfirmCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
         if (next.timedOut(confirmation = true)) {
             video.cancelEndConfirm()
-            if (!frozen) feedback.toast("三轮都没有选择，已按「继续通话」处理")
+            if (!frozen) feedback.toast("已自动继续通话")
             dwellRevision++
         } else {
             videoConfirmCursor = next
@@ -1492,6 +1618,21 @@ class MainActivity : ComponentActivity() {
                 TvInputBus.reset()
                 dwellRevision++
             }
+            "nav watermelon" -> {
+                clearTransientOverlaysForNav()
+                watermelonState.value = watermelonEngine.reset(
+                    seed = 42L,
+                    bestScoreOverride = readWatermelonBestScore()
+                )
+                watermelonRenderRevision++
+                navigateTo(AppDestination.WATERMELON)
+                dwellRevision++
+            }
+            "nav news" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.NEWS_BRIEFING)
+                dwellRevision++
+            }
             "nav settings" -> {
                 clearTransientOverlaysForNav()
                 settingsInitialIndex = AppSettingsLogic.INITIAL_INDEX
@@ -1549,6 +1690,10 @@ class MainActivity : ComponentActivity() {
                     destination.value == AppDestination.APP_SETTINGS -> AppSettingsInputBus.debugTick()
                     destination.value == AppDestination.SPEED_PRACTICE -> SpeedPracticeInputBus.debugTick()
                     destination.value == AppDestination.SNAKE_CLIMB -> applySnakeAction(SnakeAction.TICK)
+                    destination.value == AppDestination.WATERMELON -> {
+                        repeat(15) { stepWatermelonPhysics(WatermelonGame.FIXED_DT) }
+                        watermelonRenderRevision++
+                    }
                     destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
                     destination.value == AppDestination.COMMUNICATION -> {
                         val chat = communicationViewModel
@@ -1561,6 +1706,7 @@ class MainActivity : ComponentActivity() {
                     destination.value == AppDestination.LIFE_ASSISTANT -> AssistantInputBus.debugTick()
                     destination.value == AppDestination.TV -> if (!TvInputBus.debugTick()) return "pending: page cursor"
                     destination.value == AppDestination.MUSIC -> if (!com.example.input_ds.music.MusicInputBus.debugTick()) return "pending: page cursor"
+                    destination.value == AppDestination.NEWS_BRIEFING -> if (!NewsInputBus.debugTick()) return "pending: page cursor"
                     else -> return "pending: page cursor"
                 }
             }
@@ -1625,9 +1771,6 @@ class MainActivity : ComponentActivity() {
                             if (frozen) 0L else AppUiSettings.graceMs(this),
                             scanMode.value
                         )
-                        if (chosen != videoConfirmCursor.index && !frozen) {
-                            feedback.toast("已按上一项执行（延迟补偿）")
-                        }
                         if (chosen == 1) video.confirmEndCall(frozen)
                         else {
                             video.cancelEndConfirm()
@@ -1653,9 +1796,6 @@ class MainActivity : ComponentActivity() {
                         if (frozen) 0L else AppUiSettings.graceMs(this),
                         scanMode.value
                     )
-                    if (chosen != synced.index && !frozen) {
-                        feedback.toast("已按上一项执行（延迟补偿）")
-                    }
                     actions[chosen.coerceIn(0, actions.lastIndex)].invoke()
                 }
                 else -> Unit
@@ -1677,9 +1817,6 @@ class MainActivity : ComponentActivity() {
                         if (frozen) 0 else AppUiSettings.graceMs(this),
                         scanMode.value
                     )
-                    if (chosen != confirmCursor.index && !frozen) {
-                        feedback.toast("已按上一项执行（延迟补偿）")
-                    }
                     chooseConfirmOption(chosen)
                 }
                 else -> Unit
@@ -1700,9 +1837,6 @@ class MainActivity : ComponentActivity() {
                         if (frozen) 0 else AppUiSettings.graceMs(this),
                         scanMode.value
                     )
-                    if (chosen != activeSpeak.cursor.index && !frozen) {
-                        feedback.toast("已按上一项执行（延迟补偿）")
-                    }
                     chooseSpeakOption(chosen)
                 }
                 else -> Unit
@@ -1741,9 +1875,6 @@ class MainActivity : ComponentActivity() {
                         if (frozen) 0 else AppUiSettings.graceMs(this),
                         scanMode.value
                     )
-                    if (chosen != activeAdjust.cursor.index && !frozen) {
-                        feedback.toast("已按上一项执行（延迟补偿）")
-                    }
                     chooseAdjustOption(chosen)
                 }
                 else -> Unit
@@ -1760,7 +1891,6 @@ class MainActivity : ComponentActivity() {
                     val selected = cursor.selected(SystemClock.elapsedRealtime(), if (frozen) 0 else AppUiSettings.graceMs(this), scanMode.value)
                     if (selected != cursor.index) {
                         cursor = cursor.copy(index = selected)
-                        feedback.toast("已按上一项执行（延迟补偿）")
                     }
                     enterModule(homeModules[selected])
                 }
@@ -1779,7 +1909,6 @@ class MainActivity : ComponentActivity() {
                     )
                     if (selected != entCursor.index) {
                         entCursor = entCursor.copy(index = selected)
-                        if (!frozen) feedback.toast("已按上一项执行（延迟补偿）")
                     }
                     enterEntertainmentModule(EntertainmentHubModule.entries[selected])
                 }
@@ -1795,6 +1924,12 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.LEFT_LOOK -> applySnakeAction(SnakeAction.LOOK_LEFT)
                 ControlSignal.RIGHT_LOOK -> applySnakeAction(SnakeAction.LOOK_RIGHT)
                 ControlSignal.BITE -> applySnakeAction(SnakeAction.BITE)
+                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            AppDestination.WATERMELON -> when (signal) {
+                ControlSignal.LEFT_LOOK -> applyWatermelonAction(WatermelonAction.LOOK_LEFT)
+                ControlSignal.RIGHT_LOOK -> applyWatermelonAction(WatermelonAction.LOOK_RIGHT)
+                ControlSignal.BITE -> applyWatermelonAction(WatermelonAction.BITE)
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
             AppDestination.COMMUNICATION -> {
@@ -1826,6 +1961,9 @@ class MainActivity : ComponentActivity() {
             }
             AppDestination.MUSIC -> {
                 MusicInputBus.dispatch(signal)
+            }
+            AppDestination.NEWS_BRIEFING -> {
+                NewsInputBus.dispatch(signal)
             }
             AppDestination.APP_SETTINGS -> {
                 AppSettingsInputBus.dispatch(signal)

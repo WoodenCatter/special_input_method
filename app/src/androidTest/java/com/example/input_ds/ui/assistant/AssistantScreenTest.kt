@@ -97,7 +97,7 @@ class AssistantScreenTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("制冷 25°C").assertIsDisplayed()
-        composeRule.onNodeWithText("模拟：已执行「降温到 25°C」").assertIsDisplayed()
+        composeRule.onNodeWithText("已执行「降温到 25°C」").assertIsDisplayed()
     }
 
     @Test
@@ -174,7 +174,7 @@ class AssistantScreenTest {
 
             composeRule.onNodeWithText("要执行这项操作吗？").assertIsDisplayed()
             composeRule.onNodeWithText("取消").assertIsDisplayed()
-            composeRule.onNodeWithText("取消：保持现状，不做改变").assertIsDisplayed()
+            assertTrue(composeRule.onAllNodesWithText("制冷 25°C").fetchSemanticsNodes().isEmpty())
 
             val restartedProgress = readFocusedDwellProgress()
             assertTrue("Expected dwell progress to restart < 0.2 after resume, was $restartedProgress", restartedProgress < 0.2f)
@@ -187,7 +187,7 @@ class AssistantScreenTest {
             // Wait for one resumed dwell (1650 ms) to advance focus from "取消" to "降温到 25°C".
             var advanced = false
             repeat(25) {
-                if (composeRule.onAllNodesWithText("预览：确认后会这样变化").fetchSemanticsNodes().isNotEmpty()) {
+                if (composeRule.onAllNodesWithText("制冷 25°C").fetchSemanticsNodes().isNotEmpty()) {
                     advanced = true
                     return@repeat
                 }
@@ -196,7 +196,6 @@ class AssistantScreenTest {
                 InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             }
             assertTrue("Expected confirmation focus to advance after one resumed dwell", advanced)
-            composeRule.onNodeWithText("预览：确认后会这样变化").assertIsDisplayed()
             composeRule.onNodeWithText("制冷 25°C").assertIsDisplayed()
         } finally {
             composeRule.runOnUiThread { scanMode = ScanMode.MANUAL }

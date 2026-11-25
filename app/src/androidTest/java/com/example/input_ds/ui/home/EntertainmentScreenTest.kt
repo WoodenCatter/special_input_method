@@ -38,15 +38,14 @@ class EntertainmentScreenTest {
                         dwellRevision = 0,
                         paused = false,
                         frozen = true,
-                        liveMusicCount = 10,
                         onSelect = {}
                     )
                 }
             }
         }
 
-        composeRule.onNodeWithText("1 / 8").assertIsDisplayed()
-        composeRule.onNodeWithText("左 · 右 · 上 直接控制").assertIsDisplayed()
+        composeRule.onNodeWithText("1 / 10").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("迷宫").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("下一个 ▶").assertIsDisplayed()
 
         composeRule.runOnUiThread {
@@ -54,7 +53,7 @@ class EntertainmentScreenTest {
         }
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("1 / 8").assertIsDisplayed()
+        composeRule.onNodeWithText("1 / 10").assertIsDisplayed()
         composeRule.onNodeWithText("◀ 下一个").assertIsDisplayed()
     }
 
@@ -73,7 +72,6 @@ class EntertainmentScreenTest {
                         dwellRevision = 0,
                         paused = false,
                         frozen = true,
-                        liveMusicCount = 4,
                         onSelect = { selected += it }
                     )
                 }
@@ -84,15 +82,15 @@ class EntertainmentScreenTest {
             selection = selection.onDirection(-1, ScanMode.MANUAL)
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("— / 8").assertIsDisplayed()
-        composeRule.onNodeWithText("回到主页选择其他功能").assertIsDisplayed()
+        composeRule.onNodeWithText("— / 10").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("返回主页").fetchSemanticsNodes().size)
 
         composeRule.runOnUiThread {
             selection = selection.onDirection(-1, ScanMode.MANUAL)
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("8 / 8").assertIsDisplayed()
-        composeRule.onNodeWithText("本地 10 首").assertIsDisplayed()
+        composeRule.onNodeWithText("10 / 10").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("看新闻").fetchSemanticsNodes().size)
 
         composeRule.onAllNodesWithText("向上贪吃蛇")[0].performClick()
         composeRule.waitForIdle()

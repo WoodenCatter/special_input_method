@@ -41,8 +41,15 @@ fun ChineseChessScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean
     val currentOnBack by rememberUpdatedState(onBack)
 
     var confirmLabel by remember { mutableStateOf("") }
-    ReportActionHints(if (confirmLabel.isEmpty()) ActionHints("游戏内 · 向左", "离开游戏…", "游戏内 · 向右")
-        else confirmHints(confirmLabel, scanMode))
+    var scanLabel by remember { mutableStateOf("") }
+    var scanDirection by remember { mutableStateOf(0) }
+    ReportActionHints(
+        when {
+            confirmLabel.isNotEmpty() -> confirmHints(confirmLabel, scanMode)
+            scanLabel.isNotEmpty() -> ActionHints.list(scanLabel, ScanMode.AUTO, scanDirection)
+            else -> ActionHints("", "等待对方…", "")
+        }
+    )
 
     androidx.activity.compose.BackHandler(enabled = confirmLabel.isNotEmpty() && !paused) {
         activeWebView?.evaluateJavascript("window.inputDsChess?.cancelConfirmation()", null)
@@ -74,10 +81,18 @@ fun ChineseChessScreen(scanIntervalMs: Long, scanMode: ScanMode, paused: Boolean
                     activeSignalSink = signalSink
                     ChineseChessInputBus.attach(signalSink)
                     addJavascriptInterface(
-                        ChineseChessHostBridge(this, { label ->
-                            if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
-                            confirmLabel = label
-                        }, onFeedback) { currentOnBack() },
+                        ChineseChessHostBridge(
+                            webView = this,
+                            onLabel = { label ->
+                                if (label.isEmpty() != confirmLabel.isEmpty()) onBoundary()
+                                confirmLabel = label
+                            },
+                            onScanState = { label, direction ->
+                                scanLabel = label
+                                scanDirection = direction
+                            },
+                            onFeedback = onFeedback
+                        ) { currentOnBack() },
                         "InputDsChessHost"
                     )
                     setBackgroundColor(Color.rgb(245, 239, 229))
@@ -203,11 +218,15 @@ private class ChineseChessWebSignalSink(
 private class ChineseChessHostBridge(
     private val webView: WebView,
     private val onLabel: (String) -> Unit,
+    private val onScanState: (String, Int) -> Unit,
     private val onFeedback: (String) -> Unit,
     private val onRequestExit: () -> Unit
 ) {
     @JavascriptInterface
     fun confirmationLabel(label: String) { webView.post { onLabel(label) } }
+
+    @JavascriptInterface
+    fun scanState(label: String, direction: Int) { webView.post { onScanState(label, direction) } }
 
     @JavascriptInterface
     fun notifyFeedback(message: String) { webView.post { onFeedback(message) } }

@@ -78,7 +78,7 @@ test('三套棋牌在第六次计时回调取消并返回原上下文', async t 
       assert.equal(next.delay, i === 0 ? 2250 : 1500);
       next.callback();
     }
-    assert.match(messages.shift(), /^三轮都没有选择/);
+    assert.match(messages.shift(), /^已自动/);
     assert.equal(cursor.confirming, false);
   }
   const { GameController } = await import(assets + 'chinese_chess/main.js');

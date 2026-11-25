@@ -94,14 +94,11 @@ fun SnakeClimbScreen(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("向上贪吃蛇", style = MaterialTheme.typography.headlineMedium)
-                    Text(
-                        state.message,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
+                Text(
+                    "向上贪吃蛇",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineMedium
+                )
                 TextButton(onClick = onBack) { Text("返回娱乐") }
             }
 
@@ -109,12 +106,6 @@ fun SnakeClimbScreen(
                 modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
                 SnakeBoard(state, Modifier.fillMaxSize())
-                GameInstructions(
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxWidth(.20f)
-                        .fillMaxHeight()
-                )
             }
             SnakeLengthStatus(state.bodyLength)
         }
@@ -367,27 +358,5 @@ private fun SnakeBoard(state: SnakeClimbState, modifier: Modifier = Modifier) {
             }
             drawLine(tongueColor, tongueStart, tongueEnd, maxOf(2f, cell * .035f))
         }
-    }
-}
-
-@Composable
-private fun GameInstructions(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .background(LocalBciColors.current.panel2, RoundedCornerShape(18.dp))
-            .border(2.dp, LocalBciColors.current.line, RoundedCornerShape(18.dp))
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            "游戏玩法",
-            color = LocalBciColors.current.focus,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Black
-        )
-        Text("蛇头固定在倒数第三行，地图和树木会随前进向下移动。", fontSize = 15.sp)
-        Text("吃到苹果，身体长度增加 1。", fontSize = 15.sp)
-        Text("通过数字墙时，身体长度必须大于墙上的数字，通过后扣除相应长度。", fontSize = 15.sp)
-        Text("撞到左右边界时长度减 1，并自动转向上方；长度降到 0 则结束。", fontSize = 15.sp)
     }
 }

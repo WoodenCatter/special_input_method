@@ -289,7 +289,6 @@ class InputMethodViewModel(
                 val chosen = activeCursor.selected(now, effectiveGrace, mode)
                 if (chosen != activeCursor.index) {
                     applyCandidateIndex(current, chosen)
-                    notifyToast("已按上一项执行（延迟补偿）", false)
                 }
                 activeCursor = activeCursor.copy(previousIndex = -1)
                 val latest = _state.value
@@ -341,7 +340,6 @@ class InputMethodViewModel(
         if (chosen != activeCursor.index && chosen in sideBlocks.indices) {
             activeCursor = activeCursor.copy(index = chosen, previousIndex = -1)
             _state.value = s.copy(highlightedBlockIndex = chosen)
-            notifyToast("已按上一项执行（延迟补偿）", false)
         }
         val idx = _state.value.highlightedBlockIndex
         if (idx !in sideBlocks.indices) return
@@ -425,13 +423,6 @@ class InputMethodViewModel(
 
     private fun triggerBack() {
         saveCurrentDraft()
-        val s = _state.value
-        if (s.outputText.isNotEmpty()) {
-            notifyToast(
-                if (s.mode is InputMode.Assistant) "文字已放进草稿" else "没写完的话会保留",
-                true
-            )
-        }
         onBackCallback?.invoke()
     }
 
@@ -565,7 +556,7 @@ class InputMethodViewModel(
             return
         }
         if (combos.isEmpty() && !preparedState.hasInitialPredictionOption) {
-            notifyToast("这几个字母块拼不出拼音，可用「删除」去掉", false)
+            notifyToast("无匹配拼音", false)
             restartActiveTimer()
             return
         }

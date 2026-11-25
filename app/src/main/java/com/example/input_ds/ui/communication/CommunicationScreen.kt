@@ -265,7 +265,7 @@ private fun ContactListLayout(
                         ContactRowItem(
                             name = "当面说话",
                             relation = null,
-                            subtitle = "打字后朗读，并放大给身边的人看",
+                            subtitle = "朗读与大字展示",
                             avatarText = "说",
                             self = true,
                             online = false,
@@ -532,15 +532,17 @@ private fun ContactHeader(
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
-            Text(
-                text = statusLine,
-                color = c.muted,
-                fontFamily = BciType.chinese,
-                fontSize = 20.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
+            if (statusLine.isNotBlank()) {
+                Text(
+                    text = statusLine,
+                    color = c.muted,
+                    fontFamily = BciType.chinese,
+                    fontSize = 20.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
         }
     }
 }
@@ -572,9 +574,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
                 )
                 Text(
                     text = if (state.configured || state.fakeMode) {
-                        "生成一个 6 位邀请码。家属在手机端输入后，就能给你发消息、打视频。邀请码 10 分钟内有效。"
+                        "生成 6 位邀请码，绑定家属手机"
                     } else {
-                        "请照护者在「设备与模型」中配置服务器后再邀请家属。"
+                        "请先在「设备与模型」中配置服务器"
                     },
                     color = c.muted,
                     fontFamily = BciType.chinese,
@@ -598,14 +600,6 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
                     fontSize = 40.sp,
                     style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                 )
-                Text(
-                    text = "没发出去的文字会按联系人分别保留。",
-                    color = c.muted,
-                    fontFamily = BciType.chinese,
-                    fontSize = 24.sp,
-                    lineHeight = 37.sp,
-                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                )
             }
         }
 
@@ -613,7 +607,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
             ContactHeader(
                 name = "当面说话",
                 avatarText = "说",
-                statusLine = "给身边的人看和听",
+                statusLine = "",
                 self = true,
                 online = false,
                 hue = 24f
@@ -622,33 +616,19 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)
             ) {
+                val secondaryText = when {
+                    !state.configured && !state.fakeMode -> "未配置服务器，请先在「设备与模型」中配置后再邀请家属"
+                    state.contacts.isEmpty() -> "尚未绑定家属，可通过「邀请家属」绑定"
+                    else -> "文字朗读与全屏展示"
+                }
                 Text(
-                    text = "打好字以后选「说出」，平板会朗读出来，并把这句话放大到整个屏幕。",
+                    text = secondaryText,
                     color = c.muted,
                     fontFamily = BciType.chinese,
                     fontSize = 24.sp,
                     lineHeight = 37.sp,
                     style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                 )
-                if (!state.configured && !state.fakeMode) {
-                    Text(
-                        text = "请照护者在「设备与模型」中配置服务器后再邀请家属",
-                        color = c.muted,
-                        fontFamily = BciType.chinese,
-                        fontSize = 24.sp,
-                        lineHeight = 37.sp,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                } else if (state.contacts.isEmpty()) {
-                    Text(
-                        text = "还没有绑定家属。选「邀请家属」生成邀请码，交给家属在手机上输入。",
-                        color = c.muted,
-                        fontFamily = BciType.chinese,
-                        fontSize = 24.sp,
-                        lineHeight = 37.sp,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                }
                 state.error?.takeIf { it.isNotBlank() }?.let { err ->
                     Text(
                         text = err,
@@ -660,13 +640,6 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
                     )
                 }
             }
-            Text(
-                text = "咬牙开始打字",
-                color = c.muted,
-                fontFamily = BciType.chinese,
-                fontSize = 20.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
         }
 
         else -> {
@@ -706,13 +679,6 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactListPreviewPan
                     }
                 }
             }
-            Text(
-                text = "咬牙选择：发文字消息，或视频通话",
-                color = c.muted,
-                fontFamily = BciType.chinese,
-                fontSize = 20.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
         }
     }
 }
@@ -762,7 +728,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactActionsPanel(
     ) {
         ActionBigCard(
             title = "文字消息",
-            subtitle = "打字发给${contact.name}",
+            subtitle = "",
             iconRes = R.drawable.ic_lucide_message_square_text,
             focused = state.actionIndex == 0,
             direction = dir,
@@ -772,7 +738,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.ContactActionsPanel(
         )
         ActionBigCard(
             title = "视频通话",
-            subtitle = if (contact.online) "${contact.name}在线，可以直接呼叫" else "对方离线，可能无人接听",
+            subtitle = if (contact.online) "" else "当前离线",
             iconRes = R.drawable.ic_lucide_video,
             focused = state.actionIndex == 1,
             direction = dir,
@@ -849,15 +815,17 @@ private fun ActionBigCard(
             maxLines = 1,
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
-        Text(
-            text = subtitle,
-            color = c.muted,
-            fontFamily = BciType.chinese,
-            fontSize = 19.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                color = c.muted,
+                fontFamily = BciType.chinese,
+                fontSize = 19.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
     }
 }
 
@@ -1024,7 +992,7 @@ private fun PairingLayout(
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
         Text(
-            text = "请家属打开手机端，在「兑换邀请码」里输入下面 6 位字符",
+            text = "请家属在手机端输入邀请码",
             color = c.muted,
             fontFamily = BciType.chinese,
             fontSize = 22.sp,
@@ -1062,7 +1030,7 @@ private fun PairingLayout(
         val statusText = when {
             !state.error.isNullOrBlank() -> state.error
             state.loading || state.invitation == null -> "正在生成…"
-            else -> "10 分钟内有效（$expiresDisplay 前）· 只能使用一次"
+            else -> "$expiresDisplay 前有效"
         }
         Text(
             text = statusText,
@@ -1076,7 +1044,7 @@ private fun PairingLayout(
         val code = state.invitation
         if (!code.isNullOrBlank()) {
             DashedTouchButton(
-                text = "复制邀请码（照护者触摸）",
+                text = "复制邀请码",
                 onClick = { onCopy(code) }
             )
         }
@@ -1198,7 +1166,7 @@ private fun buildDisplayBubbles(
         .filter { it.conversationId == contact.conversationId && it.clientId !in committedClientIds }
         .map { p ->
             val time = formatChatTime(p.createdAt)
-            val suffix = if (state.connected) "发送中…" else "待发送 · 网络恢复后自动发出"
+            val suffix = if (state.connected) "发送中…" else "待发送"
             val meta = if (time.isNotEmpty()) "$time · $suffix" else suffix
             DisplayBubble(p.text, meta, own = true)
         }

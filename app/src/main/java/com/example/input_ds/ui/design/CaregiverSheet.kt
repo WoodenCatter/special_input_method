@@ -176,26 +176,10 @@ internal fun CaregiverSheet(
                     CareSmallButton("关闭", fontSize = 16, onClick = onClose)
                 }
 
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, c.careLine, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    Text(
-                        "面板打开期间，患者的耳机指令暂停，扫描停止。关闭后恢复。",
-                        fontFamily = BciType.chinese,
-                        fontSize = 15.sp,
-                        lineHeight = 22.5.sp,
-                        color = c.careText,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                }
-
-                CareRow("耳机控制（真实识别结果驱动界面）") {
+                CareRow("耳机控制") {
                     CareSwitch(headsetControlEnabled, frozen) { onHeadsetControlChange(!headsetControlEnabled) }
                 }
-                CareRow("提示音（识别到动作时）") {
+                CareRow("动作提示音") {
                     CareSwitch(feedbackSound, frozen) { onFeedbackSoundChange(!feedbackSound) }
                 }
                 CareRow("悬浮波形窗口") {
@@ -256,14 +240,14 @@ internal fun CaregiverSheet(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             CareField(
-                                label = "电脑地址（例如 http://localhost:8765）",
+                                label = "服务地址",
                                 value = addressDraft,
                                 enabled = !checking,
                                 keyboardType = KeyboardType.Uri,
                                 onValueChange = { addressDraft = it; checkStatus = "" }
                             )
                             CareField(
-                                label = "电脑服务连接码",
+                                label = "连接码",
                                 value = codeDraft,
                                 enabled = !checking,
                                 secret = true,
@@ -300,7 +284,7 @@ internal fun CaregiverSheet(
                             }
                             Spacer(Modifier.fillMaxWidth().height(1.dp).background(c.careLine))
                             CareField(
-                                label = "键盘编辑助手草稿（调试）",
+                                label = "助手草稿",
                                 value = assistantDraft,
                                 enabled = true,
                                 singleLine = false,
@@ -367,7 +351,7 @@ internal fun CaregiverSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "进入设备与模型（采集 · 训练 · 用户）",
+                        "设备与模型",
                         fontFamily = BciType.chinese,
                         fontSize = 16.sp,
                         color = c.careBtnText,

@@ -75,7 +75,6 @@ import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.ScanMode
 import com.example.input_ds.ui.theme.BciType
 import com.example.input_ds.ui.theme.LocalBciColors
-import com.example.input_ds.ui.tv.TV_CHANNELS
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -92,7 +91,6 @@ fun EntertainmentScreen(
     dwellRevision: Int,
     paused: Boolean,
     frozen: Boolean,
-    liveMusicCount: Int,
     onSelect: (EntertainmentHubModule) -> Unit
 ) {
     val c = LocalBciColors.current
@@ -101,7 +99,6 @@ fun EntertainmentScreen(
     val selectedIndex = selection.selectedIndex.coerceIn(0, n - 1)
     val dir = if (selection.scanDirection < 0) -1 else 1
     val nextIndex = (selectedIndex + dir + n) % n
-    val playableTvCount = remember { TV_CHANNELS.count { !it.temporarilyUnavailable } }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val dwellProgress = remember { Animatable(0f) }
@@ -149,15 +146,6 @@ fun EntertainmentScreen(
                 fontSize = 22.sp,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = "当前项永远在中间 · 看向左右改变滑动方向",
-                modifier = Modifier.alignByBaseline(),
-                color = c.muted,
-                fontFamily = BciType.chinese,
-                fontSize = 18.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
         }
 
         // 2. Horizontal gallery stage extending edge-to-edge across the 28 dp scaffold padding.
@@ -200,16 +188,8 @@ fun EntertainmentScreen(
                             ad == 1 -> 0.60f
                             else -> 0f
                         }
-                        val resolvedSubtitle = when {
-                            frozen -> module.subtitle
-                            module == EntertainmentHubModule.TELEVISION -> "CCTV 直播 $playableTvCount 个频道"
-                            module == EntertainmentHubModule.MUSIC -> "本地 $liveMusicCount 首"
-                            else -> module.subtitle
-                        }
-
                         GalleryCard(
                             module = module,
-                            subtitle = resolvedSubtitle,
                             d = d,
                             zOrder = (10 - ad).toFloat(),
                             isCenter = d == 0,
@@ -336,7 +316,6 @@ fun EntertainmentScreen(
 @Composable
 private fun GalleryCard(
     module: EntertainmentHubModule,
-    subtitle: String,
     d: Int,
     zOrder: Float,
     isCenter: Boolean,
@@ -528,37 +507,21 @@ private fun GalleryCard(
             }
         }
 
-        Column(
+        Text(
+            text = module.displayName,
+            color = Color.White,
+            fontFamily = BciType.chinese,
+            fontWeight = FontWeight(900),
+            fontSize = 54.sp,
+            lineHeight = 59.sp,
+            style = TextStyle(
+                shadow = Shadow(Color(0x40000000), Offset(0f, 1f), 12f),
+                platformStyle = PlatformTextStyle(includeFontPadding = false)
+            ),
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 30.dp, end = 30.dp, bottom = 30.dp)
-        ) {
-            Text(
-                text = module.displayName,
-                color = Color.White,
-                fontFamily = BciType.chinese,
-                fontWeight = FontWeight(900),
-                fontSize = 54.sp,
-                lineHeight = 59.sp,
-                style = TextStyle(
-                    shadow = Shadow(Color(0x40000000), Offset(0f, 1f), 12f),
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                )
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = buildAnnotatedString {
-                    for (ch in subtitle) {
-                        withStyle(SpanStyle(fontFamily = if (ch.code < 0x3000) BciType.latin else BciType.chinese)) {
-                            append(ch)
-                        }
-                    }
-                },
-                color = Color.White.copy(alpha = 0.86f),
-                fontSize = 24.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
-        }
+        )
 
         if (showDwellBar) {
             Box(
@@ -589,10 +552,12 @@ private fun galleryArtRes(module: EntertainmentHubModule): Int = when (module) {
     EntertainmentHubModule.BACK -> R.drawable.gallery_art_back
     EntertainmentHubModule.MAZE -> R.drawable.gallery_art_maze
     EntertainmentHubModule.SNAKE_CLIMB -> R.drawable.gallery_art_snake
+    EntertainmentHubModule.WATERMELON -> R.drawable.gallery_art_watermelon
     EntertainmentHubModule.WIZARD_GAME -> R.drawable.gallery_art_wizard
     EntertainmentHubModule.CHINESE_CHESS -> R.drawable.gallery_art_chess
     EntertainmentHubModule.DOUDIZHU -> R.drawable.gallery_art_ddz
     EntertainmentHubModule.MAHJONG -> R.drawable.gallery_art_mj
     EntertainmentHubModule.TELEVISION -> R.drawable.gallery_art_tv
     EntertainmentHubModule.MUSIC -> R.drawable.gallery_art_music
+    EntertainmentHubModule.NEWS_BRIEFING -> R.drawable.gallery_art_news
 }

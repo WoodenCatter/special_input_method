@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import java.util.Locale
 import java.util.UUID
@@ -16,6 +17,9 @@ class SpeechOutput(context: Context) {
     private var available = false
     private var pendingText: String? = null
     private var pendingUnavailable: (() -> Unit)? = null
+    private var pendingDone: (() -> Unit)? = null
+    private var activeUtteranceId: String? = null
+    private var activeDone: (() -> Unit)? = null
 
     init {
         try {
@@ -40,42 +44,94 @@ class SpeechOutput(context: Context) {
                 langResult != TextToSpeech.LANG_NOT_SUPPORTED
             if (available) {
                 engine.setSpeechRate(SPEECH_RATE)
+                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+
+                    override fun onDone(utteranceId: String?) {
+                        notifyFinished(utteranceId)
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        notifyFinished(utteranceId)
+                    }
+
+                    override fun onError(utteranceId: String?, errorCode: Int) {
+                        notifyFinished(utteranceId)
+                    }
+                })
             }
         }
         val queued = pendingText
         val onUnavailable = pendingUnavailable
+        val onDone = pendingDone
         pendingText = null
         pendingUnavailable = null
+        pendingDone = null
         if (queued != null) {
-            speak(queued, onUnavailable ?: {})
+            speak(queued, onUnavailable ?: {}, onDone ?: {})
         }
     }
 
-    fun speak(text: String, onUnavailable: () -> Unit = {}) {
-        if (text.isBlank()) return
+    private fun notifyFinished(utteranceId: String?) {
+        mainHandler.post {
+            if (utteranceId != null && utteranceId == activeUtteranceId) {
+                val callback = activeDone
+                activeUtteranceId = null
+                activeDone = null
+                callback?.invoke()
+            }
+        }
+    }
+
+    fun speak(
+        text: String,
+        onUnavailable: () -> Unit = {},
+        onDone: () -> Unit = {}
+    ) {
+        if (text.isBlank()) {
+            onDone()
+            return
+        }
         if (!initialized) {
             pendingText = text
             pendingUnavailable = onUnavailable
+            pendingDone = onDone
             return
         }
         val engine = tts
         if (!available || engine == null) {
             onUnavailable()
+            onDone()
             return
         }
         try {
             engine.stop()
-            val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "bci-${UUID.randomUUID()}")
-            if (result != TextToSpeech.SUCCESS) onUnavailable()
+            val utteranceId = "bci-${UUID.randomUUID()}"
+            activeUtteranceId = utteranceId
+            activeDone = onDone
+            val result = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            if (result != TextToSpeech.SUCCESS) {
+                activeUtteranceId = null
+                activeDone = null
+                onUnavailable()
+                onDone()
+            }
         } catch (failure: RuntimeException) {
             Log.w(TAG, "TextToSpeech speak failed", failure)
+            activeUtteranceId = null
+            activeDone = null
             onUnavailable()
+            onDone()
         }
     }
 
     fun stop() {
         pendingText = null
         pendingUnavailable = null
+        pendingDone = null
+        activeUtteranceId = null
+        activeDone = null
         try {
             tts?.stop()
         } catch (_: RuntimeException) {

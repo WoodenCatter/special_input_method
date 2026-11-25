@@ -161,14 +161,14 @@ class EntertainmentEntryTest {
         bci("signal B")
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("1 / 8").assertIsDisplayed()
-        composeRule.onNodeWithText("左 · 右 · 上 直接控制").assertIsDisplayed()
+        composeRule.onNodeWithText("1 / 10").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("迷宫").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("选「迷宫」").assertIsDisplayed()
 
         // Immediate bite enters Maze instead of navigating back to Home.
         bci("signal B")
         composeRule.waitForIdle()
         composeRule.onNodeWithText("娱乐 › 迷宫").assertIsDisplayed()
-        assertEquals(0, composeRule.onAllNodesWithText("1 / 8").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithText("1 / 10").fetchSemanticsNodes().size)
     }
 }

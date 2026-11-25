@@ -365,9 +365,6 @@ internal fun TvScreenContent(
                     graceMs = if (frozen) 0L else AppUiSettings.graceMs(context),
                     mode = scanMode
                 )
-                if (chosen != menuCursor.index && !frozen) {
-                    currentOnToast("已按上一项执行（延迟补偿）", false)
-                }
                 executeOperation(chosen)
             }
             TvControlEffect.Ignore -> Unit
@@ -571,11 +568,7 @@ internal fun TvScreenContent(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("当前频道不可播放", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF3F0E8))
-                            Text(
-                                "该频道将在后续版本继续处理",
-                                color = Color(0xFFA9B0B8)
-                            )
+                            Text("当前频道暂不可用", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF3F0E8))
                         }
                     }
                 }
@@ -593,11 +586,7 @@ internal fun TvScreenContent(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.width(22.dp), strokeWidth = 3.dp)
                             Text(
-                                if (pageVariantIndex == 0) {
-                                    "正在打开 ${channel.name} 官方直播"
-                                } else {
-                                    "正在尝试 ${channel.name} 备用官方入口"
-                                },
+                                "正在加载 ${channel.name}…",
                                 color = Color(0xFFF3F0E8)
                             )
                         }
@@ -642,7 +631,7 @@ internal fun TvScreenContent(
                         )
                         .clickable(enabled = !paused) { openMenu(exitFull = false) }
                 ) {
-                    BciLabel("● 直播 · 官方网页源", 18, Color(0xFFA9B0B8))
+                    BciLabel("● 直播", 18, Color(0xFFA9B0B8))
                 }
 
                 if (showChannel) {
@@ -901,7 +890,7 @@ private class OfficialTvWebViewClient(
         if (request.isForMainFrame) {
             reportPageError(
                 request.url.toString(),
-                "官方页面返回错误：${errorResponse.statusCode}"
+                "加载失败（${errorResponse.statusCode}）"
             )
         }
     }

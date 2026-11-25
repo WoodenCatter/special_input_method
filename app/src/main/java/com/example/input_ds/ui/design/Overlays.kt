@@ -34,11 +34,11 @@ import com.example.input_ds.ui.theme.LocalBciColors
 
 data class ConfirmOverlaySpec(
     val title: String,
-    val description: String,
+    val description: String = "",
     val cancelLabel: String,
-    val cancelSub: String,
+    val cancelSub: String = "",
     val confirmLabel: String,
-    val confirmSub: String,
+    val confirmSub: String = "",
     val onConfirm: () -> Unit,
     val onCancel: () -> Unit
 )
@@ -48,7 +48,7 @@ data class SpeakOverlayState(
     val cursor: ScanCursor = ScanCursor(size = 3, index = 1)
 ) {
     companion object {
-        val LABELS = listOf("返回修改", "再说一遍", "清空，开始新的一句")
+        val LABELS = listOf("返回修改", "再说一遍", "清空")
     }
 }
 
@@ -110,20 +110,18 @@ fun NurseCallOverlay(
             lineHeight = 72.sp,
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
-        Text(
-            text = if (state.sent) {
-                "做任意动作关闭"
-            } else {
-                "${state.remainingSeconds} 秒后自动呼叫 · 左看取消 · 咬牙或右看立即呼叫"
-            },
-            color = c.onAlarm.copy(alpha = 0.9f),
-            fontFamily = BciType.chinese,
-            fontWeight = FontWeight.Normal,
-            fontSize = 26.sp,
-            lineHeight = 39.sp,
-            textAlign = TextAlign.Center,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
+        if (!state.sent) {
+            Text(
+                text = "${state.remainingSeconds} 秒后自动发出",
+                color = c.onAlarm.copy(alpha = 0.9f),
+                fontFamily = BciType.chinese,
+                fontWeight = FontWeight.Normal,
+                fontSize = 26.sp,
+                lineHeight = 39.sp,
+                textAlign = TextAlign.Center,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
     }
 }
 
@@ -158,13 +156,6 @@ fun SpeakOverlay(
             .padding(horizontal = 48.dp, vertical = 34.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        Text(
-            text = "正在朗读 · 照护者请看这里",
-            color = c.muted,
-            fontFamily = BciType.chinese,
-            fontSize = 20.sp,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -259,14 +250,16 @@ fun ConfirmOverlay(
                 fontSize = 44.sp,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = spec.description,
-                color = c.muted,
-                fontFamily = BciType.chinese,
-                fontSize = 22.sp,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
+            if (spec.description.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = spec.description,
+                    color = c.muted,
+                    fontFamily = BciType.chinese,
+                    fontSize = 22.sp,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
         }
 
         Row(
@@ -276,43 +269,29 @@ fun ConfirmOverlay(
             horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             ConfirmHalfCard(
-                topTag = "先亮 · 默认",
                 mainLabel = spec.cancelLabel,
                 subLabel = spec.cancelSub,
-                rightAligned = false,
                 focused = cursor.index == 0,
                 progress = { if (scanMode == ScanMode.AUTO) progress.value else null },
                 onClick = { onChoose(0) },
                 modifier = Modifier.weight(1f).fillMaxHeight()
             )
             ConfirmHalfCard(
-                topTag = "后亮",
                 mainLabel = spec.confirmLabel,
                 subLabel = spec.confirmSub,
-                rightAligned = true,
                 focused = cursor.index == 1,
                 progress = { if (scanMode == ScanMode.AUTO) progress.value else null },
                 onClick = { onChoose(1) },
                 modifier = Modifier.weight(1f).fillMaxHeight()
             )
         }
-
-        Text(
-            text = "两项自动轮流高亮，亮到哪项咬牙就选哪项 · 三轮不选按「${spec.cancelLabel}」处理",
-            color = c.muted,
-            fontFamily = BciType.chinese,
-            fontSize = 20.sp,
-            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-        )
     }
 }
 
 @Composable
 private fun ConfirmHalfCard(
-    topTag: String,
     mainLabel: String,
     subLabel: String,
-    rightAligned: Boolean,
     focused: Boolean,
     progress: () -> Float?,
     onClick: () -> Unit,
@@ -340,28 +319,19 @@ private fun ConfirmHalfCard(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(34.dp),
-            horizontalAlignment = if (rightAligned) Alignment.End else Alignment.Start,
-            verticalArrangement = Arrangement.SpaceBetween
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = topTag,
-                color = if (focused) c.focus else c.muted,
+                text = mainLabel,
+                color = c.text,
                 fontFamily = BciType.chinese,
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
+                fontWeight = FontWeight(900),
+                fontSize = 72.sp,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
-            Column(
-                horizontalAlignment = if (rightAligned) Alignment.End else Alignment.Start
-            ) {
-                Text(
-                    text = mainLabel,
-                    color = c.text,
-                    fontFamily = BciType.chinese,
-                    fontWeight = FontWeight(900),
-                    fontSize = 72.sp,
-                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                )
+            if (subLabel.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = subLabel,
                     color = c.muted,

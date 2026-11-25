@@ -68,18 +68,14 @@ internal enum class AppSettingItem(
     val description: String,
     val isNavigation: Boolean = false
 ) {
-    BACK("返回主页", R.drawable.ic_lucide_arrow_left, "回到主页，选择其他功能。", isNavigation = true),
-    VOLUME("音量", R.drawable.ic_lucide_volume_2, "整个应用的声音大小，包括朗读、通话和提示音。"),
-    BRIGHTNESS("屏幕亮度", R.drawable.ic_lucide_sun, "只在使用本应用时生效。夜间建议调低。"),
-    SPEED("每项停留", R.drawable.ic_lucide_gauge, "自动扫描时，光标在每一项停留多久。范围 1.1–3.0 秒。"),
-    SCAN_MODE(
-        "扫描方式",
-        R.drawable.ic_lucide_arrow_left_right,
-        "自动：光标按停留时间自己移动，看向左右改变方向。手动：光标不自己动，左看上一项、右看下一项。沟通的字母块始终自动扫描。"
-    ),
-    DISPLAY_MODE("显示模式", R.drawable.ic_lucide_sun_moon, "咬牙依次切换：自动 → 日间 → 夜间。自动为 7:00–19:00 日间，其余时间夜间。"),
-    FLOATING_BALL("模拟悬浮球", R.drawable.ic_lucide_circle_dot, "照护者测试用的模拟按钮，不影响真实耳机控制。"),
-    SPEED_PRACTICE("速度练习", R.drawable.ic_lucide_target, "做 12 次目标选择，系统推荐合适的停留时间，由你决定是否采用。")
+    BACK("返回主页", R.drawable.ic_lucide_arrow_left, "", isNavigation = true),
+    VOLUME("音量", R.drawable.ic_lucide_volume_2, "朗读、通话与提示音音量"),
+    BRIGHTNESS("屏幕亮度", R.drawable.ic_lucide_sun, "当前界面显示亮度"),
+    SPEED("每项停留", R.drawable.ic_lucide_gauge, "自动扫描停留时长（1.1–3.0 秒）"),
+    SCAN_MODE("扫描方式", R.drawable.ic_lucide_arrow_left_right, "自动轮转，或左右手动切换"),
+    DISPLAY_MODE("显示模式", R.drawable.ic_lucide_sun_moon, "自动模式下 7:00–19:00 为日间"),
+    FLOATING_BALL("模拟悬浮球", R.drawable.ic_lucide_circle_dot, "屏幕悬浮控制按钮"),
+    SPEED_PRACTICE("速度练习", R.drawable.ic_lucide_target, "12 次目标选择，测算推荐停留时长")
 }
 
 internal object AppSettingsLogic {
@@ -249,9 +245,6 @@ fun AppSettingsScreen(
             }
             ControlSignal.BITE -> {
                 val chosen = cursor.selected(now, grace, scanMode)
-                if (chosen != cursor.index && !frozen) {
-                    currentOnToast("已按上一项执行（延迟补偿）", false)
-                }
                 choose(chosen)
             }
             ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
@@ -434,17 +427,19 @@ fun AppSettingsScreen(
                     )
                 )
             }
-            Text(
-                text = mixedLatinText(focusedItem.description),
-                color = c.text,
-                fontWeight = FontWeight.Normal,
-                fontSize = 24.sp,
-                lineHeight = 36.sp,
-                style = TextStyle(
-                    lineHeightStyle = cssLineBox,
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+            if (focusedItem.description.isNotBlank()) {
+                Text(
+                    text = mixedLatinText(focusedItem.description),
+                    color = c.text,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 24.sp,
+                    lineHeight = 36.sp,
+                    style = TextStyle(
+                        lineHeightStyle = cssLineBox,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
                 )
-            )
+            }
         }
     }
 }

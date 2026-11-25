@@ -208,7 +208,7 @@ class TvScreenTest {
         composeRule.mainClock.advanceTimeBy(3_500L)
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("● 直播 · 官方网页源").assertIsDisplayed()
+        composeRule.onNodeWithText("● 直播").assertIsDisplayed()
         composeRule.onNodeWithText("综合").assertIsDisplayed()
         assertEquals(2, composeRule.onAllNodesWithText("CCTV-1").fetchSemanticsNodes().size)
         composeRule.onNodeWithText("CCTV-16").assertIsDisplayed()
@@ -334,7 +334,7 @@ class TvScreenTest {
 
         // Capture a pending BITE window during playback, then tap live badge to open the menu.
         val preMenuWindow = requireNotNull(gate.snapshot(acquisitionEpoch = 1L))
-        composeRule.onNodeWithText("● 直播 · 官方网页源").performClick()
+        composeRule.onNodeWithText("● 直播").performClick()
         composeRule.waitForIdle()
 
         assertFalse(gate.isCurrent(preMenuWindow, acquisitionEpoch = 1L))
@@ -401,7 +401,7 @@ class TvScreenTest {
         }
 
         val cctv2Bounds = composeRule.onNodeWithText("CCTV-2").fetchSemanticsNode().boundsInRoot
-        composeRule.onNodeWithText("● 直播 · 官方网页源").performClick()
+        composeRule.onNodeWithText("● 直播").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("电视菜单").assertIsDisplayed()
 

@@ -15,6 +15,7 @@ onnxRuntime = "1.27.0"
 workRuntime = "2.10.1"
 media3 = "1.11.0"
 okhttp = "5.3.0"
+jbox2d = "2.2.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,6 +42,7 @@ androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.re
 androidx-media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasource-okhttp", version.ref = "media3" }
 okhttp-bom = { group = "com.squareup.okhttp3", name = "okhttp-bom", version.ref = "okhttp" }
 okhttp-dnsoverhttps = { group = "com.squareup.okhttp3", name = "okhttp-dnsoverhttps" }
+jbox2d-library = { group = "org.jbox2d", name = "jbox2d-library", version.ref = "jbox2d" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

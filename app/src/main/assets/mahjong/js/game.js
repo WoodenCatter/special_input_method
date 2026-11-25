@@ -727,7 +727,7 @@
           if (this.scan.cursor.confirmationExpired) {
             const label = this.scan.cursor.candidates[0].label;
             this.cancelConfirmation();
-            window.InputDsMahjongHost?.notifyFeedback(`三轮都没有选择，已按「${label}」处理`);
+            window.InputDsMahjongHost?.notifyFeedback(`已自动${label}`);
             return;
           }
           try { this.renderBciFocus(); } finally { this.restartScanTimer(); }
@@ -887,7 +887,7 @@
       this.scan.pending = request;
       this.scan.confirmReturn = this.scan.cursor.snapshot();
       this.el.confirmTitle.textContent = request.title || "确定要执行吗？";
-      this.el.confirmDetail.textContent = request.detail || "咬牙选择当前高亮项。";
+      this.el.confirmDetail.textContent = request.detail || "";
       this.el.confirm.classList.remove("hidden");
       this.setScanPhase("confirm", [
         { kind: "confirm_no", label: "返回选择" },
@@ -934,7 +934,7 @@
       this.requestConfirmation({
         kind: "discard",
         title: "确定要打出“" + Core.tileName(tile.type) + "”吗？",
-        detail: "确定后将进入其他玩家的响应阶段。",
+        detail: "",
         execute: () => {
           const index = this.players[HUMAN].hand.findIndex(item => item.id === tile.id);
           if (index >= 0) this.discardAt(HUMAN, index);
@@ -951,7 +951,7 @@
       this.requestConfirmation({
         kind: action.kind || "action",
         title: action.confirmTitle || ("确定要“" + action.label + "”吗？"),
-        detail: action.confirmDetail || "确定后执行当前操作。",
+        detail: action.confirmDetail || "",
         execute: action.run
       });
     }
@@ -969,14 +969,14 @@
         this.requestConfirmation({
           kind: "restart",
           title: "确定要重新开始吗？",
-          detail: "当前牌局会被清除并重新发牌。",
+          detail: "",
           execute: () => this.startRound()
         });
       } else if (candidate.kind === "settings_exit" || candidate.kind === "result_exit") {
         this.requestConfirmation({
           kind: "exit",
           title: "确定要退出麻将游戏吗？",
-          detail: "确定后将返回 APP 主页面。",
+          detail: "",
           execute: () => this.requestExit()
         });
       } else if (candidate.kind === "again") this.startRound();
@@ -993,16 +993,19 @@
       }
       if (action === "bite") {
         const item = this.scan.cursor.chosen();
-        if (item !== this.scan.cursor.current()) window.InputDsMahjongHost?.notifyFeedback("已按上一项执行（延迟补偿）");
         this.activateBciCandidate(item);
       }
     }
 
     renderBciFocus() {
-    window.InputDsMahjongHost?.confirmationLabel(this.scan.cursor.confirming ? this.scan.cursor.current()?.label || '' : '');
-      document.querySelectorAll(".bci-focus").forEach(element => element.classList.remove("bci-focus"));
       const cursor = this.scan.cursor;
       const current = cursor.current();
+      window.InputDsMahjongHost?.confirmationLabel?.(cursor.confirming ? current?.label || "" : "");
+      window.InputDsMahjongHost?.scanState?.(
+        cursor.confirming || !current ? "" : (current.label || ""),
+        cursor.confirming || !current ? 0 : (cursor.direction < 0 ? -1 : 1)
+      );
+      document.querySelectorAll(".bci-focus").forEach(element => element.classList.remove("bci-focus"));
       this.updateCenterPrompt(current);
       if (!current) return;
 

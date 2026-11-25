@@ -118,6 +118,9 @@ dependencies {
     implementation(libs.onnxruntime.android)
     implementation(libs.androidx.work.runtime.ktx)
 
+    // 2D rigid-body physics engine (Box2D) for Watermelon merge game
+    implementation(libs.jbox2d.library)
+
     // Entertainment playback (music playlists and HLS television streams)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)

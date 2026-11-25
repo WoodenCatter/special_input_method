@@ -94,7 +94,7 @@ internal object AssistantHomePreview {
         )
         if (has("体育")) {
             return AssistantResult.Message(
-                "有两个体育频道：CCTV-5 体育、CCTV-5+ 体育赛事。想看哪一个？草稿已保留，可以补充后再发送。",
+                "有两个体育频道：CCTV-5 体育、CCTV-5+ 体育赛事，想看哪一个？",
                 clarify = true
             )
         }
@@ -189,6 +189,6 @@ internal object AssistantHomePreview {
                 clarify = false
             )
         }
-        return AssistantResult.Message("（模拟回复）收到：「$prompt」。正式版由电脑端助手服务回答。", clarify = false)
+        return AssistantResult.Message("收到：「$prompt」", clarify = false)
     }
 }
