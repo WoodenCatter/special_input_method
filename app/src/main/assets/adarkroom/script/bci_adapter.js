@@ -905,6 +905,37 @@
 		}
 	}
 
+	function applyDarkClass(isDark) {
+		withAdapterDomMutation(function () {
+			if (document.documentElement) {
+				document.documentElement.classList.toggle('bci-dark', Boolean(isDark));
+			}
+			if (document.body) {
+				document.body.classList.toggle('bci-dark', Boolean(isDark));
+			}
+		});
+	}
+
+	function syncViewportHeight() {
+		var vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 592;
+		if (vh < 200) vh = 592;
+		withAdapterDomMutation(function () {
+			if (document.documentElement) {
+				document.documentElement.style.setProperty('--adr-vh', vh + 'px');
+			}
+		});
+	}
+
+	// Apply initial theme & viewport height immediately to avoid any first-paint flash or 0px vh collapse.
+	try {
+		if (window.location && window.location.search && window.location.search.indexOf('theme=dark') !== -1) {
+			cfg.isDark = true;
+			applyDarkClass(true);
+		}
+		syncViewportHeight();
+		window.addEventListener('resize', syncViewportHeight);
+	} catch (e) {}
+
 	window.inputDsAdr = {
 		configure: function (intervalMs, manual, paused, frozen, graceMs, isDark) {
 			var prevPaused = cfg.paused;
@@ -915,9 +946,8 @@
 			cfg.graceMs = Math.max(0, Number(graceMs) || 0);
 			cfg.isDark = Boolean(isDark);
 
-			withAdapterDomMutation(function () {
-				document.body.classList.toggle('bci-dark', cfg.isDark);
-			});
+			syncViewportHeight();
+			applyDarkClass(cfg.isDark);
 			if (prevPaused !== cfg.paused) {
 				applyPausedState(cfg.paused);
 			}
@@ -940,6 +970,8 @@
 	// Initialize right after jQuery's ready handler finishes Engine.init()
 	function bootAdapter() {
 		if (state.ready) return;
+		syncViewportHeight();
+		applyDarkClass(cfg.isDark);
 		installGameHooks();
 		state.ready = true;
 		refreshItems(true);

@@ -5,6 +5,7 @@
  */
 
 :root {
+	--adr-vh: 592px;
 	--adr-bg: #F6F3EF;
 	--adr-panel: #FFFFFF;
 	--adr-panel2: #FBF9F6;
@@ -19,8 +20,10 @@
 	--adr-ok-tint: rgba(19, 138, 90, 0.16);
 	--adr-ov: rgba(246, 243, 239, 0.96);
 	--adr-cd: rgba(106, 97, 89, 0.24);
+	--adr-scrim: rgba(33, 28, 24, 0.24);
 }
 
+:root.bci-dark,
 body.bci-dark {
 	--adr-bg: #14110E;
 	--adr-panel: #1C1915;
@@ -36,13 +39,15 @@ body.bci-dark {
 	--adr-ok-tint: rgba(76, 203, 138, 0.18);
 	--adr-ov: rgba(20, 17, 14, 0.96);
 	--adr-cd: rgba(167, 157, 146, 0.26);
+	--adr-scrim: rgba(0, 0, 0, 0.48);
 }
 
 html, body {
 	margin: 0;
 	padding: 0;
 	width: 100%;
-	height: 100%;
+	height: var(--adr-vh, 592px);
+	min-height: var(--adr-vh, 592px);
 	overflow: hidden;
 	background: var(--adr-bg) !important;
 	color: var(--adr-text) !important;
@@ -108,7 +113,7 @@ div#wrapper {
 	margin: 0 auto !important;
 	width: 1080px !important;
 	padding: 10px 0 0 380px !important;
-	height: 100%;
+	height: var(--adr-vh, 592px) !important;
 	box-sizing: border-box;
 	position: relative;
 }
@@ -133,7 +138,7 @@ div#notifications {
 	top: 10px !important;
 	left: 0 !important;
 	width: 352px !important;
-	height: calc(100vh - 20px) !important;
+	height: calc(var(--adr-vh, 592px) - 20px) !important;
 	background: var(--adr-panel) !important;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 18px;
@@ -167,12 +172,12 @@ div#content {
 	position: relative;
 	overflow: hidden;
 	width: 700px !important;
-	height: calc(100vh - 20px) !important;
+	height: calc(var(--adr-vh, 592px) - 20px) !important;
 }
 
 div#outerSlider > div {
 	width: 700px !important;
-	height: calc(100vh - 20px) !important;
+	height: calc(var(--adr-vh, 592px) - 20px) !important;
 	overflow-y: auto !important;
 	overflow-x: hidden !important;
 	box-sizing: border-box;
@@ -185,7 +190,7 @@ div#header {
 	top: 0;
 	z-index: 32;
 	background: var(--adr-bg);
-	padding: 4px 0 12px 0 !important;
+	padding: 4px 270px 12px 0 !important;
 	height: auto !important;
 	min-height: 44px;
 	border-bottom: 1px solid var(--adr-line);
@@ -194,6 +199,7 @@ div#header {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
+	box-sizing: border-box;
 }
 
 div.headerButton {
@@ -429,13 +435,14 @@ div.dnManyBtn.disabled {
 
 /* Event modal overlay */
 div.eventPanel {
+	position: fixed !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
 	border: 3px solid var(--adr-focus) !important;
 	border-radius: 22px !important;
-	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.30) !important;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.30), 0 0 0 9999px var(--adr-scrim) !important;
 	width: 620px !important;
-	max-height: calc(100vh - 56px);
+	max-height: calc(var(--adr-vh, 592px) - 56px) !important;
 	overflow-y: auto;
 	left: 50% !important;
 	top: 50% !important;
@@ -443,6 +450,13 @@ div.eventPanel {
 	padding: 24px 28px !important;
 	box-sizing: border-box;
 	z-index: 60 !important;
+}
+
+.eventPanel:before,
+.eventPanel:after,
+.eventTitle:after {
+	content: none !important;
+	display: none !important;
 }
 
 .eventTitle {

@@ -2,6 +2,7 @@ package com.example.input_ds.ui.game
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -100,6 +101,10 @@ fun ADarkRoomScreen(
                 .fillMaxSize(),
             factory = { context ->
                 WebView(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                     activeWebView = this
                     val signalSink = ADarkRoomWebSignalSink(this)
                     activeSignalSink = signalSink
@@ -134,7 +139,7 @@ fun ADarkRoomScreen(
                         cacheMode = WebSettings.LOAD_NO_CACHE
                     }
                     webViewClient = OfflineADarkRoomWebViewClient(context.assets)
-                    loadUrl(ADR_URL)
+                    loadUrl("$ADR_URL&theme=${if (isDark) "dark" else "light"}")
                 }
             },
             update = { webView ->
