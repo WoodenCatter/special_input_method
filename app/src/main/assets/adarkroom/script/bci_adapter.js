@@ -262,7 +262,23 @@
 		});
 	}
 
+	function syncHeaderClearance() {
+		var header = document.getElementById('header');
+		var slider = document.getElementById('locationSlider');
+		if (!header || !slider) return;
+		var h = header.offsetHeight;
+		if (h > 0) {
+			var nextTop = (h + 20) + 'px';
+			if (slider.style.top !== nextTop) {
+				withAdapterDomMutation(function () {
+					slider.style.top = nextTop;
+				});
+			}
+		}
+	}
+
 	function collectScanItems() {
+		syncHeaderClearance();
 		ensureWorldPad();
 		ensureSpaceHud();
 		updateSoundButtonLabel();
@@ -437,10 +453,14 @@
 			}
 		}
 
-		// 3e. Utility buttons (Sound + Exit; Restart is touch-only to prevent accidental save wipes)
+		// 3e. Utility buttons (Sound, Restart [opens safe cancel-first confirm dialog], Exit)
 		var soundBtn = document.getElementById('bciSoundBtn');
 		if (soundBtn && isVisibleEl(soundBtn)) {
 			out.push({ el: soundBtn, label: soundBtn.textContent.trim(), id: 'bciSoundBtn' });
+		}
+		var restartBtn = document.getElementById('bciRestartBtn');
+		if (restartBtn && isVisibleEl(restartBtn)) {
+			out.push({ el: restartBtn, label: '重开', id: 'bciRestartBtn' });
 		}
 		if (exitBtn && isVisibleEl(exitBtn)) {
 			out.push({ el: exitBtn, label: '离开小黑屋', id: 'bciExitBtn' });

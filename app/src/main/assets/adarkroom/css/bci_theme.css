@@ -120,7 +120,8 @@ div#wrapper {
 
 div#saveNotify {
 	position: fixed !important;
-	top: 54px !important;
+	top: auto !important;
+	bottom: 14px !important;
 	right: 20px !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-ok) !important;
@@ -130,6 +131,7 @@ div#saveNotify {
 	font-size: 14px;
 	font-weight: 700;
 	z-index: 35;
+	pointer-events: none;
 }
 
 /* Left story chronicle column */
@@ -227,32 +229,85 @@ div.headerButton.selected:hover {
 
 /* Keep div.location overflow visible so #storesContainer sliding from Room onto Outside/Path is NEVER clipped! */
 div#locationSlider {
-	top: 62px;
+	top: 78px;
 }
 
 div.location {
 	width: 700px !important;
 	overflow: visible !important;
-	padding: 8px 6px 56px 6px;
+	padding: 0 6px 56px 6px;
 	box-sizing: border-box;
 }
 
-/* Game action buttons */
+/* Game action buttons: keep upstream left-column width so buttons NEVER collide with #storesContainer / #village */
 div.button {
 	position: relative;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 14px !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
-	font-size: 18px !important;
+	font-size: 17px !important;
 	font-weight: 700 !important;
-	width: auto !important;
-	min-width: 148px !important;
-	padding: 11px 16px !important;
+	width: 136px !important;
+	padding: 10px 10px !important;
 	margin-bottom: 10px !important;
 	box-sizing: border-box;
 	text-decoration: none !important;
 	transition: border-color 140ms ease-out, background-color 140ms ease-out;
+}
+
+#lightButton,
+#stokeButton,
+#embarkButton,
+#liftoffButton {
+	width: 180px !important;
+}
+
+div#buildBtns,
+div#craftBtns,
+div#buyBtns {
+	top: 76px !important;
+}
+
+div#buildBtns:before,
+div#craftBtns:before,
+div#buyBtns:before,
+div#fabricateButtons:before {
+	display: block;
+	margin-bottom: 4px;
+}
+
+div#workers {
+	left: 158px !important;
+	width: 292px !important;
+	padding: 12px 14px !important;
+	box-sizing: border-box;
+}
+
+div#outfitting {
+	width: 390px !important;
+	padding: 14px 14px 10px 14px !important;
+	box-sizing: border-box;
+}
+
+div#stores,
+div#weapons,
+div#village,
+div#perks,
+div#blueprints {
+	width: 220px !important;
+	padding: 14px 14px 10px 14px !important;
+	box-sizing: border-box;
+}
+
+div#population,
+div#bagspace {
+	background: var(--adr-bg) !important;
+	color: var(--adr-muted) !important;
+	padding: 0 6px !important;
+	top: -13px !important;
+	font-size: 15px !important;
+	font-weight: 700;
 }
 
 div.button:hover {
@@ -272,7 +327,7 @@ div.button div.cooldown {
 	border-radius: 12px;
 }
 
-/* Section containers: stores, buildings, workers, outfitting, perks, weapons */
+/* Section containers: stores, buildings, workers, outfitting, perks, weapons, blueprints */
 #storesContainer,
 #stores,
 #weapons,
@@ -280,6 +335,7 @@ div.button div.cooldown {
 #workers,
 #outfitting,
 #perks,
+#blueprints,
 #bagspace-world,
 #lootButtons {
 	background: var(--adr-panel) !important;
@@ -299,12 +355,15 @@ div.button div.cooldown {
 #workers:before,
 #outfitting:before,
 #perks:before,
+#blueprints:before,
 #lootButtons:before,
 #buildBtns:before,
 #craftBtns:before,
-#buyBtns:before {
+#buyBtns:before,
+#fabricateButtons:before {
 	background: var(--adr-bg) !important;
 	color: var(--adr-muted) !important;
+	font-size: 15px !important;
 	font-weight: 700;
 	padding: 0 6px;
 }
@@ -407,6 +466,26 @@ div.dnManyBtn {
 	overflow: hidden;
 }
 
+div.upBtn:before,
+div.dnBtn:before,
+div.upManyBtn:before,
+div.dnManyBtn:before {
+	content: none !important;
+	display: none !important;
+	border: none !important;
+}
+
+div.upBtn:after,
+div.dnBtn:after,
+div.upManyBtn:after,
+div.dnManyBtn:after {
+	position: static !important;
+	width: auto !important;
+	height: auto !important;
+	border: none !important;
+	line-height: 1 !important;
+}
+
 div.upBtn:after { content: "+" !important; font-size: 18px; font-weight: 800; color: var(--adr-text); }
 div.dnBtn:after { content: "−" !important; font-size: 18px; font-weight: 800; color: var(--adr-text); }
 div.upManyBtn:after { content: "+10" !important; font-size: 12px; font-weight: 800; color: var(--adr-muted); }
@@ -426,11 +505,16 @@ div.dnManyBtn.disabled {
 	line-height: 30px;
 }
 
-.workerRow .row_val,
-.outfitRow .row_val {
+div.outfitRow {
+	margin: 8px 0 !important;
+}
+
+.workerRow > .row_val,
+.outfitRow > .row_val {
 	display: flex;
 	align-items: center;
 	gap: 4px;
+	padding-right: 0 !important;
 }
 
 /* Event modal overlay */
@@ -483,13 +567,41 @@ div.eventPanel {
 
 div#buttons {
 	display: flex;
-	flex-wrap: wrap;
+	flex-direction: column;
 	gap: 12px;
 	padding-top: 8px;
 }
 
-div#buttons .button {
-	min-width: 160px !important;
+#exitButtons,
+#attackButtons,
+#healButtons,
+#lootButtons {
+	display: flex !important;
+	flex-wrap: wrap;
+	gap: 14px;
+	align-items: center;
+}
+
+#lootButtons {
+	padding: 14px 12px 12px 12px !important;
+}
+
+#lootButtons:before {
+	top: -13px !important;
+	left: 10px !important;
+	background: var(--adr-panel) !important;
+}
+
+#attackButtons .clear,
+#healButtons .clear {
+	display: none !important;
+}
+
+.eventPanel .button {
+	float: none !important;
+	width: auto !important;
+	min-width: 156px !important;
+	padding: 11px 18px !important;
 	margin: 0 !important;
 }
 

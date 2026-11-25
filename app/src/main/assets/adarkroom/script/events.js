@@ -823,8 +823,13 @@ var Events = {
 
 	clearTimeouts: () => {
 		clearInterval(Events._enemyAttackTimer);
-		Events._specialTimers.forEach(clearInterval);
+		Events._enemyAttackTimer = null;
+		if (Array.isArray(Events._specialTimers)) {
+			Events._specialTimers.forEach(clearInterval);
+			Events._specialTimers = [];
+		}
 		clearInterval(Events._dotTimer);
+		Events._dotTimer = null;
 	},
 
 	endFight: function() {
@@ -1432,6 +1437,8 @@ var Events = {
 		if (!event) {
 			return;
 		}
+		Events.cancelExplode();
+		Events.clearTimeouts();
 		AudioEngine.stopEventMusic();
 		Events.eventPanel().remove();
 		Events.activeEvent().eventPanel = null;
