@@ -262,7 +262,7 @@ div.button {
 #stokeButton,
 #embarkButton,
 #liftoffButton {
-	width: 210px !important;
+	width: 246px !important;
 	font-size: 22px !important;
 }
 
@@ -282,6 +282,56 @@ div#buyBtns {
 	left: 366px !important;
 	top: 116px !important;
 	padding-bottom: 28px;
+}
+
+/* Adaptive Room columns: fill available stage space cleanly before Craft / Buy unlock */
+#roomPanel[data-bci-cols="cols-1"] div#buildBtns {
+	left: 10px !important;
+	width: 508px !important;
+	display: grid !important;
+	grid-template-columns: repeat(2, 246px);
+	column-gap: 16px;
+	row-gap: 12px;
+	align-content: start;
+}
+
+#roomPanel[data-bci-cols="cols-1"] div#buildBtns:before {
+	grid-column: 1 / -1;
+	margin-bottom: 0;
+}
+
+#roomPanel[data-bci-cols="cols-1"] div#buildBtns .button {
+	width: 246px !important;
+	margin-bottom: 0 !important;
+}
+
+#roomPanel[data-bci-cols="cols-2-bc"] div#buildBtns,
+#roomPanel[data-bci-cols="cols-2-bb"] div#buildBtns {
+	left: 10px !important;
+	width: 246px !important;
+}
+
+#roomPanel[data-bci-cols="cols-2-bc"] div#craftBtns {
+	left: 272px !important;
+	width: 246px !important;
+}
+
+#roomPanel[data-bci-cols="cols-2-bb"] div#buyBtns {
+	left: 272px !important;
+	width: 246px !important;
+}
+
+#roomPanel[data-bci-cols="cols-2-bc"] div#buildBtns .button,
+#roomPanel[data-bci-cols="cols-2-bc"] div#craftBtns .button,
+#roomPanel[data-bci-cols="cols-2-bb"] div#buildBtns .button,
+#roomPanel[data-bci-cols="cols-2-bb"] div#buyBtns .button {
+	width: 246px !important;
+}
+
+/* Adaptive Outside buttons before workers unlock */
+#outsidePanel[data-bci-outside="no-workers"] #gatherButton,
+#outsidePanel[data-bci-outside="no-workers"] #trapsButton {
+	width: 246px !important;
 }
 
 div#fabricateButtons {

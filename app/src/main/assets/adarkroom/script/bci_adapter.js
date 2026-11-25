@@ -313,8 +313,41 @@
 		}
 	}
 
+	function syncAdaptiveLayout() {
+		var roomPanel = document.getElementById('roomPanel');
+		if (roomPanel) {
+			var hasBuild = Boolean(document.querySelector('#buildBtns .button'));
+			var hasCraft = Boolean(document.querySelector('#craftBtns .button'));
+			var hasBuy = Boolean(document.querySelector('#buyBtns .button'));
+			var mode = 'cols-3';
+			if (hasBuild && !hasCraft && !hasBuy) {
+				mode = 'cols-1';
+			} else if (hasBuild && hasCraft && !hasBuy) {
+				mode = 'cols-2-bc';
+			} else if (hasBuild && !hasCraft && hasBuy) {
+				mode = 'cols-2-bb';
+			}
+			if (roomPanel.dataset.bciCols !== mode) {
+				withAdapterDomMutation(function () {
+					roomPanel.dataset.bciCols = mode;
+				});
+			}
+		}
+		var outsidePanel = document.getElementById('outsidePanel');
+		if (outsidePanel) {
+			var hasWorkers = Boolean(document.querySelector('#workers .workerRow'));
+			var oMode = hasWorkers ? 'with-workers' : 'no-workers';
+			if (outsidePanel.dataset.bciOutside !== oMode) {
+				withAdapterDomMutation(function () {
+					outsidePanel.dataset.bciOutside = oMode;
+				});
+			}
+		}
+	}
+
 	function collectScanItems() {
 		syncHeaderClearance();
+		syncAdaptiveLayout();
 		syncModalSpaceFreeze();
 		ensureWorldPad();
 		ensureSpaceHud();
