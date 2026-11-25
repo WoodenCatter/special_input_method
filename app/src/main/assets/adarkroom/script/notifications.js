@@ -29,7 +29,12 @@ var Notifications = {
 	// Allow notification to the player
 	notify: function(module, text, noQueue) {
 		if(typeof text == 'undefined') return;
-		if(!/[.!?。！？…]$/.test(text)) text += ".";
+		if (/[\u4e00-\u9fff]/.test(text)) {
+			text = text.replace(/([\u4e00-\u9fff])\.$/, '$1。');
+			if (!/[。！？…]$/.test(text)) text += "。";
+		} else if (!/[.!?]$/.test(text)) {
+			text += ".";
+		}
 		if(module != null && Engine.activeModule != module) {
 			if(!noQueue) {
 				if(typeof this.notifyQueue[module] == 'undefined') {
