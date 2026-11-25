@@ -21,7 +21,8 @@ class AppSettingsStateTest {
                 AppSettingItem.SCAN_MODE,
                 AppSettingItem.DISPLAY_MODE,
                 AppSettingItem.FLOATING_BALL,
-                AppSettingItem.SPEED_PRACTICE
+                AppSettingItem.SPEED_PRACTICE,
+                AppSettingItem.ENTERTAINMENT_MARKET
             ),
             AppSettingItem.entries
         )
@@ -64,6 +65,7 @@ class AppSettingsStateTest {
         assertEquals("显示", AppSettingsLogic.valueFor(AppSettingItem.FLOATING_BALL, 60, 80, 1_500L, ScanMode.AUTO, AppUiSettings.DisplayMode.AUTO, true))
         assertEquals("隐藏", AppSettingsLogic.valueFor(AppSettingItem.FLOATING_BALL, 60, 80, 1_500L, ScanMode.AUTO, AppUiSettings.DisplayMode.AUTO, false))
         assertEquals("12 题", AppSettingsLogic.valueFor(AppSettingItem.SPEED_PRACTICE, 60, 80, 1_500L, ScanMode.AUTO, AppUiSettings.DisplayMode.AUTO, true))
+        assertEquals("6 / 11", AppSettingsLogic.valueFor(AppSettingItem.ENTERTAINMENT_MARKET, 60, 80, 1_500L, ScanMode.AUTO, AppUiSettings.DisplayMode.AUTO, true, 6))
     }
 
     @Test

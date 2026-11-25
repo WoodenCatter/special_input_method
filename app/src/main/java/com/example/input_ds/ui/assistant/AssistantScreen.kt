@@ -188,6 +188,7 @@ internal fun AssistantScreen(
     paused: Boolean = false,
     frozen: Boolean = false,
     fakeAssistant: Boolean = false,
+    initialEditing: Boolean = false,
     onToast: (String, Boolean) -> Unit = { _, _ -> },
     onEditingChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -210,7 +211,7 @@ internal fun AssistantScreen(
     val sharedDraft by AssistantCareStore.debugDraft.collectAsState()
     LaunchedEffect(context) { AssistantCareStore.load(context) }
 
-    var editing by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(initialEditing) }
     var draft by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(sharedDraft) {
         if (sharedDraft != draft) draft = sharedDraft
@@ -582,6 +583,19 @@ internal fun AssistantScreen(
         }
     }
 
+    LaunchedEffect(Unit) {
+        if (editing) {
+            input.setOnToast(onToast)
+            input.resumeOrOpenMode(
+                mode = InputMode.Assistant,
+                initialDraft = draft,
+                onSend = { finishInput(submitNow = true) },
+                onBack = { finishInput(submitNow = false) }
+            )
+            onEditingChange(true)
+        }
+    }
+
     DisposableEffect(Unit) {
         val handler: (ControlSignal) -> Unit = { currentSignalHandler(it) }
         AssistantInputBus.attach(
@@ -595,7 +609,11 @@ internal fun AssistantScreen(
             activeRequestJob = null
             requestGeneration++
             AssistantInputBus.detach(handler)
-            input.deactivate()
+            if (editing) {
+                input.suspendForDetour()
+            } else {
+                input.deactivate()
+            }
             onEditingChange(false)
         }
     }

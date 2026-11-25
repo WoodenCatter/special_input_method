@@ -44,8 +44,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.input_ds.communication.videoPermissions
 import com.example.input_ds.ui.communication.PadVideoScreen
 import com.example.input_ds.bci.BciController
@@ -62,7 +66,10 @@ import com.example.input_ds.model.AppDestination
 import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
 import com.example.input_ds.model.EntertainmentHubModule
-import com.example.input_ds.model.EntertainmentHubSelectionState
+import com.example.input_ds.model.EntertainmentCatalog
+import com.example.input_ds.model.EntertainmentCategory
+import com.example.input_ds.model.EntertainmentGalleryEntry
+import com.example.input_ds.model.EntertainmentMarketPreset
 import com.example.input_ds.model.HomeModule
 import com.example.input_ds.model.HomeSelectionState
 import com.example.input_ds.model.ScanMode
@@ -71,6 +78,7 @@ import com.example.input_ds.music.MusicInputBus
 import com.example.input_ds.news.NewsInputBus
 import com.example.input_ds.ui.news.NewsBriefingScreen
 import com.example.input_ds.settings.AppSettingsInputBus
+import com.example.input_ds.settings.EntertainmentMarketInputBus
 import com.example.input_ds.settings.SpeedPracticeInputBus
 import com.example.input_ds.personalization.ClassificationProtocol
 import com.example.input_ds.personalization.PersonalizationRepository
@@ -87,6 +95,12 @@ import com.example.input_ds.ui.chess.ChineseChessScreen
 import com.example.input_ds.mahjong.MahjongInputBus
 import com.example.input_ds.ui.doudizhu.DoudizhuScreen
 import com.example.input_ds.ui.mahjong.MahjongScreen
+import com.example.input_ds.game.LifeRestartEngine
+import com.example.input_ds.game.LifeRestartPhase
+import com.example.input_ds.game.LifeRestartProfile
+import com.example.input_ds.game.LifeRestartRepository
+import com.example.input_ds.game.LifeRestartRules
+import com.example.input_ds.game.LifeRestartState
 import com.example.input_ds.game.SnakeDirection
 import com.example.input_ds.game.SnakeAction
 import com.example.input_ds.game.SnakeClimbGame
@@ -101,8 +115,11 @@ import com.example.input_ds.ui.components.FloatingEegSignalSource
 import com.example.input_ds.ui.components.FloatingEegSignalWindow
 import com.example.input_ds.wizard.WizardGameActivity
 import com.example.input_ds.wizard.WizardGameInputBus
+import com.example.input_ds.ui.game.LifeRestartScanItem
+import com.example.input_ds.ui.game.LifeRestartScreen
 import com.example.input_ds.ui.game.SnakeClimbScreen
 import com.example.input_ds.ui.game.WatermelonScreen
+import com.example.input_ds.ui.game.buildLifeRestartScanItems
 import com.example.input_ds.ui.components.FloatingControlBall
 import com.example.input_ds.ui.communication.CommunicationScreen
 import com.example.input_ds.communication.CommunicationSignalOutcome
@@ -110,6 +127,7 @@ import com.example.input_ds.communication.CommunicationStage
 import com.example.input_ds.communication.CommunicationViewModel
 import com.example.input_ds.communication.ContactSelectionPolicy
 import com.example.input_ds.ui.game.MazeScreen
+import com.example.input_ds.ui.home.EntertainmentMarketScreen
 import com.example.input_ds.ui.home.EntertainmentScreen
 import com.example.input_ds.ui.home.HomeScreen
 import com.example.input_ds.ui.music.MusicScreen
@@ -152,6 +170,11 @@ class MainActivity : ComponentActivity() {
     private val watermelonEngine = WatermelonEngine()
     private val watermelonState = mutableStateOf(watermelonEngine.uiState)
     private var watermelonRenderRevision by androidx.compose.runtime.mutableLongStateOf(0L)
+    private var lifeRestartEngine: LifeRestartEngine? = null
+    private var lifeRestartLoading by mutableStateOf(false)
+    private var lifeRestartTotalAchievements by mutableIntStateOf(165)
+    private val lifeRestartState = mutableStateOf(LifeRestartState())
+    private var lifeRestartCursor by mutableStateOf(ScanCursor(size = 1))
     private var assistantMediaId: String? = null
     private val homeModules = HomeModule.entries
     private var cursor by mutableStateOf(ScanCursor(homeModules.size))
@@ -178,10 +201,15 @@ class MainActivity : ComponentActivity() {
     private var unregisterDebug: () -> Unit = {}
     private val caregiverPages = setOf(AppDestination.SETTINGS, AppDestination.COLLECTION, AppDestination.DEVICE_STATUS)
 
+    private var enabledEntertainmentIds by mutableStateOf(EntertainmentHubModule.allSubFeatureIds)
+    private var entertainmentCategory by mutableStateOf<EntertainmentCategory?>(null)
+    private var marketReturnDestination by mutableStateOf(AppDestination.ENTERTAINMENT)
+    private var marketSavedAssistantMediaId: String? = null
+    private var marketSavedAssistantEditing: Boolean = false
     private var entCursor by mutableStateOf(
         ScanCursor(
-            size = EntertainmentHubModule.entries.size,
-            index = EntertainmentHubModule.MAZE.ordinal,
+            size = EntertainmentCatalog.entriesFor(null, EntertainmentHubModule.allSubFeatureIds).size,
+            index = 1,
             direction = 1
         )
     )
@@ -225,6 +253,8 @@ class MainActivity : ComponentActivity() {
         }
 
         displayMode = AppUiSettings.displayMode(this)
+        enabledEntertainmentIds = AppUiSettings.readEnabledEntertainmentIds(applicationContext)
+        syncEntertainmentCategoryAndCursor()
         refreshHardwareSettings()
         unregisterDebug = registerRedesignDebug(this, ::debugCommand)
         setContent {
@@ -493,10 +523,29 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                LaunchedEffect(destination.value, lifeRestartLoading, lifeRestartState.value.phase, lifeRestartState.value.ended, call?.id, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, careOpen, frozen, scanMode.value, dwellRevision, state.scanIntervalMs) {
+                    if (destination.value == AppDestination.LIFE_RESTART && !lifeRestartLoading && call == null && nurseCall == null && speakOverlay == null && confirmOverlay == null && adjustOverlay == null && !careOpen && !frozen && scanMode.value == ScanMode.AUTO) {
+                        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                            lifeRestartCursor = lifeRestartCursor.copy(previousIndex = -1, advancedAtMs = 0L)
+                            runScanTimer({ state.scanIntervalMs }, { android.util.Log.e("ScanCursor", "LifeRestart tick failed", it) }) {
+                                advanceLifeRestart()
+                            }
+                        }
+                    }
+                }
+                val resolvedEntCategory = EntertainmentCatalog.resolveCategory(entertainmentCategory, enabledEntertainmentIds)
                 val path = if (destination.value == AppDestination.LIFE_ASSISTANT && assistantEditing && call == null) {
                     listOf("生活助手", "输入")
                 } else {
-                    patientPath(destination.value, conversation, video, mediaParent(), state.mode)
+                    patientPath(
+                        page = destination.value,
+                        chat = conversation,
+                        video = video,
+                        parent = mediaParent(),
+                        inputMode = state.mode,
+                        entertainmentCategory = resolvedEntCategory,
+                        marketParent = marketReturnDestination
+                    )
                 }
                 androidx.compose.runtime.SideEffect { statusPath = path }
                 LaunchedEffect(path, state.phase, state.charPage, state.predictionPage, state.initialPage, video.confirmEnd, nurseCall != null, speakOverlay != null, confirmOverlay != null, adjustOverlay != null, careOpen) {
@@ -547,7 +596,11 @@ class MainActivity : ComponentActivity() {
                                 activeAdjust.cursor.direction
                             )
                             destination.value == AppDestination.HOME -> ActionHints.list(homeModules[cursor.index].displayName, scanMode.value, cursor.direction)
-                            destination.value == AppDestination.ENTERTAINMENT -> ActionHints.list(EntertainmentHubModule.entries[entCursor.index].displayName, scanMode.value, entCursor.direction, true)
+                            destination.value == AppDestination.ENTERTAINMENT -> {
+                                val entries = currentEntertainmentEntries()
+                                val focused = entries.getOrElse(entCursor.index) { entries.first() }
+                                ActionHints.list(focused.displayName, scanMode.value, entCursor.direction, true)
+                            }
                             destination.value == AppDestination.COMMUNICATION -> communicationHints(conversation, state)
                             destination.value == AppDestination.INPUT_METHOD -> inputHints(state)
                             destination.value == AppDestination.SNAKE_CLIMB -> ActionHints("向左转", if (snakeState.value.direction == SnakeDirection.UP) "退出游戏" else "转向上方", "向右转")
@@ -691,6 +744,8 @@ class MainActivity : ComponentActivity() {
                                     feedbackSound = feedbackSound,
                                     floatingEegVisible = floatingEegVisible,
                                     displayMode = displayMode,
+                                    enabledEntertainmentCount = enabledEntertainmentIds.size,
+                                    totalEntertainmentCount = EntertainmentHubModule.subFeatures.size,
                                     info = careInfo,
                                     assistantConfig = assistantConfig,
                                     assistantDraft = assistantDraft,
@@ -722,6 +777,9 @@ class MainActivity : ComponentActivity() {
                                         if (!frozen) {
                                             feedback.toast("显示模式：${AppSettingsLogic.displayModeLabel(mode)}", true)
                                         }
+                                    },
+                                    onOpenEntertainmentMarket = {
+                                        openEntertainmentMarket(destination.value)
                                     },
                                     onSaveAssistantConfig = { connection ->
                                         AssistantCareStore.save(applicationContext, connection)
@@ -809,16 +867,28 @@ class MainActivity : ComponentActivity() {
                     applyWatermelonAction(WatermelonAction.REQUEST_EXIT)
                     return@BackHandler
                 }
+                if (destination.value == AppDestination.LIFE_RESTART) {
+                    confirmLifeRestartExit()
+                    return@BackHandler
+                }
                 if (destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB,
                         AppDestination.CHINESE_CHESS, AppDestination.MAHJONG, AppDestination.DOUDIZHU)) {
                     confirmGameExit()
                     return@BackHandler
                 }
+                if (destination.value == AppDestination.ENTERTAINMENT &&
+                    EntertainmentCatalog.resolveCategory(entertainmentCategory, enabledEntertainmentIds) != null
+                ) {
+                    enterEntertainmentEntry(EntertainmentGalleryEntry.BackCategories)
+                    return@BackHandler
+                }
                 val parent = when (destination.value) {
                     AppDestination.ENTERTAINMENT -> AppDestination.HOME
+                    AppDestination.ENTERTAINMENT_MARKET -> marketReturnDestination
                     AppDestination.ASYNC_MAZE,
                     AppDestination.SNAKE_CLIMB,
                     AppDestination.WATERMELON,
+                    AppDestination.LIFE_RESTART,
                     AppDestination.WIZARD_GAME,
                     AppDestination.CHINESE_CHESS,
                     AppDestination.DOUDIZHU,
@@ -846,21 +916,45 @@ class MainActivity : ComponentActivity() {
                 }
             )
 
-            AppDestination.ENTERTAINMENT -> EntertainmentScreen(
-                selection = EntertainmentHubSelectionState(entCursor.index, entCursor.direction),
-                scanMode = scanMode.value,
-                scanIntervalMs = inputState.scanIntervalMs,
-                dwellRevision = dwellRevision,
-                paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
-                frozen = frozen,
-                onSelect = { module ->
-                    entCursor = entCursor.reset(
-                        newSize = EntertainmentHubModule.entries.size,
-                        initial = EntertainmentHubModule.entries.indexOf(module)
-                    )
-                    enterEntertainmentModule(module)
+            AppDestination.ENTERTAINMENT -> {
+                val effectiveCategory = EntertainmentCatalog.resolveCategory(entertainmentCategory, enabledEntertainmentIds)
+                val entries = EntertainmentCatalog.entriesFor(effectiveCategory, enabledEntertainmentIds)
+                EntertainmentScreen(
+                    title = effectiveCategory?.displayName ?: "娱乐",
+                    entries = entries,
+                    selectedIndex = entCursor.index.coerceIn(0, (entries.size - 1).coerceAtLeast(0)),
+                    scanDirection = entCursor.direction,
+                    scanMode = scanMode.value,
+                    scanIntervalMs = inputState.scanIntervalMs,
+                    dwellRevision = dwellRevision,
+                    paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
+                    frozen = frozen,
+                    onSelect = { entry ->
+                        val idx = entries.indexOfFirst { it.id == entry.id }.coerceAtLeast(0)
+                        entCursor = entCursor.reset(newSize = entries.size, initial = idx)
+                        enterEntertainmentEntry(entry)
+                    }
+                )
+            }
+
+            AppDestination.ENTERTAINMENT_MARKET -> {
+                val returnLabel = when (marketReturnDestination) {
+                    AppDestination.APP_SETTINGS -> "返回设置"
+                    AppDestination.ENTERTAINMENT -> "返回娱乐"
+                    else -> "返回"
                 }
-            )
+                EntertainmentMarketScreen(
+                    enabledIds = enabledEntertainmentIds,
+                    returnLabel = returnLabel,
+                    scanMode = scanMode.value,
+                    scanIntervalMs = inputState.scanIntervalMs,
+                    paused = careOpen || nurseCall != null || adjustOverlay != null || hasActiveCall,
+                    frozen = frozen,
+                    onToggleModule = ::toggleEntertainmentModule,
+                    onApplyPreset = ::applyEntertainmentPreset,
+                    onBack = { navigateTo(marketReturnDestination) }
+                )
+            }
 
             AppDestination.INPUT_METHOD -> InputMethodPage(vm, hasActiveCall)
             AppDestination.COMMUNICATION -> {
@@ -882,6 +976,7 @@ class MainActivity : ComponentActivity() {
                     paused = careOpen || adjustOverlay != null || confirmOverlay != null || speakOverlay != null || nurseCall != null || hasActiveCall,
                     frozen = frozen,
                     fakeAssistant = debugFakeAssistant,
+                    initialEditing = assistantEditing,
                     onToast = { message, ok -> feedback.toast(message, ok) },
                     onEditingChange = { assistantEditing = it },
                     onBack = {
@@ -933,6 +1028,34 @@ class MainActivity : ComponentActivity() {
                 onTouchAimAtX = ::aimWatermelonAtX,
                 onTouchDropAtX = ::dropWatermelonAtX,
                 onBack = { applyWatermelonAction(WatermelonAction.REQUEST_EXIT) }
+            )
+
+            AppDestination.LIFE_RESTART -> LifeRestartScreen(
+                state = lifeRestartState.value,
+                cursor = lifeRestartCursor,
+                scanMode = scanMode.value,
+                scanIntervalMs = inputState.scanIntervalMs,
+                dwellRevision = dwellRevision,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null,
+                frozen = frozen,
+                loading = lifeRestartLoading,
+                totalAchievementsCount = lifeRestartTotalAchievements,
+                onChooseItem = ::chooseLifeRestartItem,
+                onAutoStepYear = ::stepLifeRestartYear,
+                onAdjustStatByTouch = ::adjustLifeRestartStat,
+                onSpeakYearText = { text, onDone ->
+                    if (!frozen) {
+                        speechOutput.speak(text, onUnavailable = {}, onDone = onDone)
+                    } else {
+                        onDone()
+                    }
+                },
+                onMarkSpokenCompleted = { rev ->
+                    lifeRestartEngine?.let { eng ->
+                        lifeRestartState.value = eng.markSpokenCompleted(rev)
+                    }
+                },
+                onStopSpeech = { speechOutput.stop() }
             )
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
@@ -993,11 +1116,13 @@ class MainActivity : ComponentActivity() {
                 floatingBallVisible = floatingBallVisible.value,
                 volumePercent = volumePercent,
                 brightnessPercent = brightnessPercent,
+                enabledEntertainmentCount = enabledEntertainmentIds.size,
                 paused = careOpen || adjustOverlay != null || nurseCall != null || hasActiveCall,
                 frozen = frozen,
                 initialIndex = settingsInitialIndex,
                 onOpenAdjust = ::openAdjustOverlay,
                 onOpenSpeedPractice = { navigateTo(AppDestination.SPEED_PRACTICE) },
+                onOpenEntertainmentMarket = { openEntertainmentMarket(AppDestination.APP_SETTINGS) },
                 onScanModeChange = { mode ->
                     scanMode.value = ScanSettings.writeMode(applicationContext, mode)
                     dwellRevision++
@@ -1196,8 +1321,60 @@ class MainActivity : ComponentActivity() {
         adjustOverlay = current.copy(cursor = current.cursor.advance(SystemClock.elapsedRealtime(), scanMode.value))
     }
 
+    private fun currentEntertainmentEntries(): List<EntertainmentGalleryEntry> =
+        EntertainmentCatalog.entriesFor(entertainmentCategory, enabledEntertainmentIds)
+
+    private fun syncEntertainmentCategoryAndCursor() {
+        val resolved = EntertainmentCatalog.resolveCategory(entertainmentCategory, enabledEntertainmentIds)
+        entertainmentCategory = resolved
+        val entries = EntertainmentCatalog.entriesFor(resolved, enabledEntertainmentIds)
+        val safeIndex = entCursor.index.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
+        entCursor = entCursor.reset(newSize = entries.size, initial = safeIndex)
+    }
+
+    private fun openEntertainmentMarket(returnTo: AppDestination) {
+        toggleCareSheet(false)
+        if (destination.value == AppDestination.ENTERTAINMENT_MARKET) {
+            return
+        }
+        if (returnTo != AppDestination.ENTERTAINMENT_MARKET) {
+            marketReturnDestination = returnTo
+            marketSavedAssistantMediaId = assistantMediaId
+            marketSavedAssistantEditing = assistantEditing
+        }
+        navigateTo(AppDestination.ENTERTAINMENT_MARKET)
+    }
+
+    private fun toggleEntertainmentModule(module: EntertainmentHubModule) {
+        val wasAdded = module.id in enabledEntertainmentIds
+        val next = if (wasAdded) enabledEntertainmentIds - module.id else enabledEntertainmentIds + module.id
+        enabledEntertainmentIds = AppUiSettings.writeEnabledEntertainmentIds(applicationContext, next)
+        syncEntertainmentCategoryAndCursor()
+        if (!frozen) {
+            feedback.toast(
+                if (wasAdded) "已移除「${module.displayName}」" else "已添加「${module.displayName}」",
+                true
+            )
+        }
+    }
+
+    private fun applyEntertainmentPreset(preset: EntertainmentMarketPreset) {
+        enabledEntertainmentIds = AppUiSettings.writeEnabledEntertainmentIds(applicationContext, preset.enabledIds)
+        syncEntertainmentCategoryAndCursor()
+        if (!frozen) {
+            feedback.toast("已应用「${preset.label}」", true)
+        }
+    }
+
     private fun advanceEntertainment() {
-        entCursor = entCursor.advance(SystemClock.elapsedRealtime(), scanMode.value)
+        val entries = currentEntertainmentEntries()
+        val synced = if (entCursor.size != entries.size) {
+            entCursor.reset(
+                newSize = entries.size,
+                initial = entCursor.index.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
+            )
+        } else entCursor
+        entCursor = synced.advance(SystemClock.elapsedRealtime(), scanMode.value)
     }
 
     private fun advanceSpeakOverlay() {
@@ -1282,6 +1459,7 @@ class MainActivity : ComponentActivity() {
         speakOverlay = speakOverlay?.let { it.copy(cursor = it.cursor.reset()) }
         confirmOverlay = confirmOverlay?.let { (spec, c) -> spec to c.copy(previousIndex = -1, advancedAtMs = 0L, direction = 1) }
         entCursor = entCursor.reset()
+        lifeRestartCursor = lifeRestartCursor.reset()
         cursor = cursor.reset()
     }
 
@@ -1450,6 +1628,236 @@ class MainActivity : ComponentActivity() {
         handleWatermelonStateTransition(previous, next)
     }
 
+    private fun readLifeRestartProfile(): LifeRestartProfile {
+        val prefs = getSharedPreferences("life_restart_profile", Context.MODE_PRIVATE)
+        val times = prefs.getInt("times", 0)
+        val locked = prefs.getInt("locked_talent", -1).takeIf { it >= 0 }
+        fun readIdSet(key: String): Set<Int> =
+            prefs.getStringSet(key, emptySet()).orEmpty().mapNotNull { it.toIntOrNull() }.toSet()
+        return LifeRestartProfile(
+            times = times,
+            lockedTalentId = locked,
+            talents = readIdSet("talents"),
+            events = readIdSet("events"),
+            achievements = readIdSet("achievements")
+        )
+    }
+
+    private fun saveLifeRestartProfile(profile: LifeRestartProfile) {
+        val prefs = getSharedPreferences("life_restart_profile", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("times", profile.times)
+            .putInt("locked_talent", profile.lockedTalentId ?: -1)
+            .putStringSet("talents", profile.talents.map { it.toString() }.toSet())
+            .putStringSet("events", profile.events.map { it.toString() }.toSet())
+            .putStringSet("achievements", profile.achievements.map { it.toString() }.toSet())
+            .apply()
+    }
+
+    private fun openLifeRestart() {
+        val existing = lifeRestartEngine
+        if (existing != null) {
+            lifeRestartLoading = false
+            val next = existing.startNewSession(readLifeRestartProfile())
+            lifeRestartState.value = next
+            syncLifeRestartCursor(next, initialIndex = 0)
+            navigateTo(AppDestination.LIFE_RESTART)
+            return
+        }
+        lifeRestartLoading = true
+        navigateTo(AppDestination.LIFE_RESTART)
+        lifecycleScope.launch {
+            val repo = withContext(Dispatchers.IO) {
+                LifeRestartRepository.loadFromAssets(applicationContext.assets)
+            }
+            lifeRestartTotalAchievements = repo.achievements.size
+            val engine = lifeRestartEngine ?: LifeRestartEngine(repo).also { lifeRestartEngine = it }
+            val stillRelevant = destination.value == AppDestination.LIFE_RESTART ||
+                (destination.value == AppDestination.ENTERTAINMENT_MARKET && marketReturnDestination == AppDestination.LIFE_RESTART)
+            if (stillRelevant && lifeRestartState.value.pulledTalents.isEmpty()) {
+                val next = engine.startNewSession(readLifeRestartProfile())
+                lifeRestartState.value = next
+                syncLifeRestartCursor(next, initialIndex = 0)
+            }
+            lifeRestartLoading = false
+        }
+    }
+
+    private fun syncLifeRestartCursor(state: LifeRestartState, initialIndex: Int? = null) {
+        val size = buildLifeRestartScanItems(state).size.coerceAtLeast(1)
+        val target = (initialIndex ?: lifeRestartCursor.index).coerceIn(0, size - 1)
+        lifeRestartCursor = ScanCursor(size = size, index = target, direction = 1)
+        dwellRevision++
+    }
+
+    private fun advanceLifeRestart() {
+        if (lifeRestartLoading) return
+        val items = buildLifeRestartScanItems(lifeRestartState.value)
+        if (items.isEmpty()) return
+        val synced = if (lifeRestartCursor.size != items.size) {
+            lifeRestartCursor.reset(newSize = items.size, initial = lifeRestartCursor.index.coerceIn(0, items.lastIndex))
+        } else lifeRestartCursor
+        lifeRestartCursor = synced.advance(SystemClock.elapsedRealtime(), scanMode.value)
+    }
+
+    private fun stepLifeRestartYear() {
+        val engine = lifeRestartEngine ?: return
+        val prevEnded = lifeRestartState.value.ended
+        val next = engine.nextYear()
+        lifeRestartState.value = next
+        if (next.ended && !prevEnded) {
+            bciController?.invalidatePendingCommands()
+            syncLifeRestartCursor(next, initialIndex = 0)
+        }
+    }
+
+    private fun adjustLifeRestartStat(key: String, delta: Int) {
+        val engine = lifeRestartEngine ?: return
+        lifeRestartState.value = engine.adjustStat(key, delta)
+    }
+
+    private fun confirmLifeRestartExit() {
+        confirmGameExit(onExit = {
+            speechOutput.stop()
+            lifeRestartEngine?.let { saveLifeRestartProfile(it.finalizeRunAndUpdateProfile()) }
+            navigateTo(AppDestination.ENTERTAINMENT)
+        })
+    }
+
+    private fun chooseLifeRestartItem(item: LifeRestartScanItem) {
+        val engine = lifeRestartEngine ?: return
+        val prevPhase = lifeRestartState.value.phase
+        when (item) {
+            is LifeRestartScanItem.TalentOption -> {
+                val (next, notice) = engine.toggleTalent(item.talent.id)
+                lifeRestartState.value = next
+                if (notice != null && !frozen) feedback.toast(notice)
+                if (next.selectedTalentIds.size >= LifeRestartRules.PICK_COUNT) {
+                    syncLifeRestartCursor(next, initialIndex = next.pulledTalents.size)
+                } else {
+                    dwellRevision++
+                }
+            }
+            is LifeRestartScanItem.PickAction -> when (item.kind) {
+                LifeRestartScanItem.PickAction.Kind.CONFIRM -> {
+                    val (next, notice) = engine.proceedToAllocate()
+                    lifeRestartState.value = next
+                    if (notice != null && !frozen) feedback.toast(notice)
+                    if (next.phase == LifeRestartPhase.ALLOCATE) {
+                        syncLifeRestartCursor(next, initialIndex = 0)
+                    } else {
+                        dwellRevision++
+                    }
+                }
+                LifeRestartScanItem.PickAction.Kind.REROLL -> {
+                    val next = engine.rerollTalents()
+                    lifeRestartState.value = next
+                    syncLifeRestartCursor(next, initialIndex = 0)
+                }
+                LifeRestartScanItem.PickAction.Kind.EXIT -> confirmLifeRestartExit()
+            }
+            is LifeRestartScanItem.AllocPresetOption -> {
+                val next = engine.applyAllocationPreset(item.preset)
+                lifeRestartState.value = next
+                if (!frozen) feedback.toast("已套用「${item.preset.label}」")
+                syncLifeRestartCursor(next, initialIndex = 0)
+            }
+            is LifeRestartScanItem.AllocAction -> when (item.kind) {
+                LifeRestartScanItem.AllocAction.Kind.START -> {
+                    val next = engine.beginLife()
+                    lifeRestartState.value = next
+                    syncLifeRestartCursor(next, initialIndex = 0)
+                }
+                LifeRestartScanItem.AllocAction.Kind.BACK_TO_TALENTS -> {
+                    val next = engine.backToPickTalents()
+                    lifeRestartState.value = next
+                    syncLifeRestartCursor(next, initialIndex = 0)
+                }
+                LifeRestartScanItem.AllocAction.Kind.EXIT -> confirmLifeRestartExit()
+            }
+            is LifeRestartScanItem.PlayAction -> when (item.kind) {
+                LifeRestartScanItem.PlayAction.Kind.TOGGLE_AUTO -> {
+                    val next = engine.toggleAutoPlay()
+                    lifeRestartState.value = next
+                    if (!next.autoPlay) speechOutput.stop()
+                    dwellRevision++
+                }
+                LifeRestartScanItem.PlayAction.Kind.NEXT_YEAR -> {
+                    stepLifeRestartYear()
+                    dwellRevision++
+                }
+                LifeRestartScanItem.PlayAction.Kind.TOGGLE_TTS -> {
+                    val next = engine.toggleReadAloud()
+                    lifeRestartState.value = next
+                    if (!next.readAloud) speechOutput.stop()
+                    if (!frozen) feedback.toast(if (next.readAloud) "已开启语音朗读" else "已关闭语音朗读")
+                    dwellRevision++
+                }
+                LifeRestartScanItem.PlayAction.Kind.SUMMARY -> {
+                    speechOutput.stop()
+                    val next = engine.openSummary()
+                    lifeRestartState.value = next
+                    syncLifeRestartCursor(next, initialIndex = 0)
+                }
+                LifeRestartScanItem.PlayAction.Kind.EXIT -> confirmLifeRestartExit()
+            }
+            is LifeRestartScanItem.LockTalentOption -> {
+                val next = engine.toggleLockTalent(item.talent.id)
+                lifeRestartState.value = next
+                if (!frozen) {
+                    val locked = next.pendingLockTalentId == item.talent.id
+                    feedback.toast(if (locked) "已锁定「${item.talent.name}」带入下世" else "已取消继承", locked)
+                }
+                dwellRevision++
+            }
+            is LifeRestartScanItem.SummaryAction -> when (item.kind) {
+                LifeRestartScanItem.SummaryAction.Kind.RESTART -> {
+                    val next = engine.restartAfterSummary()
+                    saveLifeRestartProfile(next.profile)
+                    lifeRestartState.value = next
+                    syncLifeRestartCursor(next, initialIndex = 0)
+                }
+                LifeRestartScanItem.SummaryAction.Kind.EXIT -> confirmLifeRestartExit()
+            }
+        }
+        if (lifeRestartState.value.phase != prevPhase) {
+            bciController?.invalidatePendingCommands()
+        }
+    }
+
+    private fun enterEntertainmentEntry(entry: EntertainmentGalleryEntry) {
+        when (entry) {
+            EntertainmentGalleryEntry.BackHome -> {
+                entertainmentCategory = null
+                navigateTo(AppDestination.HOME)
+            }
+            EntertainmentGalleryEntry.BackCategories -> {
+                val previousCategory = entertainmentCategory
+                entertainmentCategory = null
+                val rootEntries = EntertainmentCatalog.entriesFor(null, enabledEntertainmentIds)
+                val focusIdx = if (previousCategory != null) {
+                    EntertainmentCatalog.indexForCategory(previousCategory, enabledEntertainmentIds)
+                } else {
+                    if (rootEntries.size > 1) 1 else 0
+                }
+                entCursor = ScanCursor(size = rootEntries.size, index = focusIdx, direction = 1)
+                dwellRevision++
+            }
+            is EntertainmentGalleryEntry.Category -> {
+                entertainmentCategory = entry.category
+                val catEntries = EntertainmentCatalog.entriesFor(entry.category, enabledEntertainmentIds)
+                entCursor = ScanCursor(
+                    size = catEntries.size,
+                    index = if (catEntries.size > 1) 1 else 0,
+                    direction = 1
+                )
+                dwellRevision++
+            }
+            is EntertainmentGalleryEntry.Module -> enterEntertainmentModule(entry.module)
+            is EntertainmentGalleryEntry.Market -> openEntertainmentMarket(AppDestination.ENTERTAINMENT)
+        }
+    }
+
     private fun enterEntertainmentModule(module: EntertainmentHubModule) {
         when (module) {
             EntertainmentHubModule.MAZE -> {
@@ -1469,6 +1877,7 @@ class MainActivity : ComponentActivity() {
                 watermelonRenderRevision++
                 navigateTo(AppDestination.WATERMELON)
             }
+            EntertainmentHubModule.LIFE_RESTART -> openLifeRestart()
             EntertainmentHubModule.WIZARD_GAME -> {
                 navigateTo(AppDestination.WIZARD_GAME)
                 wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
@@ -1484,8 +1893,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun navigateTo(target: AppDestination) {
-        if (target != AppDestination.MUSIC && target != AppDestination.TV) assistantMediaId = null
-        if (target != AppDestination.LIFE_ASSISTANT) assistantEditing = false
+        val previous = destination.value
+        val returningFromMarket = previous == AppDestination.ENTERTAINMENT_MARKET && target == marketReturnDestination
+        if (target != AppDestination.MUSIC && target != AppDestination.TV && target != AppDestination.ENTERTAINMENT_MARKET) {
+            assistantMediaId = null
+        } else if (returningFromMarket && (target == AppDestination.MUSIC || target == AppDestination.TV)) {
+            assistantMediaId = marketSavedAssistantMediaId
+        }
+        if (target != AppDestination.LIFE_ASSISTANT) {
+            assistantEditing = false
+        } else if (returningFromMarket && marketSavedAssistantEditing) {
+            assistantEditing = true
+        }
+        if (target != AppDestination.ENTERTAINMENT_MARKET) {
+            marketSavedAssistantMediaId = null
+            marketSavedAssistantEditing = false
+        }
         if (target != AppDestination.HOME) {
             nurseCall = null
             nurseCallAlarm.stop()
@@ -1499,7 +1922,6 @@ class MainActivity : ComponentActivity() {
             adjustOverlay = null
         }
         bciController?.invalidatePendingCommands()
-        val previous = destination.value
         val homeFocus = if (target == AppDestination.HOME) {
             when (previous) {
                 AppDestination.COMMUNICATION, AppDestination.INPUT_METHOD -> HomeModule.COMMUNICATION.ordinal
@@ -1513,27 +1935,61 @@ class MainActivity : ComponentActivity() {
         }
         cursor = cursor.reset(newSize = homeModules.size, initial = homeFocus)
         destination.value = target
-        if (target != AppDestination.INPUT_METHOD && target != AppDestination.COMMUNICATION) {
+        if (target == AppDestination.ENTERTAINMENT_MARKET) {
+            if (previous == AppDestination.INPUT_METHOD || previous == AppDestination.COMMUNICATION) {
+                inputViewModel?.suspendForDetour()
+            } else if (previous != AppDestination.ENTERTAINMENT_MARKET) {
+                inputViewModel?.deactivate()
+            }
+        } else if (target != AppDestination.INPUT_METHOD && target != AppDestination.COMMUNICATION) {
             inputViewModel?.deactivate()
         }
-        if (target == AppDestination.COMMUNICATION && previous != AppDestination.INPUT_METHOD && previous != AppDestination.COMMUNICATION) {
+        if (returningFromMarket) {
+            when (target) {
+                AppDestination.INPUT_METHOD -> inputViewModel?.resumeVisible()
+                AppDestination.LIFE_RESTART -> {
+                    val engine = lifeRestartEngine
+                    if (!lifeRestartLoading && engine != null && lifeRestartState.value.pulledTalents.isEmpty()) {
+                        val next = engine.startNewSession(readLifeRestartProfile())
+                        lifeRestartState.value = next
+                        syncLifeRestartCursor(next, initialIndex = 0)
+                    }
+                }
+                else -> Unit
+            }
+        }
+        if (target == AppDestination.COMMUNICATION &&
+            previous != AppDestination.INPUT_METHOD &&
+            previous != AppDestination.COMMUNICATION &&
+            !returningFromMarket
+        ) {
             communicationViewModel?.enterContactList()
         }
         if (target == AppDestination.LIFE_ASSISTANT && previous in setOf(AppDestination.TV, AppDestination.MUSIC)) {
             AssistantInputBus.resetFocusToInput()
         }
         if (target == AppDestination.ENTERTAINMENT) {
+            val (targetCategory, targetIndex) = EntertainmentCatalog.entryContextFor(
+                previous = previous,
+                currentCategory = entertainmentCategory,
+                enabledIds = enabledEntertainmentIds
+            )
+            entertainmentCategory = targetCategory
+            val entries = EntertainmentCatalog.entriesFor(targetCategory, enabledEntertainmentIds)
             entCursor = ScanCursor(
-                size = EntertainmentHubModule.entries.size,
-                index = EntertainmentHubModule.initialIndexForEntry(previous),
+                size = entries.size,
+                index = targetIndex.coerceIn(0, (entries.size - 1).coerceAtLeast(0)),
                 direction = 1
             )
         }
+        if (target == AppDestination.ENTERTAINMENT_MARKET) {
+            EntertainmentMarketInputBus.resetFocus(1)
+        }
         if (target == AppDestination.APP_SETTINGS) {
-            settingsInitialIndex = if (previous == AppDestination.SPEED_PRACTICE) {
-                AppSettingItem.SPEED_PRACTICE.ordinal
-            } else {
-                AppSettingsLogic.INITIAL_INDEX
+            settingsInitialIndex = when (previous) {
+                AppDestination.SPEED_PRACTICE -> AppSettingItem.SPEED_PRACTICE.ordinal
+                AppDestination.ENTERTAINMENT_MARKET -> AppSettingItem.ENTERTAINMENT_MARKET.ordinal
+                else -> AppSettingsLogic.INITIAL_INDEX
             }
             refreshHardwareSettings()
             AppSettingsInputBus.resetFocus(settingsInitialIndex)
@@ -1619,12 +2075,19 @@ class MainActivity : ComponentActivity() {
             }
             "nav ent" -> {
                 clearTransientOverlaysForNav()
+                entertainmentCategory = null
                 navigateTo(AppDestination.ENTERTAINMENT)
+                val entries = EntertainmentCatalog.entriesFor(null, enabledEntertainmentIds)
                 entCursor = ScanCursor(
-                    size = EntertainmentHubModule.entries.size,
-                    index = EntertainmentHubModule.MAZE.ordinal,
+                    size = entries.size,
+                    index = if (entries.size > 1) 1 else 0,
                     direction = 1
                 )
+                dwellRevision++
+            }
+            "nav market" -> {
+                clearTransientOverlaysForNav()
+                openEntertainmentMarket(AppDestination.ENTERTAINMENT)
                 dwellRevision++
             }
             "nav tv" -> {
@@ -1643,6 +2106,10 @@ class MainActivity : ComponentActivity() {
                 watermelonRenderRevision++
                 navigateTo(AppDestination.WATERMELON)
                 dwellRevision++
+            }
+            "nav liferestart" -> {
+                clearTransientOverlaysForNav()
+                openLifeRestart()
             }
             "nav news" -> {
                 clearTransientOverlaysForNav()
@@ -1703,6 +2170,7 @@ class MainActivity : ComponentActivity() {
                     adjustOverlay != null -> advanceAdjustOverlay()
                     destination.value == AppDestination.HOME -> advanceHome()
                     destination.value == AppDestination.ENTERTAINMENT -> advanceEntertainment()
+                    destination.value == AppDestination.ENTERTAINMENT_MARKET -> EntertainmentMarketInputBus.debugTick()
                     destination.value == AppDestination.APP_SETTINGS -> AppSettingsInputBus.debugTick()
                     destination.value == AppDestination.SPEED_PRACTICE -> SpeedPracticeInputBus.debugTick()
                     destination.value == AppDestination.SNAKE_CLIMB -> applySnakeAction(SnakeAction.TICK)
@@ -1710,6 +2178,7 @@ class MainActivity : ComponentActivity() {
                         repeat(15) { stepWatermelonPhysics(WatermelonGame.FIXED_DT) }
                         watermelonRenderRevision++
                     }
+                    destination.value == AppDestination.LIFE_RESTART -> advanceLifeRestart()
                     destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
                     destination.value == AppDestination.COMMUNICATION -> {
                         val chat = communicationViewModel
@@ -1912,24 +2381,34 @@ class MainActivity : ComponentActivity() {
                 }
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
-            AppDestination.ENTERTAINMENT -> when (signal) {
-                ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
-                    entCursor = entCursor.look(if (signal == ControlSignal.LEFT_LOOK) -1 else 1, scanMode.value)
-                    dwellRevision++
-                }
-                ControlSignal.BITE -> {
-                    val selected = entCursor.selected(
-                        SystemClock.elapsedRealtime(),
-                        if (frozen) 0 else AppUiSettings.graceMs(this),
-                        scanMode.value
+            AppDestination.ENTERTAINMENT -> {
+                val entries = currentEntertainmentEntries()
+                val synced = if (entCursor.size != entries.size) {
+                    entCursor.reset(
+                        newSize = entries.size,
+                        initial = entCursor.index.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
                     )
-                    if (selected != entCursor.index) {
-                        entCursor = entCursor.copy(index = selected)
+                } else entCursor
+                when (signal) {
+                    ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                        entCursor = synced.look(if (signal == ControlSignal.LEFT_LOOK) -1 else 1, scanMode.value)
+                        dwellRevision++
                     }
-                    enterEntertainmentModule(EntertainmentHubModule.entries[selected])
+                    ControlSignal.BITE -> {
+                        val selected = synced.selected(
+                            SystemClock.elapsedRealtime(),
+                            if (frozen) 0 else AppUiSettings.graceMs(this),
+                            scanMode.value
+                        )
+                        if (selected != synced.index) {
+                            entCursor = synced.copy(index = selected)
+                        }
+                        entries.getOrNull(selected)?.let(::enterEntertainmentEntry)
+                    }
+                    ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
                 }
-                ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
             }
+            AppDestination.ENTERTAINMENT_MARKET -> EntertainmentMarketInputBus.dispatch(signal)
             AppDestination.INPUT_METHOD -> inputViewModel?.handleSignal(signal)
             AppDestination.LIFE_ASSISTANT -> AssistantInputBus.dispatch(signal)
             AppDestination.WIZARD_GAME -> Unit
@@ -1947,6 +2426,35 @@ class MainActivity : ComponentActivity() {
                 ControlSignal.RIGHT_LOOK -> applyWatermelonAction(WatermelonAction.LOOK_RIGHT)
                 ControlSignal.BITE -> applyWatermelonAction(WatermelonAction.BITE)
                 ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+            }
+            AppDestination.LIFE_RESTART -> {
+                if (lifeRestartLoading) return
+                val items = buildLifeRestartScanItems(lifeRestartState.value)
+                if (items.isEmpty()) return
+                val synced = if (lifeRestartCursor.size != items.size) {
+                    lifeRestartCursor.reset(
+                        newSize = items.size,
+                        initial = lifeRestartCursor.index.coerceIn(0, items.lastIndex)
+                    )
+                } else lifeRestartCursor
+                when (signal) {
+                    ControlSignal.LEFT_LOOK, ControlSignal.RIGHT_LOOK -> {
+                        lifeRestartCursor = synced.look(if (signal == ControlSignal.LEFT_LOOK) -1 else 1, scanMode.value)
+                        dwellRevision++
+                    }
+                    ControlSignal.BITE -> {
+                        val selected = synced.selected(
+                            SystemClock.elapsedRealtime(),
+                            if (frozen) 0L else AppUiSettings.graceMs(this),
+                            scanMode.value
+                        )
+                        if (selected != synced.index) {
+                            lifeRestartCursor = synced.copy(index = selected)
+                        }
+                        items.getOrNull(selected)?.let(::chooseLifeRestartItem)
+                    }
+                    ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
+                }
             }
             AppDestination.COMMUNICATION -> {
                 val chat = communicationViewModel ?: return

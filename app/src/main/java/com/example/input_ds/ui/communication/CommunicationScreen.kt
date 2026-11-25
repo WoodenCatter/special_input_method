@@ -93,7 +93,7 @@ fun CommunicationScreen(
     LaunchedEffect(state.stage, state.contact?.conversationId) {
         val contact = state.contact
         if (state.stage == CommunicationStage.CHAT_INPUT && contact != null) {
-            input.openMode(
+            input.resumeOrOpenMode(
                 mode = InputMode.Chat(contact.conversationId, contact.name),
                 onSend = { text ->
                     val trimmed = text.trim()

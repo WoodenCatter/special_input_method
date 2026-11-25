@@ -12,6 +12,7 @@ object AppUiSettings {
     private const val PREFERENCES = "app_ui_settings"
     private const val KEY_FLOATING_BALL_VISIBLE = "floating_ball_visible"
     private const val KEY_SCREEN_BRIGHTNESS = "screen_brightness"
+    private const val KEY_DISABLED_ENTERTAINMENT_IDS = "disabled_entertainment_ids"
 
     enum class DisplayMode { AUTO, LIGHT, DARK }
 
@@ -62,5 +63,23 @@ object AppUiSettings {
             .putFloat(KEY_SCREEN_BRIGHTNESS, validated)
             .apply()
         return validated
+    }
+
+    fun readDisabledEntertainmentIds(context: Context): Set<String> =
+        preferences(context).getStringSet(KEY_DISABLED_ENTERTAINMENT_IDS, emptySet())
+            ?.intersect(EntertainmentHubModule.allSubFeatureIds)
+            ?: emptySet()
+
+    fun readEnabledEntertainmentIds(context: Context): Set<String> =
+        EntertainmentHubModule.allSubFeatureIds - readDisabledEntertainmentIds(context)
+
+    fun writeEnabledEntertainmentIds(context: Context, enabledIds: Set<String>): Set<String> {
+        val validEnabled = enabledIds.intersect(EntertainmentHubModule.allSubFeatureIds)
+        val disabled = EntertainmentHubModule.allSubFeatureIds - validEnabled
+        preferences(context)
+            .edit()
+            .putStringSet(KEY_DISABLED_ENTERTAINMENT_IDS, HashSet(disabled))
+            .apply()
+        return validEnabled
     }
 }

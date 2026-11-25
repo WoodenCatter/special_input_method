@@ -47,6 +47,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.example.input_ds.R
 import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.model.ControlSignal
+import com.example.input_ds.model.EntertainmentHubModule
 import com.example.input_ds.model.ScanCursor
 import com.example.input_ds.model.ScanMode
 import com.example.input_ds.model.ScanSettings
@@ -75,7 +76,8 @@ internal enum class AppSettingItem(
     SCAN_MODE("扫描方式", R.drawable.ic_lucide_arrow_left_right, "自动轮转，或左右手动切换"),
     DISPLAY_MODE("显示模式", R.drawable.ic_lucide_sun_moon, "自动模式下 7:00–19:00 为日间"),
     FLOATING_BALL("模拟悬浮球", R.drawable.ic_lucide_circle_dot, "屏幕悬浮控制按钮"),
-    SPEED_PRACTICE("速度练习", R.drawable.ic_lucide_target, "12 次目标选择，测算推荐停留时长")
+    SPEED_PRACTICE("速度练习", R.drawable.ic_lucide_target, "12 次目标选择，测算推荐停留时长"),
+    ENTERTAINMENT_MARKET("功能市场", R.drawable.ic_lucide_gamepad_2, "添加或移除娱乐板块中的子功能")
 }
 
 internal object AppSettingsLogic {
@@ -142,7 +144,8 @@ internal object AppSettingsLogic {
         scanIntervalMs: Long,
         scanMode: ScanMode,
         displayMode: AppUiSettings.DisplayMode,
-        floatingBallVisible: Boolean
+        floatingBallVisible: Boolean,
+        enabledEntertainmentCount: Int = EntertainmentHubModule.subFeatures.size
     ): String = when (item) {
         AppSettingItem.BACK -> ""
         AppSettingItem.VOLUME -> "${volumePercent}%"
@@ -152,6 +155,7 @@ internal object AppSettingsLogic {
         AppSettingItem.DISPLAY_MODE -> displayModeLabel(displayMode)
         AppSettingItem.FLOATING_BALL -> if (floatingBallVisible) "显示" else "隐藏"
         AppSettingItem.SPEED_PRACTICE -> "12 题"
+        AppSettingItem.ENTERTAINMENT_MARKET -> "$enabledEntertainmentCount / ${EntertainmentHubModule.subFeatures.size}"
     }
 }
 
@@ -163,11 +167,13 @@ fun AppSettingsScreen(
     floatingBallVisible: Boolean,
     volumePercent: Int,
     brightnessPercent: Int,
+    enabledEntertainmentCount: Int = EntertainmentHubModule.subFeatures.size,
     paused: Boolean,
     frozen: Boolean,
     initialIndex: Int = AppSettingsLogic.INITIAL_INDEX,
     onOpenAdjust: (AdjustOverlayKind) -> Unit,
     onOpenSpeedPractice: () -> Unit,
+    onOpenEntertainmentMarket: () -> Unit = {},
     onScanModeChange: (ScanMode) -> Unit,
     onDisplayModeChange: (AppUiSettings.DisplayMode) -> Unit,
     onFloatingBallVisibleChange: (Boolean) -> Unit,
@@ -179,6 +185,7 @@ fun AppSettingsScreen(
     val currentOnBack by rememberUpdatedState(onBack)
     val currentOnOpenAdjust by rememberUpdatedState(onOpenAdjust)
     val currentOnOpenSpeedPractice by rememberUpdatedState(onOpenSpeedPractice)
+    val currentOnOpenEntertainmentMarket by rememberUpdatedState(onOpenEntertainmentMarket)
     val currentOnScanModeChange by rememberUpdatedState(onScanModeChange)
     val currentOnDisplayModeChange by rememberUpdatedState(onDisplayModeChange)
     val currentOnFloatingBallChange by rememberUpdatedState(onFloatingBallVisibleChange)
@@ -231,6 +238,7 @@ fun AppSettingsScreen(
                 dwellRevision++
             }
             AppSettingItem.SPEED_PRACTICE -> currentOnOpenSpeedPractice()
+            AppSettingItem.ENTERTAINMENT_MARKET -> currentOnOpenEntertainmentMarket()
         }
     }
 
@@ -324,7 +332,8 @@ fun AppSettingsScreen(
                     scanIntervalMs = scanIntervalMs,
                     scanMode = scanMode,
                     displayMode = displayMode,
-                    floatingBallVisible = floatingBallVisible
+                    floatingBallVisible = floatingBallVisible,
+                    enabledEntertainmentCount = enabledEntertainmentCount
                 )
                 Row(
                     modifier = Modifier
@@ -391,7 +400,8 @@ fun AppSettingsScreen(
             scanIntervalMs = scanIntervalMs,
             scanMode = scanMode,
             displayMode = displayMode,
-            floatingBallVisible = floatingBallVisible
+            floatingBallVisible = floatingBallVisible,
+            enabledEntertainmentCount = enabledEntertainmentCount
         )
         val panelShape = RoundedCornerShape(20.dp)
         Column(

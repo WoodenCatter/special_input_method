@@ -9,6 +9,7 @@ enum class AppDestination {
     ASYNC_MAZE,
     SNAKE_CLIMB,
     WATERMELON,
+    LIFE_RESTART,
     WIZARD_GAME,
     CHINESE_CHESS,
     DOUDIZHU,
@@ -17,6 +18,7 @@ enum class AppDestination {
     MUSIC,
     NEWS_BRIEFING,
     APP_SETTINGS,
+    ENTERTAINMENT_MARKET,
     SPEED_PRACTICE,
     SETTINGS,
     DEVICE_STATUS,
@@ -63,26 +65,44 @@ data class HomeSelectionState(
         }
 }
 
+enum class EntertainmentCategory(
+    val id: String,
+    val displayName: String,
+    val hue: Float
+) {
+    MEDIA("media", "视听资讯", 214f),
+    BOARD("board", "棋牌", 12f),
+    GAMES("games", "游戏", 148f);
+}
+
 enum class EntertainmentHubModule(
     val id: String,
     val destination: AppDestination,
     val displayName: String,
     val hue: Float,
+    val category: EntertainmentCategory? = null,
     val isNavigation: Boolean = false
 ) {
-    BACK("back", AppDestination.HOME, "返回主页", 220f, isNavigation = true),
-    MAZE("maze", AppDestination.ASYNC_MAZE, "迷宫", 198f),
-    SNAKE_CLIMB("snake", AppDestination.SNAKE_CLIMB, "向上贪吃蛇", 132f),
-    WATERMELON("watermelon", AppDestination.WATERMELON, "合成大西瓜", 148f),
-    WIZARD_GAME("wizard", AppDestination.WIZARD_GAME, "魔法师", 262f),
-    CHINESE_CHESS("chess", AppDestination.CHINESE_CHESS, "中国象棋", 12f),
-    DOUDIZHU("ddz", AppDestination.DOUDIZHU, "斗地主", 345f),
-    MAHJONG("mj", AppDestination.MAHJONG, "麻将", 165f),
-    TELEVISION("tv", AppDestination.TV, "看电视", 214f),
-    MUSIC("music", AppDestination.MUSIC, "音乐", 34f),
-    NEWS_BRIEFING("news", AppDestination.NEWS_BRIEFING, "看新闻", 232f);
+    BACK("back", AppDestination.HOME, "返回主页", 220f, category = null, isNavigation = true),
+    MAZE("maze", AppDestination.ASYNC_MAZE, "迷宫", 198f, category = EntertainmentCategory.GAMES),
+    SNAKE_CLIMB("snake", AppDestination.SNAKE_CLIMB, "向上贪吃蛇", 132f, category = EntertainmentCategory.GAMES),
+    WATERMELON("watermelon", AppDestination.WATERMELON, "合成大西瓜", 148f, category = EntertainmentCategory.GAMES),
+    LIFE_RESTART("liferestart", AppDestination.LIFE_RESTART, "人生重开", 48f, category = EntertainmentCategory.GAMES),
+    WIZARD_GAME("wizard", AppDestination.WIZARD_GAME, "魔法师", 262f, category = EntertainmentCategory.GAMES),
+    CHINESE_CHESS("chess", AppDestination.CHINESE_CHESS, "中国象棋", 12f, category = EntertainmentCategory.BOARD),
+    DOUDIZHU("ddz", AppDestination.DOUDIZHU, "斗地主", 345f, category = EntertainmentCategory.BOARD),
+    MAHJONG("mj", AppDestination.MAHJONG, "麻将", 165f, category = EntertainmentCategory.BOARD),
+    TELEVISION("tv", AppDestination.TV, "看电视", 214f, category = EntertainmentCategory.MEDIA),
+    MUSIC("music", AppDestination.MUSIC, "音乐", 34f, category = EntertainmentCategory.MEDIA),
+    NEWS_BRIEFING("news", AppDestination.NEWS_BRIEFING, "看新闻", 232f, category = EntertainmentCategory.MEDIA);
 
     companion object {
+        val subFeatures: List<EntertainmentHubModule> = entries.filter { !it.isNavigation }
+        val allSubFeatureIds: Set<String> = subFeatures.map { it.id }.toSet()
+
+        fun modulesIn(category: EntertainmentCategory): List<EntertainmentHubModule> =
+            entries.filter { it.category == category }
+
         fun initialIndexForEntry(previous: AppDestination): Int =
             entries.indexOfFirst { !it.isNavigation && it.destination == previous }
                 .takeIf { it >= 0 } ?: MAZE.ordinal

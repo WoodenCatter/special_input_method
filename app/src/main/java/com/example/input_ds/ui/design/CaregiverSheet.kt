@@ -47,6 +47,7 @@ import com.example.input_ds.assistant.AssistantService
 import com.example.input_ds.assistant.AssistantServiceException
 import com.example.input_ds.bci.NaoyunBleManager
 import com.example.input_ds.model.AppUiSettings
+import com.example.input_ds.model.EntertainmentHubModule
 import com.example.input_ds.ui.bci.EegStereoView
 import com.example.input_ds.ui.theme.BciType
 import com.example.input_ds.ui.theme.LocalBciColors
@@ -68,6 +69,8 @@ internal fun CaregiverSheet(
     feedbackSound: Boolean,
     floatingEegVisible: Boolean,
     displayMode: AppUiSettings.DisplayMode = AppUiSettings.DisplayMode.AUTO,
+    enabledEntertainmentCount: Int = EntertainmentHubModule.subFeatures.size,
+    totalEntertainmentCount: Int = EntertainmentHubModule.subFeatures.size,
     info: CaregiverInfo,
     assistantConfig: AssistantConfig,
     assistantDraft: String,
@@ -80,6 +83,7 @@ internal fun CaregiverSheet(
     onFeedbackSoundChange: (Boolean) -> Unit,
     onFloatingEegVisibleChange: (Boolean) -> Unit,
     onDisplayModeChange: (AppUiSettings.DisplayMode) -> Unit = {},
+    onOpenEntertainmentMarket: () -> Unit = {},
     onSaveAssistantConfig: (AssistantConnection) -> Unit,
     onAssistantDraftChange: (String) -> Unit,
     onAssistantNotice: (String, Boolean) -> Unit,
@@ -198,6 +202,15 @@ internal fun CaregiverSheet(
                         selected = displayMode,
                         onSelect = onDisplayModeChange
                     )
+                }
+                CareRow("功能市场") {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CareBoldValue("$enabledEntertainmentCount / $totalEntertainmentCount")
+                        CareSmallButton("管理", onClick = onOpenEntertainmentMarket)
+                    }
                 }
                 CareRow("设备") {
                     CareBoldValue(info.deviceSummary)

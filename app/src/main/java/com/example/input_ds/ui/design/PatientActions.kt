@@ -24,7 +24,9 @@ internal fun patientPath(
     chat: CommunicationState,
     video: VideoState,
     parent: AppDestination,
-    inputMode: InputMode = InputMode.Talk
+    inputMode: InputMode = InputMode.Talk,
+    entertainmentCategory: EntertainmentCategory? = null,
+    marketParent: AppDestination = AppDestination.ENTERTAINMENT
 ): List<String> {
     val name = chat.contact?.name.orEmpty()
     val media = if (parent == AppDestination.LIFE_ASSISTANT) "生活助手" else "娱乐"
@@ -44,8 +46,17 @@ internal fun patientPath(
         }
         AppDestination.LIFE_ASSISTANT -> listOf("主页", "生活助手")
         AppDestination.APP_SETTINGS -> listOf("主页", "设置")
+        AppDestination.ENTERTAINMENT_MARKET -> when (marketParent) {
+            AppDestination.APP_SETTINGS -> listOf("设置", "功能市场")
+            AppDestination.ENTERTAINMENT -> listOf("娱乐", "功能市场")
+            else -> listOf("主页", "功能市场")
+        }
         AppDestination.SPEED_PRACTICE -> listOf("主页", "设置", "速度练习")
-        AppDestination.ENTERTAINMENT -> listOf("主页", "娱乐")
+        AppDestination.ENTERTAINMENT -> if (entertainmentCategory != null) {
+            listOf("娱乐", entertainmentCategory.displayName)
+        } else {
+            listOf("主页", "娱乐")
+        }
         AppDestination.TV -> listOf(media, "看电视")
         AppDestination.MUSIC -> listOf(media, "音乐")
         else -> listOf("娱乐", EntertainmentHubModule.entries.firstOrNull { it.destination == page }?.displayName.orEmpty())

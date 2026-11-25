@@ -48,6 +48,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
@@ -70,8 +71,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.input_ds.R
+import com.example.input_ds.model.EntertainmentGalleryEntry
 import com.example.input_ds.model.EntertainmentHubModule
-import com.example.input_ds.model.EntertainmentHubSelectionState
 import com.example.input_ds.model.ScanMode
 import com.example.input_ds.ui.theme.BciType
 import com.example.input_ds.ui.theme.LocalBciColors
@@ -85,24 +86,27 @@ private val GalleryEasing = CubicBezierEasing(0.2f, 0.75f, 0.2f, 1f)
 
 @Composable
 fun EntertainmentScreen(
-    selection: EntertainmentHubSelectionState,
+    title: String,
+    entries: List<EntertainmentGalleryEntry>,
+    selectedIndex: Int,
+    scanDirection: Int,
     scanMode: ScanMode,
     scanIntervalMs: Long,
     dwellRevision: Int,
     paused: Boolean,
     frozen: Boolean,
-    onSelect: (EntertainmentHubModule) -> Unit
+    onSelect: (EntertainmentGalleryEntry) -> Unit
 ) {
+    if (entries.isEmpty()) return
     val c = LocalBciColors.current
-    val modules = EntertainmentHubModule.entries
-    val n = modules.size
-    val selectedIndex = selection.selectedIndex.coerceIn(0, n - 1)
-    val dir = if (selection.scanDirection < 0) -1 else 1
-    val nextIndex = (selectedIndex + dir + n) % n
+    val n = entries.size
+    val safeIndex = selectedIndex.coerceIn(0, n - 1)
+    val dir = if (scanDirection < 0) -1 else 1
+    val nextIndex = (safeIndex + dir + n) % n
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val dwellProgress = remember { Animatable(0f) }
-    LaunchedEffect(selectedIndex, dir, dwellRevision, scanIntervalMs, scanMode, paused, frozen, lifecycleOwner) {
+    LaunchedEffect(safeIndex, dir, dwellRevision, scanIntervalMs, scanMode, paused, frozen, lifecycleOwner) {
         when {
             frozen -> dwellProgress.snapTo(if (scanMode == ScanMode.AUTO) 0.5f else 0f)
             paused || scanMode != ScanMode.AUTO -> dwellProgress.snapTo(0f)
@@ -127,7 +131,7 @@ fun EntertainmentScreen(
             verticalAlignment = Alignment.Bottom
         ) {
             Text(
-                text = "娱乐",
+                text = title,
                 modifier = Modifier.alignByBaseline(),
                 color = c.text,
                 fontFamily = BciType.chinese,
@@ -136,7 +140,8 @@ fun EntertainmentScreen(
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
             Spacer(Modifier.width(18.dp))
-            val posText = if (selectedIndex == 0) "— / ${n - 1}" else "$selectedIndex / ${n - 1}"
+            val nonNavTotal = (n - 1).coerceAtLeast(1)
+            val posText = if (safeIndex == 0) "— / $nonNavTotal" else "$safeIndex / $nonNavTotal"
             Text(
                 text = posText,
                 modifier = Modifier.alignByBaseline(),
@@ -164,13 +169,14 @@ fun EntertainmentScreen(
                     .clipToBounds(),
                 contentAlignment = Alignment.Center
             ) {
-                modules.forEachIndexed { i, module ->
-                    key(module) {
-                        var d = ((i - selectedIndex) % n + n) % n
-                        if (d > n / 2) d -= n
+                entries.forEachIndexed { i, entry ->
+                    key(entry.id) {
+                        var d = ((i - safeIndex) % n + n) % n
+                        if (n == 2 && d == 1 && dir < 0) d = -1
+                        else if (d > n / 2) d -= n
                         val ad = abs(d)
                         val sg = d.toFloat().sign
-                        val isNext = d == dir
+                        val isNext = n > 1 && d == dir
                         val targetScale = when {
                             d == 0 -> 1f
                             ad == 1 && isNext -> 0.60f
@@ -189,7 +195,7 @@ fun EntertainmentScreen(
                             else -> 0f
                         }
                         GalleryCard(
-                            module = module,
+                            entry = entry,
                             d = d,
                             zOrder = (10 - ad).toFloat(),
                             isCenter = d == 0,
@@ -202,7 +208,7 @@ fun EntertainmentScreen(
                             dwellProgress = { dwellProgress.value },
                             frozen = frozen,
                             interactive = targetAlpha > 0.05f,
-                            onClick = { onSelect(module) }
+                            onClick = { onSelect(entry) }
                         )
                     }
                 }
@@ -226,38 +232,40 @@ fun EntertainmentScreen(
                 )
 
                 // Floating next direction indicator circle (.gnext).
-                val gnextX by animateDpAsState(
-                    targetValue = (dir * 366).dp,
-                    animationSpec = tween(if (frozen) 0 else 300, easing = GalleryEasing),
-                    label = "gnext"
-                )
-                Box(
-                    modifier = Modifier
-                        .offset(x = gnextX)
-                        .zIndex(20f)
-                        .size(72.dp)
-                        .drawBehind {
-                            drawCircle(
-                                color = c.bg,
-                                radius = size.minDimension / 2f + 6.dp.toPx()
+                if (n > 1) {
+                    val gnextX by animateDpAsState(
+                        targetValue = (dir * 366).dp,
+                        animationSpec = tween(if (frozen) 0 else 300, easing = GalleryEasing),
+                        label = "gnext"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .offset(x = gnextX)
+                            .zIndex(20f)
+                            .size(72.dp)
+                            .drawBehind {
+                                drawCircle(
+                                    color = c.bg,
+                                    radius = size.minDimension / 2f + 6.dp.toPx()
+                                )
+                            }
+                            .background(c.focus, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(Modifier.size(width = 18.dp, height = 21.dp)) {
+                            val right = dir > 0
+                            val edge = if (right) 0f else size.width
+                            val tip = if (right) size.width else 0f
+                            drawPath(
+                                Path().apply {
+                                    moveTo(edge, 0f)
+                                    lineTo(tip, size.height / 2f)
+                                    lineTo(edge, size.height)
+                                    close()
+                                },
+                                color = c.bg
                             )
                         }
-                        .background(c.focus, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(Modifier.size(width = 18.dp, height = 21.dp)) {
-                        val right = dir > 0
-                        val edge = if (right) 0f else size.width
-                        val tip = if (right) size.width else 0f
-                        drawPath(
-                            Path().apply {
-                                moveTo(edge, 0f)
-                                lineTo(tip, size.height / 2f)
-                                lineTo(edge, size.height)
-                                close()
-                            },
-                            color = c.bg
-                        )
                     }
                 }
             }
@@ -271,9 +279,9 @@ fun EntertainmentScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            modules.forEachIndexed { idx, module ->
-                val isCurrent = idx == selectedIndex
-                val isNext = idx == nextIndex
+            entries.forEachIndexed { idx, entry ->
+                val isCurrent = idx == safeIndex
+                val isNext = n > 1 && idx == nextIndex
                 val pillFill = if (isCurrent) c.focus else Color.Transparent
                 val pillBorder = when {
                     isCurrent -> c.focus
@@ -290,12 +298,12 @@ fun EntertainmentScreen(
                         .clip(CircleShape)
                         .background(pillFill, CircleShape)
                         .border(1.dp, pillBorder, CircleShape)
-                        .clickable { onSelect(module) }
+                        .clickable { onSelect(entry) }
                         .padding(horizontal = 13.dp, vertical = 7.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = module.displayName,
+                        text = entry.displayName,
                         color = textColor,
                         fontFamily = BciType.chinese,
                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
@@ -315,7 +323,7 @@ fun EntertainmentScreen(
 
 @Composable
 private fun GalleryCard(
-    module: EntertainmentHubModule,
+    entry: EntertainmentGalleryEntry,
     d: Int,
     zOrder: Float,
     isCenter: Boolean,
@@ -366,19 +374,33 @@ private fun GalleryCard(
 
     if (alphaAnim.value <= 0.01f && abs(d) >= 2) return
 
-    val cardBitmap = remember(module.id) {
-        runCatching {
-            context.assets.open("entertainment/${module.id}.webp").use { stream ->
-                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+    val cardBitmap = remember(entry) {
+        if (entry is EntertainmentGalleryEntry.Module) {
+            runCatching {
+                context.assets.open("entertainment/${entry.module.id}.webp").use { stream ->
+                    BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                }
+            }.getOrNull()
+        } else null
+    }
+    val categoryThumbs: List<Pair<EntertainmentHubModule, ImageBitmap?>> = remember(entry) {
+        if (entry is EntertainmentGalleryEntry.Category) {
+            entry.modules.take(4).map { mod ->
+                val bmp = runCatching {
+                    context.assets.open("entertainment/${mod.id}.webp").use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                }.getOrNull()
+                mod to bmp
             }
-        }.getOrNull()
+        } else emptyList()
     }
 
     val shape = RoundedCornerShape(26.dp)
-    val sat = if (module.isNavigation) 0.06f else 0.40f
-    val topColor = Color.hsl(module.hue, sat, 0.50f)
-    val botColor = Color.hsl(module.hue, (sat + 0.06f).coerceAtMost(1f), 0.21f)
-    val artRes = galleryArtRes(module)
+    val sat = if (entry.isNavigation) 0.06f else 0.40f
+    val topColor = Color.hsl(entry.hue, sat, 0.50f)
+    val botColor = Color.hsl(entry.hue, (sat + 0.06f).coerceAtMost(1f), 0.21f)
+    val artRes = galleryArtRes(entry)
 
     Box(
         modifier = Modifier
@@ -444,24 +466,29 @@ private fun GalleryCard(
             }
             .clickable(enabled = interactive, onClick = onClick)
     ) {
-        // Vector silhouette art layer.
-        Icon(
-            painter = painterResource(artRes),
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.26f),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 26.dp)
-                .size(width = 462.dp, height = 288.75.dp)
-        )
-
-        if (cardBitmap != null) {
-            Image(
-                bitmap = cardBitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+        when {
+            entry is EntertainmentGalleryEntry.Category && categoryThumbs.any { it.second != null } -> {
+                CategoryMosaic(categoryThumbs)
+            }
+            cardBitmap != null -> {
+                Image(
+                    bitmap = cardBitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            else -> {
+                Icon(
+                    painter = painterResource(artRes),
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.26f),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 26.dp)
+                        .size(width = 462.dp, height = 288.75.dp)
+                )
+            }
         }
 
         // Bottom contrast scrim matching linear-gradient(to top, rgba(6,8,12,.86) 0%, .55 34%, 0 62%).
@@ -508,7 +535,7 @@ private fun GalleryCard(
         }
 
         Text(
-            text = module.displayName,
+            text = entry.displayName,
             color = Color.White,
             fontFamily = BciType.chinese,
             fontWeight = FontWeight(900),
@@ -548,11 +575,91 @@ private fun GalleryCard(
     }
 }
 
-private fun galleryArtRes(module: EntertainmentHubModule): Int = when (module) {
+@Composable
+private fun CategoryMosaic(items: List<Pair<EntertainmentHubModule, ImageBitmap?>>) {
+    val gap = 3.dp
+    val dividerColor = Color(0xCC06080C)
+    when (items.size) {
+        1 -> MosaicTile(items[0], Modifier.fillMaxSize())
+        2 -> Row(
+            Modifier.fillMaxSize().background(dividerColor),
+            horizontalArrangement = Arrangement.spacedBy(gap)
+        ) {
+            MosaicTile(items[0], Modifier.weight(1f).fillMaxHeight())
+            MosaicTile(items[1], Modifier.weight(1f).fillMaxHeight())
+        }
+        3 -> Row(
+            Modifier.fillMaxSize().background(dividerColor),
+            horizontalArrangement = Arrangement.spacedBy(gap)
+        ) {
+            MosaicTile(items[0], Modifier.weight(1.15f).fillMaxHeight())
+            Column(
+                Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                MosaicTile(items[1], Modifier.weight(1f).fillMaxWidth())
+                MosaicTile(items[2], Modifier.weight(1f).fillMaxWidth())
+            }
+        }
+        else -> Column(
+            Modifier.fillMaxSize().background(dividerColor),
+            verticalArrangement = Arrangement.spacedBy(gap)
+        ) {
+            Row(
+                Modifier.weight(1f).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                MosaicTile(items[0], Modifier.weight(1f).fillMaxHeight())
+                MosaicTile(items[1], Modifier.weight(1f).fillMaxHeight())
+            }
+            Row(
+                Modifier.weight(1f).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                MosaicTile(items[2], Modifier.weight(1f).fillMaxHeight())
+                MosaicTile(items[3], Modifier.weight(1f).fillMaxHeight())
+            }
+        }
+    }
+}
+
+@Composable
+private fun MosaicTile(item: Pair<EntertainmentHubModule, ImageBitmap?>, modifier: Modifier) {
+    val (mod, bmp) = item
+    Box(modifier.background(Color.hsl(mod.hue, 0.38f, 0.34f))) {
+        if (bmp != null) {
+            Image(
+                bitmap = bmp,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                painter = painterResource(moduleArtRes(mod)),
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.32f),
+                modifier = Modifier.align(Alignment.Center).size(110.dp)
+            )
+        }
+    }
+}
+
+private fun galleryArtRes(entry: EntertainmentGalleryEntry): Int = when (entry) {
+    EntertainmentGalleryEntry.BackHome,
+    EntertainmentGalleryEntry.BackCategories -> R.drawable.gallery_art_back
+    is EntertainmentGalleryEntry.Module -> moduleArtRes(entry.module)
+    is EntertainmentGalleryEntry.Category -> entry.modules.firstOrNull()?.let(::moduleArtRes)
+        ?: R.drawable.ic_lucide_gamepad_2
+    is EntertainmentGalleryEntry.Market -> R.drawable.ic_lucide_sliders_horizontal
+}
+
+private fun moduleArtRes(module: EntertainmentHubModule): Int = when (module) {
     EntertainmentHubModule.BACK -> R.drawable.gallery_art_back
     EntertainmentHubModule.MAZE -> R.drawable.gallery_art_maze
     EntertainmentHubModule.SNAKE_CLIMB -> R.drawable.gallery_art_snake
     EntertainmentHubModule.WATERMELON -> R.drawable.gallery_art_watermelon
+    EntertainmentHubModule.LIFE_RESTART -> R.drawable.gallery_art_liferestart
     EntertainmentHubModule.WIZARD_GAME -> R.drawable.gallery_art_wizard
     EntertainmentHubModule.CHINESE_CHESS -> R.drawable.gallery_art_chess
     EntertainmentHubModule.DOUDIZHU -> R.drawable.gallery_art_ddz

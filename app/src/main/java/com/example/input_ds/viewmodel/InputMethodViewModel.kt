@@ -93,6 +93,7 @@ class InputMethodViewModel(
     private var onBackCallback: (() -> Unit)? = null
     private var onToastCallback: ((String, Boolean) -> Unit)? = null
     private var inputVisible = false
+    private var suspendedForDetour = false
     private var paused = false
     private var frozen = false
     private var graceMs = 400L
@@ -147,6 +148,7 @@ class InputMethodViewModel(
         onSendCallback = onSend
         onBackCallback = onBack
         inputVisible = true
+        suspendedForDetour = false
         val draft = initialDraft ?: drafts[mode.draftKey].orEmpty()
         drafts[mode.draftKey] = draft
         activeCursor = ScanCursor(LetterBlockMapping.LEFT_BLOCKS.size, index = 0, direction = 1)
@@ -167,7 +169,37 @@ class InputMethodViewModel(
     fun deactivate() {
         saveCurrentDraft()
         inputVisible = false
+        suspendedForDetour = false
         stopActiveTimer()
+    }
+
+    fun suspendForDetour() {
+        saveCurrentDraft()
+        inputVisible = false
+        suspendedForDetour = true
+        stopActiveTimer()
+    }
+
+    fun resumeVisible() {
+        inputVisible = true
+        suspendedForDetour = false
+        _state.value = _state.value.copy(dwellRevision = _state.value.dwellRevision + 1)
+        restartActiveTimer()
+    }
+
+    fun resumeOrOpenMode(
+        mode: InputMode,
+        initialDraft: String? = null,
+        onSend: ((String) -> Unit)? = null,
+        onBack: (() -> Unit)? = null
+    ) {
+        if (suspendedForDetour && _state.value.mode == mode) {
+            onSendCallback = onSend
+            onBackCallback = onBack
+            resumeVisible()
+            return
+        }
+        openMode(mode = mode, initialDraft = initialDraft, onSend = onSend, onBack = onBack)
     }
 
     fun saveCurrentDraft() {

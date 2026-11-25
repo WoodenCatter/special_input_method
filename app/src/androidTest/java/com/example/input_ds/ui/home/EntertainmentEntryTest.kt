@@ -132,6 +132,11 @@ class EntertainmentEntryTest {
         bci("freeze on")
         bci("scan auto")
         bci("nav ent")
+        // Root entertainment: [返回主页, 视听资讯(1), 棋牌(2), 游戏(3), 功能市场(4)].
+        bci("tick")
+        bci("tick")
+        bci("signal B")
+        // Games category: [返回娱乐, 迷宫(1), 向上贪吃蛇(2), ...].
         bci("tick")
         bci("signal B")
         val gameOver = composeRule.onAllNodesWithText("游戏结束")
@@ -148,7 +153,7 @@ class EntertainmentEntryTest {
     }
 
     @Test
-    fun enteringEntertainmentFromHomeFocusesMazeInsteadOfBack() {
+    fun enteringEntertainmentFromHomeFocusesFirstCategoryInsteadOfBack() {
         bci("freeze on")
         bci("scan manual")
         bci("mode light")
@@ -161,14 +166,21 @@ class EntertainmentEntryTest {
         bci("signal B")
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("1 / 10").assertIsDisplayed()
-        assertEquals(2, composeRule.onAllNodesWithText("迷宫").fetchSemanticsNodes().size)
+        composeRule.onNodeWithText("1 / 4").assertIsDisplayed()
+        assertEquals(2, composeRule.onAllNodesWithText("视听资讯").fetchSemanticsNodes().size)
+        composeRule.onNodeWithText("选「视听资讯」").assertIsDisplayed()
+
+        // Navigate to 游戏 (2 R moves) and enter, then immediately bite 迷宫.
+        bci("signal R")
+        bci("signal R")
+        bci("signal B")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("娱乐 › 游戏").assertIsDisplayed()
         composeRule.onNodeWithText("选「迷宫」").assertIsDisplayed()
 
-        // Immediate bite enters Maze instead of navigating back to Home.
         bci("signal B")
         composeRule.waitForIdle()
         composeRule.onNodeWithText("娱乐 › 迷宫").assertIsDisplayed()
-        assertEquals(0, composeRule.onAllNodesWithText("1 / 10").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithText("1 / 4").fetchSemanticsNodes().size)
     }
 }
