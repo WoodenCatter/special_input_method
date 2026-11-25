@@ -27,12 +27,11 @@ var Events = {
 			options
 		);
 
-		// Build the Event Pool
+		// Build the Event Pool (offline BCI edition excludes external marketing promos)
 		Events.EventPool = [].concat(
 			Events.Global,
 			Events.Room,
-			Events.Outside,
-      Events.Marketing
+			Events.Outside
 		);
 
 		Events.eventStack = [];
