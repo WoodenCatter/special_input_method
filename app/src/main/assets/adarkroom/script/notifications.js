@@ -29,7 +29,7 @@ var Notifications = {
 	// Allow notification to the player
 	notify: function(module, text, noQueue) {
 		if(typeof text == 'undefined') return;
-		if(text.slice(-1) != ".") text += ".";
+		if(!/[.!?。！？…]$/.test(text)) text += ".";
 		if(module != null && Engine.activeModule != module) {
 			if(!noQueue) {
 				if(typeof this.notifyQueue[module] == 'undefined') {

@@ -104,7 +104,7 @@ var Space = {
 
 	createAsteroid: function(noNext) {
 		if (Space.done) return;
-		if (window.__bciAdrPaused) {
+		if (window.__bciAdrPaused || window.__bciAdrModalOpen) {
 			if (!noNext) {
 				Engine.setTimeout(Space.createAsteroid, 400, true);
 			}
@@ -154,7 +154,7 @@ var Space = {
 	},
 
 	stepAsteroids: function() {
-		if (Space.done || window.__bciAdrPaused) return;
+		if (Space.done || window.__bciAdrPaused || window.__bciAdrModalOpen) return;
 		var dt = 0.033;
 		for (var i = Space._asteroids.length - 1; i >= 0; i--) {
 			var ast = Space._asteroids[i];
@@ -202,7 +202,10 @@ var Space = {
 	},
 	
 	moveShip: function() {
-		if (Space.done || window.__bciAdrPaused) return;
+		if (Space.done || window.__bciAdrPaused || window.__bciAdrModalOpen) {
+			Space.lastMove = Date.now();
+			return;
+		}
 		var x = Space.ship.css('left');
 		x = parseFloat(x.substring(0, x.length - 2));
 		var y = Space.ship.css('top');
@@ -261,7 +264,7 @@ var Space = {
 		Space.drawStars();
 		Space._asteroidTimer = setInterval(Space.stepAsteroids, 33);
 		Space._timer = setInterval(function() {
-			if (window.__bciAdrPaused || Space.done) return;
+			if (window.__bciAdrPaused || window.__bciAdrModalOpen || Space.done) return;
 			Space.altitude += 1;
 			if(Space.altitude % 10 === 0) {
 				Space.setTitle();
@@ -427,7 +430,7 @@ var Space = {
 								Score.save();
 								Prestige.save();
 								$('#starsContainer').remove();
-								$('#content, #notifications').remove();
+								$('#wrapper, #content, #notifications').remove();
 								Space.showExpansionEnding().then(() => {
 									Space.showEndingOptions();
 									Engine.options = {};
@@ -584,7 +587,7 @@ var Space = {
 	},
 	
 	lowerVolume: function () {
-		if (Space.done || window.__bciAdrPaused) return;
+		if (Space.done || window.__bciAdrPaused || window.__bciAdrModalOpen) return;
 		
 		// lower audio as ship gets further into space
 		var progress = Space.altitude / 60;

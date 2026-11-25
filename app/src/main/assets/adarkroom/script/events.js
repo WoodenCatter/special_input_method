@@ -726,7 +726,21 @@ var Events = {
 			if(dmg == 'stun') {
 				msg = _('stunned');
 				enemy.data('stunned', true);
-				setTimeout(() => enemy.data('stunned', false), Events.STUN_DURATION);
+				if (!Array.isArray(Events._stunTimers)) {
+					Events._stunTimers = [];
+				}
+				var stunRemaining = Events.STUN_DURATION;
+				var stunId = setInterval(function() {
+					if (window.__bciAdrPaused) return;
+					stunRemaining -= 100;
+					if (stunRemaining <= 0) {
+						clearInterval(stunId);
+						var sIdx = Events._stunTimers.indexOf(stunId);
+						if (sIdx >= 0) Events._stunTimers.splice(sIdx, 1);
+						enemy.data('stunned', false);
+					}
+				}, 100);
+				Events._stunTimers.push(stunId);
 			}
 		}
 
@@ -826,6 +840,10 @@ var Events = {
 		if (Array.isArray(Events._specialTimers)) {
 			Events._specialTimers.forEach(clearInterval);
 			Events._specialTimers = [];
+		}
+		if (Array.isArray(Events._stunTimers)) {
+			Events._stunTimers.forEach(clearInterval);
+			Events._stunTimers = [];
 		}
 		clearInterval(Events._dotTimer);
 		Events._dotTimer = null;
@@ -1284,7 +1302,7 @@ var Events = {
 					World.setWater(World.water - cost[store]);
 				}
 				else if (store === 'hp') {
-					World.setHp(World.hp - cost[store]);
+					World.setHp(World.health - cost[store]);
 				}
 				else {
 					costMod[store] = -cost[store];
@@ -1482,7 +1500,11 @@ var Events = {
 		Events.cancelExplode();
 		Events.clearTimeouts();
 		AudioEngine.stopEventMusic();
-		Events.eventPanel().animate({opacity:0}, Events._PANEL_FADE, 'linear', function() {
+		var panel = Events.eventPanel();
+		if (panel && panel.length) {
+			panel.attr('data-bci-closing', '1');
+		}
+		panel.animate({opacity:0}, Events._PANEL_FADE, 'linear', function() {
 			Events.eventPanel().remove();
 			Events.activeEvent().eventPanel = null;
 			Events.eventStack.shift();

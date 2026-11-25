@@ -249,6 +249,9 @@
       
       Engine.saveLanguage();
       Engine.travelTo(Room);
+      if (typeof World !== 'undefined' && World.restoreExpedition) {
+        World.restoreExpedition();
+      }
 
       setTimeout(notifyAboutSound, 3000);
 
@@ -277,6 +280,22 @@
         if(typeof Engine._lastNotify == 'undefined' || Date.now() - Engine._lastNotify > Engine.SAVE_DISPLAY){
           $('#saveNotify').css('opacity', 1).animate({opacity: 0}, 1000, 'linear');
           Engine._lastNotify = Date.now();
+        }
+        if (typeof World !== 'undefined' && Engine.activeModule === World && !World.dead && World.state) {
+          State.bciExpedition = {
+            curPos: [World.curPos[0], World.curPos[1]],
+            water: World.water,
+            health: World.health,
+            foodMove: World.foodMove,
+            waterMove: World.waterMove,
+            starvation: World.starvation,
+            thirst: World.thirst,
+            usedOutposts: $.extend({}, World.usedOutposts || {}),
+            state: $.extend(true, {}, World.state),
+            outfit: $.extend({}, (typeof Path !== 'undefined' && Path.outfit) ? Path.outfit : {})
+          };
+        } else if (typeof State !== 'undefined' && State.bciExpedition) {
+          delete State.bciExpedition;
         }
         localStorage.gameState = JSON.stringify(State);
       }

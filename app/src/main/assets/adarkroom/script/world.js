@@ -888,7 +888,7 @@ var World = {
           ttClass += " bottom";
         }
         if(World.curPos[0] == i && World.curPos[1] == j) {
-          mapString += '<span class="landmark">@<div class="tooltip ' + ttClass + '">'+_('Wanderer')+'</div></span>';
+          mapString += '<span class="landmark bci-player">@<div class="tooltip ' + ttClass + '">'+_('Wanderer')+'</div></span>';
         } else if(World.state.mask[i][j]) {
           var c = World.state.map[i][j];
           switch(c) {
@@ -924,6 +924,7 @@ var World = {
       // Dead! Discard any world changes and go home
       Notifications.notify(World, _('the world fades'));
       World.state = null;
+      if (typeof State !== 'undefined') delete State.bciExpedition;
       Path.outfit = {};
       $SM.remove('outfit');
       AudioEngine.playSound(AudioLibrary.DEATH);
@@ -973,6 +974,7 @@ var World = {
     }
     World.redeemBlueprints();
     World.state = null;
+    if (typeof State !== 'undefined') delete State.bciExpedition;
 
     if(Path.outfit['cured meat'] > 0) {
       Button.setDisabled($('#embarkButton'), false);
@@ -1004,7 +1006,7 @@ var World = {
     redeem('glowstone blueprint', 'glowstone');
 
     if (redeemed) {
-      Notifications.notify(null, 'blueprints feed into the fabricator data port. possibilities grow.');
+      Notifications.notify(null, _('blueprints feed into the fabricator data port. possibilities grow.'));
     }
   },
 
@@ -1093,6 +1095,38 @@ var World = {
     $('div#bagspace-world > div').empty();
     World.updateSupplies();
     $('#bagspace-world').width($('#map').width());
+  },
+
+  restoreExpedition: function() {
+    if (typeof State === 'undefined' || !State.bciExpedition || !State.bciExpedition.state) {
+      return false;
+    }
+    var exp = State.bciExpedition;
+    Engine.tabNavigation = false;
+    Button.clearCooldown($('#embarkButton'));
+    Engine.keyLock = false;
+    Path.outfit = $.extend({}, exp.outfit || {});
+    World.state = $.extend(true, {}, exp.state);
+    World.foodMove = Number(exp.foodMove) || 0;
+    World.waterMove = Number(exp.waterMove) || 0;
+    World.starvation = Boolean(exp.starvation);
+    World.thirst = Boolean(exp.thirst);
+    World.usedOutposts = $.extend({}, exp.usedOutposts || {});
+    World.curPos = Array.isArray(exp.curPos) && exp.curPos.length === 2
+      ? [exp.curPos[0], exp.curPos[1]]
+      : World.copyPos(World.VILLAGE_POS);
+    World.dead = false;
+    World.setWater(typeof exp.water === 'number' ? exp.water : World.getMaxWater());
+    World.setHp(typeof exp.health === 'number' ? exp.health : World.getMaxHealth());
+    World.drawMap();
+    World.setTitle();
+    AudioEngine.playBackgroundMusic(AudioLibrary.MUSIC_WORLD);
+    $('div#bagspace-world > div').empty();
+    World.updateSupplies();
+    $('#bagspace-world').width($('#map').width());
+    $('#outerSlider').css({ left: '-800px' });
+    Engine.activeModule = World;
+    return true;
   },
 
   setTitle: function() {

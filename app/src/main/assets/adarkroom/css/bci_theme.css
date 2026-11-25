@@ -305,6 +305,15 @@ div#workers {
 	font-size: 20px !important;
 }
 
+div#pathScroller {
+	max-height: none !important;
+	overflow: visible !important;
+	width: 500px !important;
+	top: 0 !important;
+	padding: 12px 10px 36px 0 !important;
+	box-sizing: border-box;
+}
+
 div#outfitting {
 	width: 470px !important;
 	padding: 16px 16px 12px 16px !important;
@@ -502,7 +511,9 @@ div.button > div.tooltip .row_val {
 .outroContainer {
 	background: var(--adr-bg) !important;
 	color: var(--adr-text) !important;
-	padding: 40px 64px !important;
+	height: var(--adr-vh, 592px) !important;
+	overflow-y: auto !important;
+	padding: 40px 64px 72px 64px !important;
 	box-sizing: border-box;
 }
 
@@ -513,7 +524,10 @@ div.button > div.tooltip .row_val {
 }
 
 .centerCont {
+	height: var(--adr-vh, 592px) !important;
+	overflow-y: auto !important;
 	padding-top: 80px !important;
+	box-sizing: border-box;
 	color: var(--adr-text) !important;
 }
 
@@ -702,16 +716,93 @@ div#buttons {
 #worldPanel {
 	background: var(--adr-bg) !important;
 	color: var(--adr-text) !important;
+	height: calc(var(--adr-vh, 592px) - 20px) !important;
+	overflow: hidden !important;
+	display: flex !important;
+	flex-direction: column !important;
+	padding: 50px 10px 88px 10px !important;
+	box-sizing: border-box !important;
+}
+
+#worldOuter {
+	position: relative !important;
+	display: flex !important;
+	flex-direction: column !important;
+	flex: 1 1 auto !important;
+	min-height: 0 !important;
+	width: 100% !important;
+}
+
+#bagspace-world {
+	flex: 0 0 auto !important;
+	width: 100% !important;
+	height: auto !important;
+	min-height: 54px !important;
+	max-height: 92px !important;
 	overflow-y: auto !important;
-	padding-bottom: 92px !important;
+	margin: 14px 0 8px 0 !important;
+	padding: 12px 10px 6px 10px !important;
+	box-sizing: border-box !important;
+}
+
+#bagspace-world > div {
+	padding: 2px 0 !important;
+}
+
+#backpackTitle,
+#backpackSpace,
+#healthCounter {
+	background: var(--adr-bg) !important;
+	color: var(--adr-text) !important;
+	font-size: 16px !important;
+	font-weight: 700 !important;
+	padding: 0 6px !important;
+	top: 3px !important;
+	z-index: 5 !important;
+}
+
+#healthCounter {
+	left: 112px !important;
+	color: var(--adr-focus) !important;
+}
+
+div.supplyItem {
+	border: 1px solid var(--adr-line) !important;
+	border-radius: 8px !important;
+	background: var(--adr-panel2) !important;
+	color: var(--adr-text) !important;
+	font-size: 15px !important;
+	font-weight: 600 !important;
+	padding: 2px 8px !important;
 }
 
 #map {
-	color: var(--adr-text) !important;
+	flex: 1 1 auto !important;
+	min-height: 0 !important;
+	display: block !important;
+	width: 100% !important;
+	overflow: auto !important;
+	box-sizing: border-box !important;
+	color: var(--adr-muted) !important;
 	background: var(--adr-panel) !important;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 14px;
-	padding: 6px;
+	padding: 10px 12px !important;
+	font-size: 16px !important;
+	line-height: 15px !important;
+	letter-spacing: 1px !important;
+	white-space: nowrap !important;
+}
+
+#map .landmark {
+	color: var(--adr-text) !important;
+	font-weight: 900 !important;
+}
+
+#map .landmark.bci-player {
+	color: var(--adr-focus) !important;
+	font-weight: 900 !important;
+	text-shadow: 0 0 6px var(--adr-focus-ring);
 }
 
 #bciWorldPad {

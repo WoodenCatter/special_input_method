@@ -21,16 +21,20 @@
 	};
 
 	window.__bciAdrPaused = false;
+	window.__bciAdrModalOpen = false;
 
 	var state = {
 		items: [],
 		itemsSig: '',
 		index: 0,
 		direction: 1,
-		previousIndex: -1,
+		previousItemId: null,
+		previousItemEl: null,
+		previousContextKey: '',
 		advancedAtMs: 0,
 		timerId: null,
 		refreshTimerId: null,
+		pendingForceReset: false,
 		observer: null,
 		isUpdatingDom: false,
 		lastContextKey: '',
@@ -102,12 +106,14 @@
 		var vals = tt.querySelectorAll('.row_val');
 		if (!keys.length || keys.length !== vals.length) return '';
 		var parts = [];
-		for (var i = 0; i < keys.length && parts.length < 3; i++) {
+		for (var i = 0; i < keys.length; i++) {
 			var k = (keys[i].textContent || '').trim();
 			var v = (vals[i].textContent || '').trim();
 			if (k && v) parts.push(k + v);
 		}
-		return parts.length ? ('(' + parts.join('·') + ')') : '';
+		if (!parts.length) return '';
+		if (parts.length <= 4) return '(' + parts.join('·') + ')';
+		return '(' + parts.slice(0, 3).join('·') + ' 等' + parts.length + '项)';
 	}
 
 	function isVisibleEl(el) {
@@ -130,16 +136,40 @@
 	function isWorldActive() {
 		return typeof Engine !== 'undefined' &&
 			typeof World !== 'undefined' &&
-			Engine.activeModule === World;
+			Engine.activeModule === World &&
+			!World.dead &&
+			Boolean(World.state);
 	}
 
-	// Return the TOP-MOST visible .eventPanel (upstream stacks multiple #event panels in DOM order)
+	// Return the TOP-MOST active .eventPanel immediately (even while fading in from opacity: 0)
+	// while ignoring panels already marked as closing.
 	function getTopEventEl() {
 		var panels = document.querySelectorAll('.eventPanel');
 		for (var i = panels.length - 1; i >= 0; i--) {
-			if (isVisibleEl(panels[i])) return panels[i];
+			var p = panels[i];
+			if (!p || !p.isConnected) continue;
+			if (p.getAttribute('data-bci-closing') === '1') continue;
+			var style = window.getComputedStyle(p);
+			if (style.display === 'none' || style.visibility === 'hidden') continue;
+			var rect = p.getBoundingClientRect();
+			if (rect.width > 2 && rect.height > 2) return p;
 		}
 		return null;
+	}
+
+	function isSpaceFlightActive() {
+		return isSpaceActive() && !getTopEventEl();
+	}
+
+	function syncModalSpaceFreeze() {
+		var modalOpen = Boolean(getTopEventEl());
+		window.__bciAdrModalOpen = modalOpen;
+		if (modalOpen && typeof Space !== 'undefined') {
+			Space.left = false;
+			Space.right = false;
+			Space.up = false;
+			Space.down = false;
+		}
 	}
 
 	function healInWorld(itemKey, healAmount, soundKey) {
@@ -156,29 +186,35 @@
 			}
 		} catch (e) {}
 		if (typeof Notifications !== 'undefined') {
-			Notifications.notify(World, itemKey === 'cured meat' ? '吃了熏肉，恢复了生命。' : '服用了药剂，恢复了生命。');
+			var msg = itemKey === 'cured meat'
+				? '吃了熏肉，恢复了生命。'
+				: (itemKey === 'hypo' ? '使用了注射剂，恢复了生命。' : '服用了药剂，恢复了生命。');
+			Notifications.notify(World, msg);
 		}
 	}
 
 	function scrollWorldToPlayer() {
 		try {
-			var wp = document.getElementById('worldPanel');
 			var mapEl = document.getElementById('map');
-			if (!wp || !mapEl) return;
-			var landmarks = mapEl.querySelectorAll('span.landmark');
-			var playerEl = null;
-			for (var i = 0; i < landmarks.length; i++) {
-				var first = landmarks[i].firstChild;
-				if (first && first.nodeType === 3 && first.nodeValue && first.nodeValue.trim() === '@') {
-					playerEl = landmarks[i];
-					break;
+			if (!mapEl) return;
+			var playerEl = mapEl.querySelector('span.bci-player');
+			if (!playerEl) {
+				var landmarks = mapEl.querySelectorAll('span.landmark');
+				for (var i = 0; i < landmarks.length; i++) {
+					var first = landmarks[i].firstChild;
+					if (first && first.nodeType === 3 && first.nodeValue && first.nodeValue.trim() === '@') {
+						playerEl = landmarks[i];
+						break;
+					}
 				}
 			}
 			if (playerEl) {
-				var wpRect = wp.getBoundingClientRect();
+				var mRect = mapEl.getBoundingClientRect();
 				var pRect = playerEl.getBoundingClientRect();
-				var targetScrollTop = wp.scrollTop + (pRect.top - wpRect.top) - (wp.clientHeight * 0.42);
-				wp.scrollTop = Math.max(0, targetScrollTop);
+				var targetY = mapEl.scrollTop + (pRect.top - mRect.top) - (mapEl.clientHeight * 0.48);
+				var targetX = mapEl.scrollLeft + (pRect.left - mRect.left) - (mapEl.clientWidth * 0.50);
+				mapEl.scrollTop = Math.max(0, targetY);
+				mapEl.scrollLeft = Math.max(0, targetX);
 			}
 		} catch (e) {}
 	}
@@ -227,7 +263,7 @@
 				b.className = 'bci-world-btn';
 				b.textContent = sp.label;
 				b.addEventListener('click', function () {
-					if (cfg.paused) return;
+					if (cfg.paused || !isWorldActive() || (typeof Engine !== 'undefined' && Engine.keyLock) || getTopEventEl()) return;
 					sp.fn();
 					scheduleRefresh(false);
 				});
@@ -246,7 +282,7 @@
 				hud.textContent = '左看：向左躲避  ·  咬牙：悬停稳定  ·  右看：向右躲避';
 				document.body.appendChild(hud);
 			}
-			hud.classList.toggle('visible', isSpaceActive());
+			hud.classList.toggle('visible', isSpaceFlightActive());
 		});
 	}
 
@@ -279,11 +315,12 @@
 
 	function collectScanItems() {
 		syncHeaderClearance();
+		syncModalSpaceFreeze();
 		ensureWorldPad();
 		ensureSpaceHud();
 		updateSoundButtonLabel();
 
-		if (isSpaceActive()) {
+		if (isSpaceFlightActive()) {
 			return [];
 		}
 
@@ -486,9 +523,9 @@
 			// Fixed utility bar & sticky header tabs are always visible without scrolling #main.
 			if (el.closest('#bciTopTools, #header, #bciWorldPad')) return;
 
-			var scroller = el.closest('.eventPanel, #pathScroller, #main, #worldPanel');
+			var scroller = el.closest('.eventPanel, .outroContainer, .centerCont, #main, #worldPanel');
 			if (!scroller) {
-				el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+				el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 				return;
 			}
 
@@ -508,13 +545,16 @@
 			}
 
 			if (eRect.top < visTop) {
-				var targetTop = scroller.scrollTop + (eRect.top - visTop);
-				// Snap cleanly to top when close so legends (#stores, #buildBtns) also reveal completely.
+				var deltaUp = eRect.top - visTop;
+				var targetTop = scroller.scrollTop + deltaUp;
 				if (targetTop < 36) targetTop = 0;
-				scroller.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+				var useInstantUp = cfg.manual || Math.abs(deltaUp) > 180;
+				scroller.scrollTo({ top: Math.max(0, targetTop), behavior: useInstantUp ? 'auto' : 'smooth' });
 			} else if (eRect.bottom > visBottom) {
-				var targetDown = scroller.scrollTop + (eRect.bottom - visBottom);
-				scroller.scrollTo({ top: Math.max(0, targetDown), behavior: 'smooth' });
+				var deltaDown = eRect.bottom - visBottom;
+				var targetDown = scroller.scrollTop + deltaDown;
+				var useInstantDown = cfg.manual || Math.abs(deltaDown) > 180;
+				scroller.scrollTo({ top: Math.max(0, targetDown), behavior: useInstantDown ? 'auto' : 'smooth' });
 			}
 		} catch (e) {
 			try {
@@ -527,7 +567,7 @@
 		withAdapterDomMutation(function () {
 			clearVisualFocus();
 
-			if (isSpaceActive()) {
+			if (isSpaceFlightActive()) {
 				reportActionHints('向左躲避', '悬停稳定', '向右躲避', 0);
 				return;
 			}
@@ -587,9 +627,16 @@
 		}
 	}
 
+	function clearGraceMemory() {
+		state.previousItemId = null;
+		state.previousItemEl = null;
+		state.previousContextKey = '';
+		state.advancedAtMs = 0;
+	}
+
 	function scheduleScanTick() {
 		stopScanTimer();
-		if (cfg.paused || cfg.frozen || cfg.manual || isSpaceActive() || state.items.length <= 1) {
+		if (cfg.paused || cfg.frozen || cfg.manual || isSpaceFlightActive() || state.items.length <= 1) {
 			return;
 		}
 		state.timerId = setTimeout(function () {
@@ -602,10 +649,13 @@
 	}
 
 	function advanceAutoTick(allowWhenFrozen) {
-		if ((cfg.paused && !allowWhenFrozen) || cfg.manual || isSpaceActive()) return;
+		if ((cfg.paused && !allowWhenFrozen) || cfg.manual || isSpaceFlightActive()) return;
 		var n = state.items.length;
 		if (n <= 1) return;
-		state.previousIndex = state.index;
+		var prevItem = state.items[state.index];
+		state.previousItemId = prevItem ? prevItem.id : null;
+		state.previousItemEl = prevItem ? prevItem.el : null;
+		state.previousContextKey = state.lastContextKey;
 		state.advancedAtMs = Date.now();
 		state.index = (state.index + state.direction + n) % n;
 		renderFocus();
@@ -623,7 +673,7 @@
 			return 'event:' + title + ':' + scene;
 		}
 		if (document.querySelector('.centerCont .endGameOption')) return 'ending';
-		if (isSpaceActive()) return 'space';
+		if (isSpaceFlightActive()) return 'space';
 		if (isWorldActive()) return 'world';
 		var mod = (typeof Engine !== 'undefined' && Engine.activeModule && Engine.activeModule.name) ? Engine.activeModule.name : 'init';
 		return 'mod:' + mod;
@@ -638,12 +688,18 @@
 	}
 
 	function refreshItems(forceReset) {
+		if (state.refreshTimerId !== null) {
+			clearTimeout(state.refreshTimerId);
+			state.refreshTimerId = null;
+			state.pendingForceReset = false;
+		}
 		var prevFocusedEl = (state.items[state.index] && state.items[state.index].el) || null;
 		var prevFocusedId = (state.items[state.index] && state.items[state.index].id) || null;
 		var ctxKey = currentContextKey();
 		var contextChanged = ctxKey !== state.lastContextKey;
 		if (contextChanged) {
 			state.lastContextKey = ctxKey;
+			clearGraceMemory();
 			notifyContextBoundary();
 		}
 
@@ -668,8 +724,7 @@
 		if (forceReset || contextChanged) {
 			state.index = 0;
 			state.direction = 1;
-			state.previousIndex = -1;
-			state.advancedAtMs = 0;
+			clearGraceMemory();
 		} else if (prevFocusedEl) {
 			var keptIdx = -1;
 			for (var i = 0; i < state.items.length; i++) {
@@ -691,19 +746,28 @@
 		scheduleScanTick();
 	}
 
+	// Bounded throttle (never starved by continuous 33ms Space or combat animations)
 	function scheduleRefresh(forceReset) {
+		if (forceReset) {
+			state.pendingForceReset = true;
+		}
 		if (state.refreshTimerId !== null) {
-			clearTimeout(state.refreshTimerId);
+			return;
 		}
 		state.refreshTimerId = setTimeout(function () {
+			var shouldReset = state.pendingForceReset;
 			state.refreshTimerId = null;
-			refreshItems(Boolean(forceReset));
-		}, 70);
+			state.pendingForceReset = false;
+			refreshItems(shouldReset);
+		}, 60);
 	}
 
 	function activateIndex(idx) {
 		var item = state.items[idx];
-		if (!item || !item.el) return;
+		if (!item || !item.el || !item.el.isConnected || item.el.classList.contains('disabled')) {
+			refreshItems(false);
+			return;
+		}
 		var el = item.el;
 		withAdapterDomMutation(function () {
 			el.classList.add('bci-picked');
@@ -720,14 +784,13 @@
 			}
 		} catch (e) {}
 
+		clearGraceMemory();
 		el.click();
-		state.previousIndex = -1;
-		state.advancedAtMs = 0;
 		scheduleRefresh(false);
 	}
 
 	function handleSpaceAction(action) {
-		if (typeof Space === 'undefined' || Space.done || cfg.paused) return;
+		if (typeof Space === 'undefined' || Space.done || cfg.paused || window.__bciAdrModalOpen) return;
 		if (state.spaceStopTimerId !== null) {
 			clearTimeout(state.spaceStopTimerId);
 			state.spaceStopTimerId = null;
@@ -754,7 +817,15 @@
 
 	function handleAction(action) {
 		if (cfg.paused) return;
-		if (isSpaceActive()) {
+		syncModalSpaceFreeze();
+
+		// Synchronously reconcile if context shifted before any pending async refresh fired
+		// (prevents BITE from clicking through a newly opened modal onto background buttons).
+		if (currentContextKey() !== state.lastContextKey) {
+			refreshItems(true);
+		}
+
+		if (isSpaceFlightActive()) {
 			handleSpaceAction(action);
 			return;
 		}
@@ -769,12 +840,10 @@
 			var step = action === 'look_left' ? -1 : 1;
 			if (cfg.manual) {
 				state.index = (state.index + step + n) % n;
-				state.previousIndex = -1;
-				state.advancedAtMs = 0;
+				clearGraceMemory();
 			} else {
 				state.direction = step;
-				state.previousIndex = -1;
-				state.advancedAtMs = 0;
+				clearGraceMemory();
 			}
 			renderFocus();
 			scheduleScanTick();
@@ -782,13 +851,42 @@
 		}
 
 		if (action === 'bite') {
+			// Verify target still belongs to active modal if one is open.
+			var activeEv = getTopEventEl();
 			var targetIdx = state.index;
-			if (!cfg.manual && state.previousIndex >= 0 && state.previousIndex < n && state.advancedAtMs > 0) {
-				if (Date.now() - state.advancedAtMs < cfg.graceMs) {
-					targetIdx = state.previousIndex;
-					state.index = targetIdx;
-					notifyHostFeedback('已按上一项执行（延迟补偿）');
+			var compensated = false;
+
+			if (!cfg.manual && state.advancedAtMs > 0 && (Date.now() - state.advancedAtMs < cfg.graceMs)) {
+				if (state.previousContextKey === state.lastContextKey && (state.previousItemEl || state.previousItemId)) {
+					var matchIdx = -1;
+					for (var m = 0; m < state.items.length; m++) {
+						if ((state.previousItemEl && state.items[m].el === state.previousItemEl) ||
+							(state.previousItemId && state.items[m].id === state.previousItemId)) {
+							matchIdx = m;
+							break;
+						}
+					}
+					if (matchIdx >= 0 && state.items[matchIdx].el && state.items[matchIdx].el.isConnected && !state.items[matchIdx].el.classList.contains('disabled')) {
+						targetIdx = matchIdx;
+						state.index = targetIdx;
+						compensated = true;
+						notifyHostFeedback('已按上一项执行（延迟补偿）');
+					}
 				}
+			}
+
+			var targetItem = state.items[targetIdx];
+			if (!targetItem || !targetItem.el || !targetItem.el.isConnected || targetItem.el.classList.contains('disabled')) {
+				refreshItems(false);
+				return;
+			}
+			if (activeEv && !activeEv.contains(targetItem.el) && targetItem.id !== 'bciExitBtn') {
+				refreshItems(true);
+				return;
+			}
+			if (compensated) {
+				renderFocus();
+				scheduleScanTick();
 			}
 			activateIndex(targetIdx);
 		}
@@ -869,23 +967,61 @@
 			Space.SHIP_SPEED = 5;
 		}
 
-		// 3. Hook module & event transitions so scan ring refreshes immediately
+		// 3. Hook module, button cooldown/disabled & event transitions so scan ring refreshes immediately
 		if (typeof Engine !== 'undefined' && Engine.travelTo) {
 			var origTravelTo = Engine.travelTo;
 			Engine.travelTo = function () {
 				var res = origTravelTo.apply(Engine, arguments);
+				refreshItems(true);
+				return res;
+			};
+		}
+		if (typeof Space !== 'undefined' && Space.onArrival) {
+			var origSpaceArrival = Space.onArrival;
+			Space.onArrival = function () {
+				var res = origSpaceArrival.apply(Space, arguments);
+				refreshItems(true);
+				return res;
+			};
+		}
+		if (typeof Room !== 'undefined' && Room.onArrival) {
+			var origRoomArrival = Room.onArrival;
+			Room.onArrival = function () {
+				var res = origRoomArrival.apply(Room, arguments);
 				scheduleRefresh(true);
 				return res;
 			};
 		}
-		if (typeof World !== 'undefined' && World.onArrival) {
-			var origWorldArrival = World.onArrival;
-			World.onArrival = function () {
-				var res = origWorldArrival.apply(World, arguments);
-				setTimeout(scrollWorldToPlayer, 100);
-				scheduleRefresh(true);
-				return res;
-			};
+		if (typeof World !== 'undefined') {
+			if (World.onArrival) {
+				var origWorldArrival = World.onArrival;
+				World.onArrival = function () {
+					var res = origWorldArrival.apply(World, arguments);
+					setTimeout(scrollWorldToPlayer, 100);
+					refreshItems(true);
+					return res;
+				};
+			}
+			if (World.die) {
+				var origWorldDie = World.die;
+				World.die = function () {
+					var res = origWorldDie.apply(World, arguments);
+					refreshItems(true);
+					return res;
+				};
+			}
+		}
+		if (typeof Button !== 'undefined') {
+			['cooldown', 'clearCooldown', 'setDisabled'].forEach(function (bFn) {
+				if (Button[bFn]) {
+					var origBFn = Button[bFn];
+					Button[bFn] = function () {
+						var res = origBFn.apply(Button, arguments);
+						scheduleRefresh(false);
+						return res;
+					};
+				}
+			});
 		}
 		if (typeof Events !== 'undefined') {
 			['startEvent', 'endEvent', 'loadScene', 'drawDrop'].forEach(function (fnName) {
@@ -893,7 +1029,7 @@
 					var orig = Events[fnName];
 					Events[fnName] = function () {
 						var res = orig.apply(Events, arguments);
-						scheduleRefresh(true);
+						refreshItems(true);
 						return res;
 					};
 				}
@@ -918,7 +1054,7 @@
 			restartBtn.addEventListener('click', function () {
 				if (typeof Engine !== 'undefined' && Engine.confirmDelete) {
 					Engine.confirmDelete();
-					scheduleRefresh(true);
+					refreshItems(true);
 				}
 			});
 		}
@@ -936,19 +1072,27 @@
 			});
 		}
 
-		// 5. Watch genuine game DOM mutations (ignoring our own adapter mutations via state.isUpdatingDom)
+		// 5. Watch genuine game DOM mutations (ignoring our own adapter mutations & high-freq animations)
 		if (typeof MutationObserver !== 'undefined') {
 			state.observer = new MutationObserver(function (mutations) {
 				if (state.isUpdatingDom) return;
 				for (var i = 0; i < mutations.length; i++) {
 					var target = mutations[i].target;
-					if (target && target.classList && (
+					if (!target) continue;
+					var id = target.id || '';
+					if (id === 'notifications' || id === 'ship' || id === 'spacePanel' ||
+						id === 'starsContainer' || id === 'wanderer' || id === 'enemy' ||
+						id === 'saveNotify') {
+						continue;
+					}
+					if (target.classList && (
 						target.classList.contains('bci-dwell-track') ||
 						target.classList.contains('bci-dwell-fill') ||
 						target.classList.contains('bci-dir-badge') ||
 						target.classList.contains('cooldown') ||
 						target.classList.contains('asteroid') ||
-						target.id === 'notifications' ||
+						target.classList.contains('bullet') ||
+						target.classList.contains('damageText') ||
 						target.classList.contains('notification')
 					)) {
 						continue;
@@ -1012,8 +1156,7 @@
 			if (prevPaused !== cfg.paused) {
 				applyPausedState(cfg.paused);
 			}
-			state.previousIndex = -1;
-			state.advancedAtMs = 0;
+			clearGraceMemory();
 			if (state.ready) {
 				renderFocus();
 				scheduleScanTick();
@@ -1036,6 +1179,9 @@
 		installGameHooks();
 		state.ready = true;
 		refreshItems(true);
+		if (isWorldActive()) {
+			setTimeout(scrollWorldToPlayer, 100);
+		}
 		try {
 			var h = host();
 			if (h && h.onAdapterReady) h.onAdapterReady();

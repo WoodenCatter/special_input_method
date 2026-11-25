@@ -383,6 +383,10 @@ var StateManager = {
 	},
 
 	collectIncome: function() {
+		if (window.__bciAdrPaused) {
+			Engine._incomeTimeout = Engine.setTimeout($SM.collectIncome, 1000);
+			return;
+		}
 		var changed = false;
 		if(typeof $SM.get('income') != 'undefined' && Engine.activeModule != Space) {
 			for(var source in $SM.get('income')) {
