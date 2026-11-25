@@ -46,6 +46,7 @@ import com.example.input_ds.assistant.AssistantConnection
 import com.example.input_ds.assistant.AssistantService
 import com.example.input_ds.assistant.AssistantServiceException
 import com.example.input_ds.bci.NaoyunBleManager
+import com.example.input_ds.model.AppUiSettings
 import com.example.input_ds.ui.bci.EegStereoView
 import com.example.input_ds.ui.theme.BciType
 import com.example.input_ds.ui.theme.LocalBciColors
@@ -66,6 +67,7 @@ internal fun CaregiverSheet(
     headsetControlEnabled: Boolean,
     feedbackSound: Boolean,
     floatingEegVisible: Boolean,
+    displayMode: AppUiSettings.DisplayMode = AppUiSettings.DisplayMode.AUTO,
     info: CaregiverInfo,
     assistantConfig: AssistantConfig,
     assistantDraft: String,
@@ -77,6 +79,7 @@ internal fun CaregiverSheet(
     onHeadsetControlChange: (Boolean) -> Unit,
     onFeedbackSoundChange: (Boolean) -> Unit,
     onFloatingEegVisibleChange: (Boolean) -> Unit,
+    onDisplayModeChange: (AppUiSettings.DisplayMode) -> Unit = {},
     onSaveAssistantConfig: (AssistantConnection) -> Unit,
     onAssistantDraftChange: (String) -> Unit,
     onAssistantNotice: (String, Boolean) -> Unit,
@@ -184,6 +187,17 @@ internal fun CaregiverSheet(
                 }
                 CareRow("悬浮波形窗口") {
                     CareSwitch(floatingEegVisible, frozen) { onFloatingEegVisibleChange(!floatingEegVisible) }
+                }
+                CareRow("日夜模式") {
+                    CareSegmented(
+                        options = listOf(
+                            AppUiSettings.DisplayMode.AUTO to "自动",
+                            AppUiSettings.DisplayMode.LIGHT to "日间",
+                            AppUiSettings.DisplayMode.DARK to "夜间"
+                        ),
+                        selected = displayMode,
+                        onSelect = onDisplayModeChange
+                    )
                 }
                 CareRow("设备") {
                     CareBoldValue(info.deviceSummary)
@@ -440,6 +454,45 @@ private fun CareSmallButton(
             color = (if (primary) c.careBtnText else c.careText).copy(alpha = if (enabled) 1f else 0.45f),
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
         )
+    }
+}
+
+@Composable
+private fun <T> CareSegmented(
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit
+) {
+    val c = LocalBciColors.current
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .clip(shape)
+            .border(1.dp, c.careLine, shape),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEachIndexed { idx, (value, label) ->
+            val active = value == selected
+            if (idx > 0) {
+                Spacer(Modifier.width(1.dp).height(24.dp).background(c.careLine))
+            }
+            Box(
+                modifier = Modifier
+                    .background(if (active) c.careBtn else Color.Transparent)
+                    .clickable { onSelect(value) }
+                    .padding(horizontal = 13.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label,
+                    fontFamily = BciType.chinese,
+                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 15.sp,
+                    color = if (active) c.careBtnText else c.careText,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
+        }
     }
 }
 

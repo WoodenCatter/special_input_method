@@ -576,6 +576,14 @@ class MainActivity : ComponentActivity() {
                             feedback = feedback,
                             readiness = effectiveReadiness,
                             onCare = { toggleCareSheet(true) },
+                            onCycleDisplayMode = {
+                                val next = AppSettingsLogic.cycleDisplayMode(displayMode)
+                                displayMode = next
+                                AppUiSettings.writeDisplayMode(applicationContext, next)
+                                if (!frozen) {
+                                    feedback.toast("显示模式：${AppSettingsLogic.displayModeLabel(next)}", true)
+                                }
+                            },
                             overlay = if (hasTopOverlay) {
                                 {
                                     activeAdjust?.let { adjust ->
@@ -682,6 +690,7 @@ class MainActivity : ComponentActivity() {
                                     headsetControlEnabled = headsetControlEnabled.value,
                                     feedbackSound = feedbackSound,
                                     floatingEegVisible = floatingEegVisible,
+                                    displayMode = displayMode,
                                     info = careInfo,
                                     assistantConfig = assistantConfig,
                                     assistantDraft = assistantDraft,
@@ -706,6 +715,13 @@ class MainActivity : ComponentActivity() {
                                         floatingEegVisible = visible
                                         AppUiSettings.writeFloatingEegVisible(applicationContext, visible)
                                         feedback.toast(if (visible) "悬浮波形窗口已显示" else "悬浮波形窗口已隐藏")
+                                    },
+                                    onDisplayModeChange = { mode ->
+                                        displayMode = mode
+                                        AppUiSettings.writeDisplayMode(applicationContext, mode)
+                                        if (!frozen) {
+                                            feedback.toast("显示模式：${AppSettingsLogic.displayModeLabel(mode)}", true)
+                                        }
                                     },
                                     onSaveAssistantConfig = { connection ->
                                         AssistantCareStore.save(applicationContext, connection)

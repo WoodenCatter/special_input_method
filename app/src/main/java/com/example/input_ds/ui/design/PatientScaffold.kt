@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -13,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -50,6 +52,7 @@ fun PatientScaffold(
     feedback: GazeFeedback,
     readiness: BciController.Readiness = BciController.Readiness(),
     onCare: (() -> Unit)? = null,
+    onCycleDisplayMode: (() -> Unit)? = null,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
     videoLayer: (@Composable BoxScope.() -> Unit)? = null,
     drawer: (@Composable BoxScope.() -> Unit)? = null,
@@ -60,7 +63,7 @@ fun PatientScaffold(
     CompositionLocalProvider(LocalDensity provides Density(density, 1f)) {
         Box(Modifier.fillMaxSize().background(c.bg)) {
             Column {
-                StatusBar(status, onCare)
+                StatusBar(status, onCare, onCycleDisplayMode)
                 var pageOverlay by remember { mutableStateOf<(@Composable BoxScope.() -> Unit)?>(null) }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Box(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) {
@@ -99,7 +102,7 @@ private fun Modifier.interceptBackgroundPointers(): Modifier = pointerInput(Unit
 }
 
 @Composable
-private fun StatusBar(s: PatientStatus, onCare: (() -> Unit)?) {
+private fun StatusBar(s: PatientStatus, onCare: (() -> Unit)?, onCycleDisplayMode: (() -> Unit)?) {
     val c = LocalBciColors.current
     Box(Modifier.fillMaxWidth().height(56.dp)) {
         Row(Modifier.fillMaxSize().padding(horizontal = 28.dp), horizontalArrangement = Arrangement.SpaceBetween,
@@ -113,7 +116,12 @@ private fun StatusBar(s: PatientStatus, onCare: (() -> Unit)?) {
                 Pill(s.connection, dot = dot)
                 Pill("L "+(s.leftBattery?.let { "$it%" } ?: "--")+" · R "+(s.rightBattery?.let { "$it%" } ?: "--"))
                 Pill(if (s.mode == ScanMode.MANUAL) "手动扫描" else String.format(Locale.ROOT,"每项 %.1f s",s.interval / 1000.0))
-                Pill(s.display)
+                Pill(
+                    s.display,
+                    modifier = if (onCycleDisplayMode != null) {
+                        Modifier.clip(CircleShape).clickable(onClick = onCycleDisplayMode)
+                    } else Modifier
+                )
                 Pill("照护", inverted = true, modifier = Modifier.pointerInput(onCare) {
                     if (onCare == null) return@pointerInput
                     awaitEachGesture {
