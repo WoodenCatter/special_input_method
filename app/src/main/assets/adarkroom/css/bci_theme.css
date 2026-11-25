@@ -184,6 +184,8 @@ div#outerSlider > div {
 	overflow-x: hidden !important;
 	box-sizing: border-box;
 	padding-bottom: 56px;
+	scroll-padding-top: 96px;
+	scroll-padding-bottom: 24px;
 }
 
 /* Tabs header (10px left padding prevents left Coral focus ring clipping) */
@@ -267,20 +269,24 @@ div.button {
 div#buildBtns {
 	left: 10px !important;
 	top: 116px !important;
+	padding-bottom: 28px;
 }
 
 div#craftBtns {
 	left: 188px !important;
 	top: 116px !important;
+	padding-bottom: 28px;
 }
 
 div#buyBtns {
 	left: 366px !important;
 	top: 116px !important;
+	padding-bottom: 28px;
 }
 
 div#fabricateButtons {
 	left: 10px !important;
+	padding-bottom: 28px;
 }
 
 div#buildBtns:before,

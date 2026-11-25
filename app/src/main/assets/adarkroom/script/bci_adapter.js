@@ -480,6 +480,49 @@
 		}
 	}
 
+	function ensureFocusVisible(el) {
+		try {
+			if (!el || !el.isConnected) return;
+			// Fixed utility bar & sticky header tabs are always visible without scrolling #main.
+			if (el.closest('#bciTopTools, #header, #bciWorldPad')) return;
+
+			var scroller = el.closest('.eventPanel, #pathScroller, #main, #worldPanel');
+			if (!scroller) {
+				el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+				return;
+			}
+
+			var sRect = scroller.getBoundingClientRect();
+			var eRect = el.getBoundingClientRect();
+			var visTop = sRect.top + 14;
+			var visBottom = sRect.bottom - 18;
+
+			if (scroller.id === 'main') {
+				var header = document.getElementById('header');
+				if (header) {
+					var hRect = header.getBoundingClientRect();
+					if (hRect.bottom > visTop) {
+						visTop = hRect.bottom + 18;
+					}
+				}
+			}
+
+			if (eRect.top < visTop) {
+				var targetTop = scroller.scrollTop + (eRect.top - visTop);
+				// Snap cleanly to top when close so legends (#stores, #buildBtns) also reveal completely.
+				if (targetTop < 36) targetTop = 0;
+				scroller.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+			} else if (eRect.bottom > visBottom) {
+				var targetDown = scroller.scrollTop + (eRect.bottom - visBottom);
+				scroller.scrollTo({ top: Math.max(0, targetDown), behavior: 'smooth' });
+			}
+		} catch (e) {
+			try {
+				el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+			} catch (e2) {}
+		}
+	}
+
 	function renderFocus() {
 		withAdapterDomMutation(function () {
 			clearVisualFocus();
@@ -503,9 +546,7 @@
 			var el = current.el;
 			el.classList.add('bci-focus');
 
-			try {
-				el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-			} catch (e) {}
+			ensureFocusVisible(el);
 
 			var dir = cfg.manual ? 0 : state.direction;
 			if (!cfg.manual && items.length > 1) {
