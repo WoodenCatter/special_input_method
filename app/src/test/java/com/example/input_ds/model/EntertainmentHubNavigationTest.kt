@@ -16,6 +16,7 @@ class EntertainmentHubNavigationTest {
                 EntertainmentHubModule.SNAKE_CLIMB,
                 EntertainmentHubModule.WATERMELON,
                 EntertainmentHubModule.LIFE_RESTART,
+                EntertainmentHubModule.A_DARK_ROOM,
                 EntertainmentHubModule.WIZARD_GAME,
                 EntertainmentHubModule.CHINESE_CHESS,
                 EntertainmentHubModule.DOUDIZHU,
@@ -52,7 +53,7 @@ class EntertainmentHubNavigationTest {
 
         val games = EntertainmentCatalog.entriesFor(EntertainmentCategory.GAMES, all)
         assertEquals(
-            listOf("返回娱乐", "迷宫", "向上贪吃蛇", "合成大西瓜", "人生重开", "魔法师"),
+            listOf("返回娱乐", "迷宫", "向上贪吃蛇", "合成大西瓜", "人生重开", "小黑屋", "魔法师"),
             games.map { it.displayName }
         )
 
@@ -87,7 +88,7 @@ class EntertainmentHubNavigationTest {
         val onlyGames = EntertainmentHubModule.modulesIn(EntertainmentCategory.GAMES).map { it.id }.toSet()
         assertTrue(EntertainmentCatalog.shouldFlatten(onlyGames))
         assertEquals(
-            listOf("返回主页", "迷宫", "向上贪吃蛇", "合成大西瓜", "人生重开", "魔法师", "功能市场"),
+            listOf("返回主页", "迷宫", "向上贪吃蛇", "合成大西瓜", "人生重开", "小黑屋", "魔法师", "功能市场"),
             EntertainmentCatalog.entriesFor(null, onlyGames).map { it.displayName }
         )
 

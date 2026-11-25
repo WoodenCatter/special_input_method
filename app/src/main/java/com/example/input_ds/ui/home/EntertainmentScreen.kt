@@ -660,6 +660,7 @@ private fun moduleArtRes(module: EntertainmentHubModule): Int = when (module) {
     EntertainmentHubModule.SNAKE_CLIMB -> R.drawable.gallery_art_snake
     EntertainmentHubModule.WATERMELON -> R.drawable.gallery_art_watermelon
     EntertainmentHubModule.LIFE_RESTART -> R.drawable.gallery_art_liferestart
+    EntertainmentHubModule.A_DARK_ROOM -> R.drawable.gallery_art_adarkroom
     EntertainmentHubModule.WIZARD_GAME -> R.drawable.gallery_art_wizard
     EntertainmentHubModule.CHINESE_CHESS -> R.drawable.gallery_art_chess
     EntertainmentHubModule.DOUDIZHU -> R.drawable.gallery_art_ddz

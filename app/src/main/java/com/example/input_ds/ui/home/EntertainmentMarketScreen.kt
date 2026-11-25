@@ -349,12 +349,13 @@ fun EntertainmentMarketScreen(
             }
         }
 
-        // Row 3: 游戏 (4)
+        // Row 3: 游戏
+        val compactGames = gameModules.size >= 6
         Row(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compactGames) 10.dp else 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             MarketCategoryTag(EntertainmentCategory.GAMES.displayName)
@@ -367,6 +368,7 @@ fun EntertainmentMarketScreen(
                     direction = dir,
                     progress = if (cursor.index == idx) progressProvider else null,
                     enabled = !paused,
+                    compact = compactGames,
                     onClick = { choose(idx) },
                     modifier = Modifier
                         .weight(1f)
@@ -450,7 +452,8 @@ private fun MarketFeatureCard(
     progress: (() -> Float?)?,
     enabled: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier
+    modifier: Modifier,
+    compact: Boolean = false
 ) {
     val c = LocalBciColors.current
     val context = LocalContext.current
@@ -475,7 +478,7 @@ private fun MarketFeatureCard(
                 showDirectionTag = false
             )
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 16.dp),
+            .padding(horizontal = if (compact) 14.dp else 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
@@ -485,7 +488,7 @@ private fun MarketFeatureCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(if (compact) 40.dp else 48.dp)
                     .alpha(contentAlpha)
                     .clip(RoundedCornerShape(12.dp))
                     .background(accentColor),
@@ -505,7 +508,7 @@ private fun MarketFeatureCard(
                     .clip(CircleShape)
                     .background(if (isAdded) c.ok else Color.Transparent, CircleShape)
                     .border(1.dp, if (isAdded) c.ok else c.line, CircleShape)
-                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                    .padding(horizontal = if (compact) 9.dp else 12.dp, vertical = 5.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -513,7 +516,7 @@ private fun MarketFeatureCard(
                     color = if (isAdded) Color.White else c.muted,
                     fontFamily = BciType.chinese,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
+                    fontSize = if (compact) 14.sp else 15.sp,
                     style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                 )
             }
@@ -523,7 +526,7 @@ private fun MarketFeatureCard(
             color = c.text.copy(alpha = contentAlpha),
             fontFamily = BciType.chinese,
             fontWeight = FontWeight.Bold,
-            fontSize = 26.sp,
+            fontSize = if (compact) 22.sp else 26.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))

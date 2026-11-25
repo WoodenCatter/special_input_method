@@ -115,6 +115,8 @@ import com.example.input_ds.ui.components.FloatingEegSignalSource
 import com.example.input_ds.ui.components.FloatingEegSignalWindow
 import com.example.input_ds.wizard.WizardGameActivity
 import com.example.input_ds.wizard.WizardGameInputBus
+import com.example.input_ds.adarkroom.ADarkRoomInputBus
+import com.example.input_ds.ui.game.ADarkRoomScreen
 import com.example.input_ds.ui.game.LifeRestartScanItem
 import com.example.input_ds.ui.game.LifeRestartScreen
 import com.example.input_ds.ui.game.SnakeClimbScreen
@@ -872,7 +874,7 @@ class MainActivity : ComponentActivity() {
                     return@BackHandler
                 }
                 if (destination.value in setOf(AppDestination.ASYNC_MAZE, AppDestination.SNAKE_CLIMB,
-                        AppDestination.CHINESE_CHESS, AppDestination.MAHJONG, AppDestination.DOUDIZHU)) {
+                        AppDestination.A_DARK_ROOM, AppDestination.CHINESE_CHESS, AppDestination.MAHJONG, AppDestination.DOUDIZHU)) {
                     confirmGameExit()
                     return@BackHandler
                 }
@@ -889,6 +891,7 @@ class MainActivity : ComponentActivity() {
                     AppDestination.SNAKE_CLIMB,
                     AppDestination.WATERMELON,
                     AppDestination.LIFE_RESTART,
+                    AppDestination.A_DARK_ROOM,
                     AppDestination.WIZARD_GAME,
                     AppDestination.CHINESE_CHESS,
                     AppDestination.DOUDIZHU,
@@ -1056,6 +1059,15 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onStopSpeech = { speechOutput.stop() }
+            )
+
+            AppDestination.A_DARK_ROOM -> ADarkRoomScreen(
+                scanIntervalMs = inputState.scanIntervalMs,
+                scanMode = scanMode.value,
+                paused = careOpen || hasActiveCall || confirmOverlay != null || adjustOverlay != null || speakOverlay != null || nurseCall != null || frozen,
+                onFeedback = { message -> if (!frozen) feedback.toast(message) },
+                onBoundary = { bciController?.invalidatePendingCommands() },
+                onBack = { confirmGameExit() }
             )
 
             AppDestination.ASYNC_MAZE -> MazeScreen(
@@ -1878,6 +1890,7 @@ class MainActivity : ComponentActivity() {
                 navigateTo(AppDestination.WATERMELON)
             }
             EntertainmentHubModule.LIFE_RESTART -> openLifeRestart()
+            EntertainmentHubModule.A_DARK_ROOM -> navigateTo(AppDestination.A_DARK_ROOM)
             EntertainmentHubModule.WIZARD_GAME -> {
                 navigateTo(AppDestination.WIZARD_GAME)
                 wizardGameLauncher.launch(Intent(this, WizardGameActivity::class.java))
@@ -2111,6 +2124,11 @@ class MainActivity : ComponentActivity() {
                 clearTransientOverlaysForNav()
                 openLifeRestart()
             }
+            "nav adarkroom" -> {
+                clearTransientOverlaysForNav()
+                navigateTo(AppDestination.A_DARK_ROOM)
+                dwellRevision++
+            }
             "nav news" -> {
                 clearTransientOverlaysForNav()
                 navigateTo(AppDestination.NEWS_BRIEFING)
@@ -2179,6 +2197,7 @@ class MainActivity : ComponentActivity() {
                         watermelonRenderRevision++
                     }
                     destination.value == AppDestination.LIFE_RESTART -> advanceLifeRestart()
+                    destination.value == AppDestination.A_DARK_ROOM -> ADarkRoomInputBus.debugTick()
                     destination.value == AppDestination.INPUT_METHOD -> inputViewModel?.debugTick()
                     destination.value == AppDestination.COMMUNICATION -> {
                         val chat = communicationViewModel
@@ -2455,6 +2474,9 @@ class MainActivity : ComponentActivity() {
                     }
                     ControlSignal.LEFT_RIGHT, ControlSignal.RIGHT_LEFT -> Unit
                 }
+            }
+            AppDestination.A_DARK_ROOM -> {
+                ADarkRoomInputBus.dispatch(signal)
             }
             AppDestination.COMMUNICATION -> {
                 val chat = communicationViewModel ?: return
