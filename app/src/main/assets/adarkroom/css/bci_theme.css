@@ -52,13 +52,13 @@ html, body {
 	background: var(--adr-bg) !important;
 	color: var(--adr-text) !important;
 	font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif !important;
-	font-size: 18px !important;
+	font-size: 20px !important;
 	-webkit-tap-highlight-color: transparent;
 }
 
 body, .tooltip, select.menuBtn {
 	font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif !important;
-	font-size: 18px !important;
+	font-size: 20px !important;
 	color: var(--adr-text);
 }
 
@@ -71,8 +71,8 @@ body, .tooltip, select.menuBtn {
 /* Top-right BCI utility bar */
 #bciTopTools {
 	position: fixed;
-	top: 6px;
-	right: 16px;
+	top: 10px;
+	right: 22px;
 	z-index: 40;
 	display: flex;
 	align-items: center;
@@ -81,13 +81,13 @@ body, .tooltip, select.menuBtn {
 
 .bci-tool-btn {
 	position: relative;
-	padding: 8px 16px;
+	padding: 9px 16px;
 	border-radius: 12px;
 	border: 2px solid var(--adr-line);
 	background: var(--adr-panel);
 	color: var(--adr-text);
 	font-family: inherit;
-	font-size: 16px;
+	font-size: 18px;
 	font-weight: 700;
 	cursor: pointer;
 	outline: none;
@@ -104,14 +104,14 @@ body, .tooltip, select.menuBtn {
 .bci-tool-btn.bci-touch-only {
 	opacity: 0.72;
 	font-weight: 500;
-	font-size: 15px;
+	font-size: 16px;
 	padding: 8px 12px;
 }
 
-/* Main centered tablet wrapper: 356px notifications + 24px gap + 700px game stage = 1080px */
+/* Main centered tablet wrapper: 360px notifications + 20px gap + 800px game stage = 1180px */
 div#wrapper {
 	margin: 0 auto !important;
-	width: 1080px !important;
+	width: 1180px !important;
 	padding: 10px 0 0 380px !important;
 	height: var(--adr-vh, 592px) !important;
 	box-sizing: border-box;
@@ -127,8 +127,8 @@ div#saveNotify {
 	color: var(--adr-ok) !important;
 	border: 1px solid var(--adr-ok);
 	border-radius: 999px;
-	padding: 4px 12px;
-	font-size: 14px;
+	padding: 5px 14px;
+	font-size: 15px;
 	font-weight: 700;
 	z-index: 35;
 	pointer-events: none;
@@ -139,19 +139,19 @@ div#notifications {
 	position: absolute !important;
 	top: 10px !important;
 	left: 0 !important;
-	width: 352px !important;
+	width: 360px !important;
 	height: calc(var(--adr-vh, 592px) - 20px) !important;
 	background: var(--adr-panel) !important;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 18px;
-	padding: 16px 18px;
+	padding: 18px 20px;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 div#notifications div.notification {
-	margin-bottom: 12px !important;
-	font-size: 18px !important;
+	margin-bottom: 14px !important;
+	font-size: 21px !important;
 	line-height: 1.55 !important;
 	color: var(--adr-text);
 }
@@ -169,32 +169,32 @@ div#notifyGradient {
 	pointer-events: none;
 }
 
-/* Right main content stage (keeps exact 700px width for upstream slider math) */
+/* Right main content stage (800px wide, synchronized with engine.js/path.js slider math) */
 div#content {
 	position: relative;
 	overflow: hidden;
-	width: 700px !important;
+	width: 800px !important;
 	height: calc(var(--adr-vh, 592px) - 20px) !important;
 }
 
 div#outerSlider > div {
-	width: 700px !important;
+	width: 800px !important;
 	height: calc(var(--adr-vh, 592px) - 20px) !important;
 	overflow-y: auto !important;
 	overflow-x: hidden !important;
 	box-sizing: border-box;
-	padding-bottom: 48px;
+	padding-bottom: 56px;
 }
 
-/* Tabs header */
+/* Tabs header (10px left padding prevents left Coral focus ring clipping) */
 div#header {
 	position: sticky;
 	top: 0;
 	z-index: 32;
 	background: var(--adr-bg);
-	padding: 4px 270px 12px 0 !important;
+	padding: 6px 320px 12px 10px !important;
 	height: auto !important;
-	min-height: 44px;
+	min-height: 48px;
 	border-bottom: 1px solid var(--adr-line);
 	margin-bottom: 10px;
 	display: flex;
@@ -208,12 +208,12 @@ div.headerButton {
 	position: relative;
 	float: none !important;
 	margin: 0 !important;
-	padding: 7px 14px !important;
+	padding: 8px 16px !important;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 12px;
 	background: var(--adr-panel);
 	color: var(--adr-muted);
-	font-size: 18px !important;
+	font-size: 20px !important;
 	font-weight: 700 !important;
 	text-decoration: none !important;
 	overflow: hidden;
@@ -229,28 +229,28 @@ div.headerButton.selected:hover {
 
 /* Keep div.location overflow visible so #storesContainer sliding from Room onto Outside/Path is NEVER clipped! */
 div#locationSlider {
-	top: 78px;
+	top: 84px;
 }
 
 div.location {
-	width: 700px !important;
+	width: 800px !important;
 	overflow: visible !important;
-	padding: 0 6px 56px 6px;
+	padding: 0 10px 64px 10px;
 	box-sizing: border-box;
 }
 
-/* Game action buttons: keep upstream left-column width so buttons NEVER collide with #storesContainer / #village */
+/* Game action buttons: 164px wide, large patient-friendly typography, 10px stage inset so focus ring never clips */
 div.button {
 	position: relative;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 14px !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
-	font-size: 17px !important;
+	font-size: 21px !important;
 	font-weight: 700 !important;
-	width: 136px !important;
-	padding: 9px 11px 14px 11px !important;
-	margin-bottom: 10px !important;
+	width: 164px !important;
+	padding: 11px 13px 15px 13px !important;
+	margin-bottom: 12px !important;
 	box-sizing: border-box;
 	text-decoration: none !important;
 	transition: border-color 140ms ease-out, background-color 140ms ease-out;
@@ -260,13 +260,27 @@ div.button {
 #stokeButton,
 #embarkButton,
 #liftoffButton {
-	width: 180px !important;
+	width: 210px !important;
+	font-size: 22px !important;
 }
 
-div#buildBtns,
-div#craftBtns,
+div#buildBtns {
+	left: 10px !important;
+	top: 116px !important;
+}
+
+div#craftBtns {
+	left: 188px !important;
+	top: 116px !important;
+}
+
 div#buyBtns {
-	top: 102px !important;
+	left: 366px !important;
+	top: 116px !important;
+}
+
+div#fabricateButtons {
+	left: 10px !important;
 }
 
 div#buildBtns:before,
@@ -274,30 +288,48 @@ div#craftBtns:before,
 div#buyBtns:before,
 div#fabricateButtons:before {
 	display: block;
-	margin-bottom: 4px;
+	margin-bottom: 6px;
 }
 
 div#workers {
-	left: 158px !important;
-	width: 292px !important;
-	padding: 12px 14px !important;
+	left: 188px !important;
+	width: 342px !important;
+	padding: 14px 16px !important;
 	box-sizing: border-box;
+	font-size: 20px !important;
 }
 
 div#outfitting {
-	width: 390px !important;
-	padding: 14px 14px 10px 14px !important;
+	width: 470px !important;
+	padding: 16px 16px 12px 16px !important;
 	box-sizing: border-box;
+	font-size: 20px !important;
 }
 
 div#stores,
-div#weapons,
-div#village,
-div#perks,
-div#blueprints {
-	width: 220px !important;
-	padding: 14px 14px 10px 14px !important;
+div#weapons {
+	width: 244px !important;
+	margin-right: 10px !important;
+	padding: 16px 16px 12px 16px !important;
 	box-sizing: border-box;
+	font-size: 20px !important;
+}
+
+div#village,
+div#perks {
+	right: 10px !important;
+	width: 244px !important;
+	padding: 16px 16px 12px 16px !important;
+	box-sizing: border-box;
+	font-size: 20px !important;
+}
+
+div#blueprints {
+	right: 268px !important;
+	width: 244px !important;
+	padding: 16px 16px 12px 16px !important;
+	box-sizing: border-box;
+	font-size: 20px !important;
 }
 
 div#population,
@@ -305,8 +337,8 @@ div#bagspace {
 	background: var(--adr-bg) !important;
 	color: var(--adr-muted) !important;
 	padding: 0 6px !important;
-	top: -13px !important;
-	font-size: 15px !important;
+	top: -14px !important;
+	font-size: 17px !important;
 	font-weight: 700;
 }
 
@@ -363,7 +395,7 @@ div.button div.cooldown {
 #fabricateButtons:before {
 	background: var(--adr-bg) !important;
 	color: var(--adr-muted) !important;
-	font-size: 15px !important;
+	font-size: 17px !important;
 	font-weight: 700;
 	padding: 0 6px;
 }
@@ -399,17 +431,17 @@ div.button.bci-focus > div.tooltip {
 	bottom: auto !important;
 	width: auto !important;
 	min-width: 0 !important;
-	margin: 6px 0 0 0 !important;
-	padding: 5px 0 0 0 !important;
+	margin: 7px 0 0 0 !important;
+	padding: 6px 0 0 0 !important;
 	border: none !important;
 	border-top: 1px solid var(--adr-line) !important;
 	border-radius: 0 !important;
 	background: transparent !important;
 	box-shadow: none !important;
 	color: var(--adr-muted) !important;
-	font-size: 13px !important;
+	font-size: 16px !important;
 	font-weight: 500 !important;
-	line-height: 1.35 !important;
+	line-height: 1.4 !important;
 	text-align: left !important;
 	z-index: auto !important;
 }
@@ -504,10 +536,10 @@ div.upBtn,
 div.dnBtn,
 div.upManyBtn,
 div.dnManyBtn {
-	width: 28px !important;
-	height: 28px !important;
+	width: 34px !important;
+	height: 34px !important;
 	border: 2px solid var(--adr-line);
-	border-radius: 8px;
+	border-radius: 9px;
 	background: var(--adr-panel2);
 	display: inline-flex !important;
 	align-items: center;
@@ -540,10 +572,10 @@ div.dnManyBtn:after {
 	line-height: 1 !important;
 }
 
-div.upBtn:after { content: "+" !important; font-size: 18px; font-weight: 800; color: var(--adr-text); }
-div.dnBtn:after { content: "−" !important; font-size: 18px; font-weight: 800; color: var(--adr-text); }
-div.upManyBtn:after { content: "+10" !important; font-size: 12px; font-weight: 800; color: var(--adr-muted); }
-div.dnManyBtn:after { content: "-10" !important; font-size: 12px; font-weight: 800; color: var(--adr-muted); }
+div.upBtn:after { content: "+" !important; font-size: 21px; font-weight: 800; color: var(--adr-text); }
+div.dnBtn:after { content: "−" !important; font-size: 21px; font-weight: 800; color: var(--adr-text); }
+div.upManyBtn:after { content: "+10" !important; font-size: 13px; font-weight: 800; color: var(--adr-muted); }
+div.dnManyBtn:after { content: "-10" !important; font-size: 13px; font-weight: 800; color: var(--adr-muted); }
 
 div.upBtn.disabled,
 div.dnBtn.disabled,
@@ -579,13 +611,13 @@ div.eventPanel {
 	border: 3px solid var(--adr-focus) !important;
 	border-radius: 22px !important;
 	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.30), 0 0 0 9999px var(--adr-scrim) !important;
-	width: 620px !important;
+	width: 720px !important;
 	max-height: calc(var(--adr-vh, 592px) - 56px) !important;
 	overflow-y: auto;
 	left: 50% !important;
 	top: 50% !important;
 	transform: translate(-50%, -50%) !important;
-	padding: 24px 28px !important;
+	padding: 26px 32px !important;
 	box-sizing: border-box;
 	z-index: 60 !important;
 }
@@ -602,27 +634,27 @@ div.eventPanel {
 	display: block;
 	background: transparent !important;
 	color: var(--adr-focus) !important;
-	font-size: 26px !important;
+	font-size: 28px !important;
 	font-weight: 900 !important;
-	margin-bottom: 12px;
+	margin-bottom: 14px;
 	padding: 0 !important;
 }
 
 #description {
-	font-size: 19px !important;
+	font-size: 22px !important;
 	line-height: 1.65 !important;
 	color: var(--adr-text);
-	padding-bottom: 14px;
+	padding-bottom: 16px;
 }
 
 #description > div {
-	margin-bottom: 10px;
+	margin-bottom: 12px;
 }
 
 div#buttons {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
+	gap: 14px;
 	padding-top: 8px;
 }
 
@@ -637,11 +669,11 @@ div#buttons {
 }
 
 #lootButtons {
-	padding: 14px 12px 12px 12px !important;
+	padding: 16px 14px 14px 14px !important;
 }
 
 #lootButtons:before {
-	top: -13px !important;
+	top: -14px !important;
 	left: 10px !important;
 	background: var(--adr-panel) !important;
 }
@@ -654,8 +686,9 @@ div#buttons {
 .eventPanel .button {
 	float: none !important;
 	width: auto !important;
-	min-width: 156px !important;
-	padding: 11px 18px !important;
+	min-width: 176px !important;
+	font-size: 21px !important;
+	padding: 13px 22px 15px 22px !important;
 	margin: 0 !important;
 }
 
@@ -697,14 +730,14 @@ div#buttons {
 
 .bci-world-btn {
 	position: relative;
-	min-width: 96px;
-	padding: 10px 14px;
+	min-width: 112px;
+	padding: 12px 18px;
 	border-radius: 12px;
 	border: 2px solid var(--adr-line);
 	background: var(--adr-panel2);
 	color: var(--adr-text);
 	font-family: inherit;
-	font-size: 18px;
+	font-size: 20px;
 	font-weight: 800;
 	cursor: pointer;
 	overflow: hidden;

@@ -120,7 +120,7 @@ var Path = {
 			}
 			
 			if(!ignoreStores && Engine.activeModule === Path) {
-				$('#storesContainer').css({top: perks.height() + 26 + Path._STORES_OFFSET + 'px'});
+				$('#storesContainer').css({top: perks.outerHeight() + 24 + Path._STORES_OFFSET + 'px'});
 			}
 		}
 	},
@@ -326,7 +326,7 @@ var Path = {
 			$SM.add('stores["'+k+'"]', -Path.outfit[k]);
 		}
 		World.onArrival();
-		$('#outerSlider').animate({left: '-700px'}, 300);
+		$('#outerSlider').animate({left: '-800px'}, 300);
 		Engine.activeModule = World;
 		AudioEngine.playSound(AudioLibrary.EMBARK);
 	},
