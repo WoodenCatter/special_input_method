@@ -294,8 +294,6 @@
             state: $.extend(true, {}, World.state),
             outfit: $.extend({}, (typeof Path !== 'undefined' && Path.outfit) ? Path.outfit : {})
           };
-        } else if (typeof State !== 'undefined' && State.bciExpedition) {
-          delete State.bciExpedition;
         }
         localStorage.gameState = JSON.stringify(State);
       }

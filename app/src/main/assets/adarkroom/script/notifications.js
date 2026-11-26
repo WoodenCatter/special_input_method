@@ -53,11 +53,16 @@ var Notifications = {
 		// To fix some memory usage issues, we clear notifications that have been hidden.
 		
 		// We use position().top here, because we know that the parent will be the same, so the position will be the same.
-		var bottom = $('#notifyGradient').position().top + $('#notifyGradient').outerHeight(true);
+		var grad = $('#notifyGradient');
+		if (!grad.length) return;
+		var gradPos = grad.position();
+		if (!gradPos) return;
+		var bottom = gradPos.top + grad.outerHeight(true);
 		
 		$('.notification').each(function() {
 		
-			if($(this).position().top > bottom){
+			var itemPos = $(this).position();
+			if(itemPos && itemPos.top > bottom){
 				$(this).remove();
 			}
 		

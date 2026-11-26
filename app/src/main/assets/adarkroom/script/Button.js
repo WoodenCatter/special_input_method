@@ -93,21 +93,43 @@ var Button = {
 					left = 1;
 			}
 			Button.clearCooldown(btn);
-			if(Button.saveCooldown){
-				$SM.set(id,start);
-				// residual value is measured in seconds
-				// saves program performance
-				btn.data('countdown', Engine.setInterval(function(){
-					$SM.set(id, $SM.get(id, true) - 0.5, true);
-				},500));
+			var saveCd = Boolean(Button.saveCooldown);
+			if(saveCd){
+				$SM.set(id, start);
 			}
 			var time = start;
 			if (Engine.options.doubleTime){
 				time /= 2;
 			}
-			$('div.cooldown', btn).width(left * 100 +"%").animate({width: '0%'}, time * 1000, 'linear', function() {
-				Button.clearCooldown(btn, true);
-			});
+			var totalMs = Math.max(50, time * 1000);
+			var remainingMs = totalMs;
+			var leftFrac = parseFloat(left);
+			var cdEl = $('div.cooldown', btn);
+			cdEl.stop(true, false).css('width', (leftFrac * 100) + '%');
+			var saveAccum = 0;
+			var tickId = window.setInterval(function() {
+				if (!btn[0] || !btn[0].isConnected) {
+					Button.clearCooldown(btn, true);
+					return;
+				}
+				if (window.__bciAdrPaused || (typeof Events !== 'undefined' && Events._stackedModalPause)) {
+					return;
+				}
+				remainingMs -= 50;
+				saveAccum += 50;
+				if (saveCd && saveAccum >= 500) {
+					saveAccum = 0;
+					var secsLeft = Math.max(0, (remainingMs / totalMs) * start);
+					$SM.set(id, secsLeft, true);
+				}
+				if (remainingMs <= 0) {
+					cdEl.css('width', '0%');
+					Button.clearCooldown(btn, true);
+					return;
+				}
+				cdEl.css('width', ((remainingMs / totalMs) * leftFrac * 100) + '%');
+			}, 50);
+			btn.data('countdown', tickId);
 			btn.addClass('disabled');
 			btn.data('onCooldown', true);
 		}
@@ -116,7 +138,7 @@ var Button = {
 	clearCooldown: function(btn, cooldownEnded) {
 		var ended = cooldownEnded || false;
 		if(!ended){
-			$('div.cooldown', btn).stop(true, true);
+			$('div.cooldown', btn).stop(true, true).css('width', '0%');
 		}
 		btn.data('onCooldown', false);
 		if(btn.data('countdown')){

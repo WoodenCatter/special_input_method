@@ -1101,6 +1101,14 @@ var World = {
     if (typeof State === 'undefined' || !State.bciExpedition || !State.bciExpedition.state) {
       return false;
     }
+    if (!$('#worldPanel').length) {
+      if (typeof Path !== 'undefined' && !$('#pathPanel').length) {
+        Path.init();
+      }
+      if (!$('#worldPanel').length) {
+        World.init();
+      }
+    }
     var exp = State.bciExpedition;
     Engine.tabNavigation = false;
     Button.clearCooldown($('#embarkButton'));

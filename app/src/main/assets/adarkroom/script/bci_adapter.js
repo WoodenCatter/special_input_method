@@ -126,6 +126,16 @@
 		return rect.width > 2 && rect.height > 2;
 	}
 
+	function isLayoutVisibleEl(el) {
+		if (!el || !el.isConnected) return false;
+		var style = window.getComputedStyle(el);
+		if (style.display === 'none' || style.visibility === 'hidden') {
+			return false;
+		}
+		var rect = el.getBoundingClientRect();
+		return rect.width > 2 && rect.height > 2;
+	}
+
 	function isSpaceActive() {
 		return typeof Engine !== 'undefined' &&
 			typeof Space !== 'undefined' &&
@@ -362,7 +372,7 @@
 
 		// Priority 0: Expansion outro (#wait-btn) or Score ending (.centerCont .endGameOption)
 		var outroBtn = document.querySelector('.outroContainer #wait-btn:not(.disabled)');
-		if (outroBtn && isVisibleEl(outroBtn)) {
+		if (outroBtn && isLayoutVisibleEl(outroBtn)) {
 			out.push({ el: outroBtn, label: cleanButtonText(outroBtn) || '等待', id: 'wait-btn' });
 			if (exitBtn && isVisibleEl(exitBtn)) {
 				out.push({ el: exitBtn, label: '离开小黑屋', id: 'bciExitBtn' });
@@ -372,7 +382,7 @@
 		var endOptions = document.querySelectorAll('.centerCont .endGameOption');
 		if (endOptions.length > 0 && !getTopEventEl()) {
 			for (var eo = 0; eo < endOptions.length; eo++) {
-				if (!isVisibleEl(endOptions[eo])) continue;
+				if (!isLayoutVisibleEl(endOptions[eo])) continue;
 				var eoText = cleanButtonText(endOptions[eo]);
 				if (eoText) {
 					out.push({ el: endOptions[eo], label: eoText, id: endOptions[eo].id || ('end_' + eo) });
@@ -1055,6 +1065,14 @@
 					};
 				}
 			});
+		}
+		if (typeof Space !== 'undefined' && Space.showEndingOptions) {
+			var origShowEndingOptions = Space.showEndingOptions;
+			Space.showEndingOptions = function () {
+				var res = origShowEndingOptions.apply(Space, arguments);
+				refreshItems(true);
+				return res;
+			};
 		}
 		if (typeof Events !== 'undefined') {
 			['startEvent', 'endEvent', 'loadScene', 'drawDrop'].forEach(function (fnName) {

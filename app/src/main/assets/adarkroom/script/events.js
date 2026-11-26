@@ -49,10 +49,18 @@ var Events = {
 
 	delayState: 'wait',
 	activeScene: null,
+	_stackedModalPause: false,
+
+	isCombatPaused: function() {
+		return Boolean(window.__bciAdrPaused || Events._stackedModalPause);
+	},
 
 	loadScene: function(name) {
 		Engine.log('loading scene: ' + name);
 		Events.activeScene = name;
+		if (Events.activeEvent()) {
+			Events.activeEvent()._scene = name;
+		}
 		var scene = Events.activeEvent().scenes[name];
 
 		// onLoad
@@ -159,7 +167,7 @@ var Events = {
 		Events.startEnemyAttacks();
 		Events._specialTimers = (scene.specials ?? []).map(s => Engine.setInterval(
 			() => {
-				if (window.__bciAdrPaused) return;
+				if (Events.isCombatPaused()) return;
 				const enemy = $('#enemy');
 				const text = s.action(enemy);
 				Events.updateFighterDiv(enemy);
@@ -620,7 +628,7 @@ var Events = {
 				resolved = true;
 				return;
 			}
-			if (window.__bciAdrPaused) {
+			if (Events.isCombatPaused()) {
 				Events._explodeTimer = setTimeout(tick, 100);
 				return;
 			}
@@ -660,7 +668,7 @@ var Events = {
 	},
 
 	damage: function(fighter, enemy, dmg, type, cb) {
-		if (window.__bciAdrPaused && fighter && fighter.attr && fighter.attr('id') === 'enemy') {
+		if (Events.isCombatPaused() && fighter && fighter.attr && fighter.attr('id') === 'enemy') {
 			return;
 		}
 		var enemyHp = enemy.data('hp');
@@ -696,7 +704,7 @@ var Events = {
 				if (venomous && !shielded) {
 					clearInterval(Events._dotTimer);
 					Events._dotTimer = setInterval(() => {
-						if (window.__bciAdrPaused) return;
+						if (Events.isCombatPaused()) return;
 						Events.dotDamage(enemy, Math.floor(dmg / 2));
 					}, Events.DOT_TICK);
 				}
@@ -731,7 +739,7 @@ var Events = {
 				}
 				var stunRemaining = Events.STUN_DURATION;
 				var stunId = setInterval(function() {
-					if (window.__bciAdrPaused) return;
+					if (Events.isCombatPaused()) return;
 					stunRemaining -= 100;
 					if (stunRemaining <= 0) {
 						clearInterval(stunId);
@@ -799,7 +807,7 @@ var Events = {
 
 	enemyAttack: function() {
 		// Events.togglePause($('#pause'),'auto');
-		if (window.__bciAdrPaused) return;
+		if (Events.isCombatPaused()) return;
 
 		var scene = Events.activeEvent().scenes[Events.activeScene];
 		const enemy = $('#enemy');
@@ -1447,7 +1455,8 @@ var Events = {
 	},
 
 	eventPanel: function() {
-		return Events.activeEvent().eventPanel;
+		var active = Events.activeEvent();
+		return active ? active.eventPanel : $();
 	},
 
 	switchEvent: event => {
@@ -1458,7 +1467,9 @@ var Events = {
 		Events.clearTimeouts();
 		AudioEngine.stopEventMusic();
 		Events.eventPanel().remove();
-		Events.activeEvent().eventPanel = null;
+		if (Events.activeEvent()) {
+			Events.activeEvent().eventPanel = null;
+		}
 		Events.eventStack.shift();
 		Events.startEvent(event);
 	},
@@ -1466,6 +1477,15 @@ var Events = {
 	startEvent: function(event, options) {
 		if(!event) {
 			return;
+		}
+		delete event._closing;
+		delete event._savedScene;
+		if (Events.eventStack.length > 0) {
+			var prevTop = Events.eventStack[0];
+			prevTop._savedScene = Events.activeScene;
+			if (prevTop.eventPanel && prevTop.eventPanel.find('#fight').length > 0 && !Events.won) {
+				Events._stackedModalPause = true;
+			}
 		}
 		event.audio && AudioEngine.playEventMusic(event.audio);
 		Engine.event('game event', 'event');
@@ -1481,7 +1501,8 @@ var Events = {
 		$('<div>').attr('id', 'description').appendTo(Events.eventPanel());
 		$('<div>').attr('id', 'buttons').appendTo(Events.eventPanel());
 		Events.loadScene('start');
-		$('div#wrapper').append(Events.eventPanel());
+		var hostContainer = $('div#wrapper');
+		(hostContainer.length ? hostContainer : $('body')).append(Events.eventPanel());
 		Events.eventPanel().animate({opacity: 1}, Events._PANEL_FADE, 'linear');
 		var currentSceneInformation = Events.activeEvent().scenes[Events.activeScene];
 		if (currentSceneInformation.blink) {
@@ -1496,28 +1517,65 @@ var Events = {
 		Events._eventTimeout = Engine.setTimeout(Events.triggerEvent, nextEvent * 60 * 1000);
 	},
 
-	endEvent: function() {
-		Events.cancelExplode();
-		Events.clearTimeouts();
-		AudioEngine.stopEventMusic();
-		var panel = Events.eventPanel();
-		if (panel && panel.length) {
-			panel.attr('data-bci-closing', '1');
+	endEvent: function(targetEvent) {
+		var closingEvent = targetEvent || Events.activeEvent();
+		if (!closingEvent || closingEvent._closing) {
+			return;
 		}
-		panel.animate({opacity:0}, Events._PANEL_FADE, 'linear', function() {
-			Events.eventPanel().remove();
-			Events.activeEvent().eventPanel = null;
-			Events.eventStack.shift();
-			Engine.log(Events.eventStack.length + ' events remaining');
+		closingEvent._closing = true;
+		var closingPanel = closingEvent.eventPanel;
+		var closingWasCombat = Boolean(closingPanel && closingPanel.find('#fight').length > 0);
+		if (closingPanel && closingPanel.length) {
+			closingPanel.attr('data-bci-closing', '1');
+		}
+
+		// Remove closingEvent by object identity immediately so a rapid re-open never gets removed instead.
+		var stackIdx = Events.eventStack.indexOf(closingEvent);
+		if (stackIdx >= 0) {
+			Events.eventStack.splice(stackIdx, 1);
+		}
+		var hasUnderlying = Events.eventStack.length > 0;
+
+		if (!hasUnderlying || closingWasCombat) {
+			Events.cancelExplode();
+			Events.clearTimeouts();
+			AudioEngine.stopEventMusic();
+		}
+
+		if (hasUnderlying) {
+			var nextTop = Events.eventStack[0];
+			Events.activeScene = nextTop._savedScene || nextTop._scene || Events.activeScene;
+			Engine.keyLock = true;
+			Engine.tabNavigation = false;
+			Button.saveCooldown = false;
+			Events._stackedModalPause = Events.eventStack.some(function(ev, i) {
+				return i > 0 && ev && ev.eventPanel && ev.eventPanel.find('#fight').length > 0;
+			});
+		} else {
+			Events._stackedModalPause = false;
 			Engine.keyLock = false;
 			Engine.tabNavigation = true;
 			Button.saveCooldown = true;
 			if (Events.BLINK_INTERVAL) {
 				Events.stopTitleBlink();
 			}
-			// Force refocus on the body. I hate you, IE.
-			$('body').focus();
-		});
+		}
+
+		Engine.log(Events.eventStack.length + ' events remaining');
+		if (closingPanel && closingPanel.length) {
+			closingPanel.stop(true, false).animate({opacity: 0}, Events._PANEL_FADE, 'linear', function() {
+				closingPanel.remove();
+				if (closingEvent.eventPanel === closingPanel) {
+					closingEvent.eventPanel = null;
+				}
+				if (Events.eventStack.length === 0) {
+					// Force refocus on the body. I hate you, IE.
+					$('body').focus();
+				}
+			});
+		} else {
+			closingEvent.eventPanel = null;
+		}
 	},
 
 	handleStateUpdates: function(e){
