@@ -73,7 +73,7 @@ body, .tooltip, select.menuBtn {
 	position: fixed;
 	top: 10px;
 	right: 22px;
-	z-index: 40;
+	z-index: 65;
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -673,6 +673,15 @@ div.outfitRow {
 	padding-right: 0 !important;
 }
 
+/* Full-screen touch/pointer-blocking backdrop behind active event modals */
+#bciModalBackdrop {
+	position: fixed;
+	inset: 0;
+	background: var(--adr-scrim);
+	z-index: 55;
+	pointer-events: auto;
+}
+
 /* Event modal overlay */
 div.eventPanel {
 	position: fixed !important;
@@ -680,7 +689,7 @@ div.eventPanel {
 	color: var(--adr-text) !important;
 	border: 3px solid var(--adr-focus) !important;
 	border-radius: 22px !important;
-	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.30), 0 0 0 9999px var(--adr-scrim) !important;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35) !important;
 	width: 720px !important;
 	max-height: calc(var(--adr-vh, 592px) - 56px) !important;
 	overflow-y: auto;
@@ -689,7 +698,7 @@ div.eventPanel {
 	transform: translate(-50%, -50%) !important;
 	padding: 26px 32px !important;
 	box-sizing: border-box;
-	z-index: 60 !important;
+	z-index: 60;
 }
 
 .eventPanel:before,

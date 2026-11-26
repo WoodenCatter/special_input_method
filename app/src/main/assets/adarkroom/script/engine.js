@@ -281,7 +281,7 @@
           $('#saveNotify').css('opacity', 1).animate({opacity: 0}, 1000, 'linear');
           Engine._lastNotify = Date.now();
         }
-        if (typeof World !== 'undefined' && Engine.activeModule === World && !World.dead && World.state) {
+        if (!Engine._deletingSave && typeof World !== 'undefined' && Engine.activeModule === World && !World.dead && World.state) {
           State.bciExpedition = {
             curPos: [World.curPos[0], World.curPos[1]],
             water: World.water,
@@ -421,7 +421,11 @@
     },
 
     confirmDelete: function() {
+      if (typeof Events !== 'undefined' && Events.activeEvent && Events.activeEvent() && Events.activeEvent()._isRestartConfirm) {
+        return;
+      }
       Events.startEvent({
+        _isRestartConfirm: true,
         title: _('Restart?'),
         scenes: {
           start: {
@@ -443,6 +447,13 @@
     },
 
     deleteSave: function(noReload) {
+      Engine._deletingSave = true;
+      if (typeof World !== 'undefined') {
+        World.state = null;
+      }
+      if (typeof Path !== 'undefined') {
+        Path.outfit = {};
+      }
       if(typeof Storage != 'undefined' && localStorage) {
         var prestige = Prestige.get();
         window.State = {};
@@ -452,6 +463,8 @@
       }
       if(!noReload) {
         location.reload();
+      } else {
+        Engine._deletingSave = false;
       }
     },
 

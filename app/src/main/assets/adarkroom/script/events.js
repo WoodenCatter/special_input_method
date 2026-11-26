@@ -55,6 +55,63 @@ var Events = {
 		return Boolean(window.__bciAdrPaused || Events._stackedModalPause);
 	},
 
+	getCombatScene: function() {
+		if (!Array.isArray(Events.eventStack)) return null;
+		for (var i = 0; i < Events.eventStack.length; i++) {
+			var ev = Events.eventStack[i];
+			if (!ev || ev._closing || !ev.eventPanel || !ev.eventPanel.length) continue;
+			if (ev.eventPanel.find('#fight').length > 0) {
+				var sceneName = (i === 0) ? (Events.activeScene || ev._scene) : (ev._savedScene || ev._scene);
+				if (sceneName && ev.scenes && ev.scenes[sceneName] && ev.scenes[sceneName].combat) {
+					return ev.scenes[sceneName];
+				}
+			}
+		}
+		return null;
+	},
+
+	setCombatTimeout: function(fn, durationMs) {
+		if (!Array.isArray(Events._statusTimers)) {
+			Events._statusTimers = [];
+		}
+		var remaining = Math.max(0, Number(durationMs) || 0);
+		var step = 100;
+		var id = window.setInterval(function() {
+			if (Events.isCombatPaused()) return;
+			remaining -= step;
+			if (remaining <= 0) {
+				window.clearInterval(id);
+				var idx = Events._statusTimers.indexOf(id);
+				if (idx >= 0) Events._statusTimers.splice(idx, 1);
+				fn();
+			}
+		}, step);
+		Events._statusTimers.push(id);
+		return id;
+	},
+
+	syncModalBackdrop: function() {
+		var hasActive = Array.isArray(Events.eventStack) && Events.eventStack.length > 0;
+		var backdrop = $('#bciModalBackdrop');
+		if (hasActive) {
+			if (!backdrop.length) {
+				backdrop = $('<div>').attr('id', 'bciModalBackdrop').appendTo('body');
+			}
+			backdrop.show();
+			for (var i = 0; i < Events.eventStack.length; i++) {
+				var ev = Events.eventStack[i];
+				if (ev && ev.eventPanel && ev.eventPanel.length && !ev._closing) {
+					ev.eventPanel.css({
+						'pointer-events': i === 0 ? 'auto' : 'none',
+						'z-index': String(60 + (Events.eventStack.length - 1 - i))
+					});
+				}
+			}
+		} else if (backdrop.length) {
+			backdrop.hide();
+		}
+	},
+
 	loadScene: function(name) {
 		Engine.log('loading scene: ' + name);
 		Events.activeScene = name;
@@ -181,27 +238,39 @@ var Events = {
 
 	startEnemyAttacks: (delay) => {
 		clearInterval(Events._enemyAttackTimer);
-		const scene = Events.activeEvent().scenes[Events.activeScene];
-		Events._enemyAttackTimer = Engine.setInterval(Events.enemyAttack, (delay ?? scene.attackDelay) * 1000);
+		Events._enemyAttackTimer = null;
+		const scene = Events.getCombatScene();
+		const effectiveDelay = (typeof delay === 'number' && isFinite(delay) && delay > 0)
+			? delay
+			: (scene && typeof scene.attackDelay === 'number' && isFinite(scene.attackDelay) && scene.attackDelay > 0 ? scene.attackDelay : null);
+		if (effectiveDelay === null) {
+			return;
+		}
+		Events._enemyAttackTimer = Engine.setInterval(Events.enemyAttack, effectiveDelay * 1000);
 	},
 
 	setStatus: (fighter, status) => {
 		fighter.data('status', status);
 		if (status === 'enraged' && fighter.attr('id') === 'enemy') {
 			Events.startEnemyAttacks(0.5);
-			setTimeout(() => {
+			Events.setCombatTimeout(() => {
+				if (!fighter[0] || !fighter[0].isConnected || Events.won) return;
 				fighter.data('status', 'none');
-				Events.startEnemyAttacks();
+				if (Events.getCombatScene()) {
+					Events.startEnemyAttacks();
+				}
 			}, Events.ENRAGE_DURATION);
 		}
 		if (status === 'meditation') {
 			Events._meditateDmg = 0;
-			setTimeout(() => {
+			Events.setCombatTimeout(() => {
+				if (!fighter[0] || !fighter[0].isConnected) return;
 				fighter.data('status', 'none');
 			}, Events.MEDITATE_DURATION);
 		}
 		if (status === 'boost') {
-			setTimeout(() => {
+			Events.setCombatTimeout(() => {
+				if (!fighter[0] || !fighter[0].isConnected) return;
 				fighter.data('status', 'none');
 			}, Events.BOOST_DURATION);
 		}
@@ -853,6 +922,10 @@ var Events = {
 			Events._stunTimers.forEach(clearInterval);
 			Events._stunTimers = [];
 		}
+		if (Array.isArray(Events._statusTimers)) {
+			Events._statusTimers.forEach(clearInterval);
+			Events._statusTimers = [];
+		}
 		clearInterval(Events._dotTimer);
 		Events._dotTimer = null;
 	},
@@ -1290,7 +1363,17 @@ var Events = {
 	},
 
 	buttonClick: function(btn) {
-		var info = Events.activeEvent().scenes[Events.activeScene].buttons[btn.attr('id')];
+		if (!btn || !btn.length) return;
+		var btnPanel = btn.closest('.eventPanel');
+		if (btnPanel.attr('data-bci-closing') === '1') return;
+		var activeEv = Events.activeEvent();
+		var activePanel = activeEv && activeEv.eventPanel;
+		if (!activeEv || !activePanel || !activePanel.length || !btnPanel.is(activePanel)) {
+			return;
+		}
+		var activeSceneObj = activeEv.scenes && activeEv.scenes[Events.activeScene];
+		var info = activeSceneObj && activeSceneObj.buttons && activeSceneObj.buttons[btn.attr('id')];
+		if (!info) return;
 		// Cost
 		var costMod = {};
 		if(info.cost) {
@@ -1503,6 +1586,7 @@ var Events = {
 		Events.loadScene('start');
 		var hostContainer = $('div#wrapper');
 		(hostContainer.length ? hostContainer : $('body')).append(Events.eventPanel());
+		Events.syncModalBackdrop();
 		Events.eventPanel().animate({opacity: 1}, Events._PANEL_FADE, 'linear');
 		var currentSceneInformation = Events.activeEvent().scenes[Events.activeScene];
 		if (currentSceneInformation.blink) {
@@ -1526,7 +1610,7 @@ var Events = {
 		var closingPanel = closingEvent.eventPanel;
 		var closingWasCombat = Boolean(closingPanel && closingPanel.find('#fight').length > 0);
 		if (closingPanel && closingPanel.length) {
-			closingPanel.attr('data-bci-closing', '1');
+			closingPanel.attr('data-bci-closing', '1').css('pointer-events', 'none');
 		}
 
 		// Remove closingEvent by object identity immediately so a rapid re-open never gets removed instead.
@@ -1534,6 +1618,7 @@ var Events = {
 		if (stackIdx >= 0) {
 			Events.eventStack.splice(stackIdx, 1);
 		}
+		Events.syncModalBackdrop();
 		var hasUnderlying = Events.eventStack.length > 0;
 
 		if (!hasUnderlying || closingWasCombat) {

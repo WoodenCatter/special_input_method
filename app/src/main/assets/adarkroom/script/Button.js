@@ -13,6 +13,12 @@ var Button = {
 			.addClass('button')
 			.text(typeof(options.text) != 'undefined' ? options.text : "button")
 			.click(function() {
+				var activeEv = (typeof Events !== 'undefined' && Events.activeEvent) ? Events.activeEvent() : null;
+				if (activeEv && activeEv.eventPanel && activeEv.eventPanel.length && !activeEv._closing) {
+					if (!$(this).closest('.eventPanel').is(activeEv.eventPanel)) {
+						return;
+					}
+				}
 				if(!$(this).hasClass('disabled')) {
 					Button.cooldown($(this));
 					$(this).data("handler")($(this));

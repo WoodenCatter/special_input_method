@@ -371,8 +371,9 @@
 		var exitBtn = document.getElementById('bciExitBtn');
 
 		// Priority 0: Expansion outro (#wait-btn) or Score ending (.centerCont .endGameOption)
+		// (only when no modal eventPanel like Restart confirmation is open above them)
 		var outroBtn = document.querySelector('.outroContainer #wait-btn:not(.disabled)');
-		if (outroBtn && isLayoutVisibleEl(outroBtn)) {
+		if (outroBtn && !getTopEventEl() && isLayoutVisibleEl(outroBtn)) {
 			out.push({ el: outroBtn, label: cleanButtonText(outroBtn) || '等待', id: 'wait-btn' });
 			if (exitBtn && isVisibleEl(exitBtn)) {
 				out.push({ el: exitBtn, label: '离开小黑屋', id: 'bciExitBtn' });
@@ -705,8 +706,6 @@
 	}
 
 	function currentContextKey() {
-		var outroBtn = document.querySelector('.outroContainer #wait-btn:not(.disabled)');
-		if (outroBtn && isVisibleEl(outroBtn)) return 'outro';
 		var ev = getTopEventEl();
 		if (ev) {
 			var dropMenu = ev.querySelector('#dropMenu');
@@ -715,6 +714,8 @@
 			var scene = (typeof Events !== 'undefined' && Events.activeScene) ? Events.activeScene : '';
 			return 'event:' + title + ':' + scene;
 		}
+		var outroBtn = document.querySelector('.outroContainer #wait-btn:not(.disabled)');
+		if (outroBtn && isLayoutVisibleEl(outroBtn)) return 'outro';
 		if (document.querySelector('.centerCont .endGameOption')) return 'ending';
 		if (isSpaceFlightActive()) return 'space';
 		if (isWorldActive()) return 'world';
@@ -981,8 +982,11 @@
 					}
 				} else if (state.combatPausedByHost) {
 					state.combatPausedByHost = false;
-					if (document.getElementById('fight') && !Events.won && Events.activeEvent && Events.activeEvent()) {
-						Events.startEnemyAttacks();
+					var combatScene = Events.getCombatScene ? Events.getCombatScene() : null;
+					if (combatScene && !Events.won) {
+						var enemyEl = window.jQuery ? window.jQuery('#enemy') : null;
+						var isEnraged = enemyEl && enemyEl.length && enemyEl.data('status') === 'enraged';
+						Events.startEnemyAttacks(isEnraged ? 0.5 : undefined);
 					}
 				}
 			}
@@ -998,8 +1002,13 @@
 					state.combatPausedByHost = true;
 					return;
 				}
-				var scene = Events.activeEvent && Events.activeEvent() && Events.activeEvent().scenes[Events.activeScene];
-				var baseDelay = (typeof delay === 'number') ? delay : (scene ? scene.attackDelay : 2);
+				var scene = Events.getCombatScene ? Events.getCombatScene() : null;
+				var baseDelay = (typeof delay === 'number' && isFinite(delay) && delay > 0)
+					? delay
+					: (scene && typeof scene.attackDelay === 'number' && isFinite(scene.attackDelay) && scene.attackDelay > 0 ? scene.attackDelay : null);
+				if (baseDelay === null) {
+					return;
+				}
 				return origEnemyAttacks.call(Events, baseDelay * 2.2);
 			};
 		}
@@ -1133,7 +1142,7 @@
 					var id = target.id || '';
 					if (id === 'notifications' || id === 'ship' || id === 'spacePanel' ||
 						id === 'starsContainer' || id === 'wanderer' || id === 'enemy' ||
-						id === 'saveNotify') {
+						id === 'saveNotify' || id === 'bciModalBackdrop') {
 						continue;
 					}
 					if (target.classList && (
@@ -1204,7 +1213,7 @@
 
 			syncViewportHeight();
 			applyDarkClass(cfg.isDark);
-			if (prevPaused !== cfg.paused) {
+			if (prevPaused !== cfg.paused || Boolean(window.__bciAdrPaused) !== cfg.paused) {
 				applyPausedState(cfg.paused);
 			}
 			clearGraceMemory();
@@ -1218,7 +1227,9 @@
 			advanceAutoTick(true);
 		},
 		saveAndPause: function () {
+			cfg.paused = true;
 			applyPausedState(true);
+			stopScanTimer();
 		}
 	};
 
