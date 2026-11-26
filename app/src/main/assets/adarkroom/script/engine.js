@@ -631,6 +631,13 @@
 
     activeModule: null,
 
+    getStageWidth: function() {
+      var w = (typeof window !== 'undefined' && typeof window.__bciAdrStageW === 'number' && window.__bciAdrStageW >= 400)
+        ? window.__bciAdrStageW
+        : 800;
+      return w;
+    },
+
     travelTo: function(module) {
       if(Engine.activeModule == module) {
         return;
@@ -640,15 +647,16 @@
       $('div.headerButton').removeClass('selected');
       module.tab.addClass('selected');
 
+      var stageW = Engine.getStageWidth();
       var slider = $('#locationSlider');
       var stores = $('#storesContainer');
       var panelIndex = $('.location').index(module.panel);
       var diff = Math.abs(panelIndex - currentIndex);
-      slider.animate({left: -(panelIndex * 800) + 'px'}, 300 * diff);
+      slider.animate({left: -(panelIndex * stageW) + 'px'}, 300 * diff);
 
       if($SM.get('stores.wood') !== undefined) {
         // FIXME Why does this work if there's an animation queue...?
-        stores.animate({right: -(panelIndex * 800) + 'px'}, 300 * diff);
+        stores.animate({right: -(panelIndex * stageW) + 'px'}, 300 * diff);
       }
 
       if(Engine.activeModule == Room || Engine.activeModule == Path || Engine.activeModule == Fabricator) {
@@ -704,12 +712,12 @@
 
     updateSlider: function() {
       var slider = $('#locationSlider');
-      slider.width((slider.children().length * 800) + 'px');
+      slider.width((slider.children().length * Engine.getStageWidth()) + 'px');
     },
 
     updateOuterSlider: function() {
       var slider = $('#outerSlider');
-      slider.width((slider.children().length * 800) + 'px');
+      slider.width((slider.children().length * Engine.getStageWidth()) + 'px');
     },
 
     getIncomeMsg: function(num, delay) {

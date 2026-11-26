@@ -311,10 +311,20 @@
 	function syncHeaderClearance() {
 		var header = document.getElementById('header');
 		var slider = document.getElementById('locationSlider');
+		var tools = document.getElementById('bciTopTools');
 		if (!header || !slider) return;
+		if (tools) {
+			var toolsW = tools.offsetWidth || 310;
+			var padRight = Math.max(300, toolsW + 24) + 'px';
+			if (header.style.paddingRight !== padRight) {
+				withAdapterDomMutation(function () {
+					header.style.paddingRight = padRight;
+				});
+			}
+		}
 		var h = header.offsetHeight;
 		if (h > 0) {
-			var nextTop = (h + 20) + 'px';
+			var nextTop = (h + 18) + 'px';
 			if (slider.style.top !== nextTop) {
 				withAdapterDomMutation(function () {
 					slider.style.top = nextTop;
@@ -455,7 +465,7 @@
 			var padBtns = document.querySelectorAll('#bciWorldPad .bci-world-btn');
 			for (var w = 0; w < padBtns.length; w++) {
 				if (isVisibleEl(padBtns[w])) {
-					out.push({ el: padBtns[w], label: padBtns[w].textContent.trim(), id: padBtns[w].id });
+					out.push({ el: padBtns[w], label: cleanButtonText(padBtns[w]), id: padBtns[w].id });
 				}
 			}
 			if (exitBtn && isVisibleEl(exitBtn)) {
@@ -1182,11 +1192,44 @@
 	}
 
 	function syncViewportHeight() {
-		var vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 592;
-		if (vh < 200) vh = 592;
+		var vw = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 1064;
+		var vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 528;
+		if (vh < 200) vh = 528;
+		if (vw < 600) vw = 1064;
+		var wrapperW = Math.min(1200, Math.max(760, vw - 12));
+		var notifW = Math.max(228, Math.min(340, Math.round(wrapperW * 0.255)));
+		var gap = 14;
+		var stageW = Math.max(520, wrapperW - notifW - gap);
+		var spaceScale = Math.min(0.76, Math.max(0.55, (vh - 64) / 700));
+		window.__bciAdrStageW = stageW;
+
 		withAdapterDomMutation(function () {
 			if (document.documentElement) {
-				document.documentElement.style.setProperty('--adr-vh', vh + 'px');
+				var st = document.documentElement.style;
+				st.setProperty('--adr-vh', vh + 'px');
+				st.setProperty('--adr-wrapper-w', wrapperW + 'px');
+				st.setProperty('--adr-notif-w', notifW + 'px');
+				st.setProperty('--adr-main-pad', (notifW + gap) + 'px');
+				st.setProperty('--adr-stage-w', stageW + 'px');
+				st.setProperty('--adr-space-scale', spaceScale.toFixed(3));
+			}
+			// Keep jQuery slider widths & offsets in sync with responsive stageW
+			if (window.jQuery && typeof Engine !== 'undefined') {
+				try {
+					if (Engine.updateSlider) Engine.updateSlider();
+					if (Engine.updateOuterSlider) Engine.updateOuterSlider();
+					if (Engine.activeModule && Engine.activeModule.panel && !isWorldActive() && !isSpaceActive()) {
+						var idx = window.jQuery('.location').index(Engine.activeModule.panel);
+						if (idx >= 0) {
+							window.jQuery('#locationSlider').stop(true, false).css('left', -(idx * stageW) + 'px');
+							if (typeof $SM !== 'undefined' && $SM.get('stores.wood') !== undefined) {
+								window.jQuery('#storesContainer').stop(true, false).css('right', -(idx * stageW) + 'px');
+							}
+						}
+					} else if (isWorldActive()) {
+						window.jQuery('#outerSlider').stop(true, false).css('left', -stageW + 'px');
+					}
+				} catch (e) {}
 			}
 		});
 	}

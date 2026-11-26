@@ -72,22 +72,22 @@ body, .tooltip, select.menuBtn {
 #bciTopTools {
 	position: fixed;
 	top: 10px;
-	right: 22px;
+	right: 14px;
 	z-index: 65;
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 }
 
 .bci-tool-btn {
 	position: relative;
-	padding: 9px 16px;
-	border-radius: 12px;
+	padding: 7px 13px;
+	border-radius: 11px;
 	border: 2px solid var(--adr-line);
 	background: var(--adr-panel);
 	color: var(--adr-text);
 	font-family: inherit;
-	font-size: 18px;
+	font-size: 16px;
 	font-weight: 700;
 	cursor: pointer;
 	outline: none;
@@ -104,16 +104,16 @@ body, .tooltip, select.menuBtn {
 .bci-tool-btn.bci-touch-only {
 	opacity: 0.72;
 	font-weight: 500;
-	font-size: 16px;
-	padding: 8px 12px;
+	font-size: 15px;
+	padding: 7px 11px;
 }
 
-/* Main centered tablet wrapper: 360px notifications + 20px gap + 800px game stage = 1180px */
+/* Responsive centered tablet wrapper: fits both 1064x528 MatePad and 1224x592 tablets with 0px overflow */
 div#wrapper {
 	margin: 0 auto !important;
-	width: 1180px !important;
-	padding: 10px 0 0 380px !important;
-	height: var(--adr-vh, 592px) !important;
+	width: var(--adr-wrapper-w, 1052px) !important;
+	padding: 10px 0 0 var(--adr-main-pad, 285px) !important;
+	height: var(--adr-vh, 528px) !important;
 	box-sizing: border-box;
 	position: relative;
 }
@@ -121,14 +121,15 @@ div#wrapper {
 div#saveNotify {
 	position: fixed !important;
 	top: auto !important;
-	bottom: 14px !important;
-	right: 20px !important;
+	bottom: 16px !important;
+	left: 18px !important;
+	right: auto !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-ok) !important;
 	border: 1px solid var(--adr-ok);
 	border-radius: 999px;
-	padding: 5px 14px;
-	font-size: 15px;
+	padding: 4px 12px;
+	font-size: 14px;
 	font-weight: 700;
 	z-index: 35;
 	pointer-events: none;
@@ -139,20 +140,20 @@ div#notifications {
 	position: absolute !important;
 	top: 10px !important;
 	left: 0 !important;
-	width: 360px !important;
-	height: calc(var(--adr-vh, 592px) - 20px) !important;
+	width: var(--adr-notif-w, 271px) !important;
+	height: calc(var(--adr-vh, 528px) - 20px) !important;
 	background: var(--adr-panel) !important;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 18px;
-	padding: 18px 20px;
+	padding: 16px 16px;
 	box-sizing: border-box;
 	overflow: hidden;
 }
 
 div#notifications div.notification {
-	margin-bottom: 14px !important;
-	font-size: 21px !important;
-	line-height: 1.55 !important;
+	margin-bottom: 12px !important;
+	font-size: 19px !important;
+	line-height: 1.5 !important;
 	color: var(--adr-text);
 }
 
@@ -169,17 +170,17 @@ div#notifyGradient {
 	pointer-events: none;
 }
 
-/* Right main content stage (800px wide, synchronized with engine.js/path.js slider math) */
+/* Right main content stage (responsive width synced with Engine.getStageWidth()) */
 div#content {
 	position: relative;
 	overflow: hidden;
-	width: 800px !important;
-	height: calc(var(--adr-vh, 592px) - 20px) !important;
+	width: var(--adr-stage-w, 767px) !important;
+	height: calc(var(--adr-vh, 528px) - 20px) !important;
 }
 
 div#outerSlider > div {
-	width: 800px !important;
-	height: calc(var(--adr-vh, 592px) - 20px) !important;
+	width: var(--adr-stage-w, 767px) !important;
+	height: calc(var(--adr-vh, 528px) - 20px) !important;
 	overflow-y: auto !important;
 	overflow-x: hidden !important;
 	box-sizing: border-box;
@@ -188,21 +189,21 @@ div#outerSlider > div {
 	scroll-padding-bottom: 24px;
 }
 
-/* Tabs header (10px left padding prevents left Coral focus ring clipping) */
+/* Tabs header (left inset prevents focus ring clip; right clearance synced with #bciTopTools) */
 div#header {
 	position: sticky;
 	top: 0;
 	z-index: 32;
 	background: var(--adr-bg);
-	padding: 6px 320px 12px 10px !important;
+	padding: 4px 320px 10px 10px;
 	height: auto !important;
-	min-height: 48px;
+	min-height: 46px;
 	border-bottom: 1px solid var(--adr-line);
 	margin-bottom: 10px;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	box-sizing: border-box;
 }
 
@@ -210,12 +211,12 @@ div.headerButton {
 	position: relative;
 	float: none !important;
 	margin: 0 !important;
-	padding: 8px 16px !important;
+	padding: 7px 14px !important;
 	border: 2px solid var(--adr-line) !important;
-	border-radius: 12px;
+	border-radius: 11px;
 	background: var(--adr-panel);
 	color: var(--adr-muted);
-	font-size: 20px !important;
+	font-size: 18px !important;
 	font-weight: 700 !important;
 	text-decoration: none !important;
 	overflow: hidden;
@@ -231,27 +232,27 @@ div.headerButton.selected:hover {
 
 /* Keep div.location overflow visible so #storesContainer sliding from Room onto Outside/Path is NEVER clipped! */
 div#locationSlider {
-	top: 84px;
+	top: 76px;
 }
 
 div.location {
-	width: 800px !important;
+	width: var(--adr-stage-w, 767px) !important;
 	overflow: visible !important;
 	padding: 0 10px 64px 10px;
 	box-sizing: border-box;
 }
 
-/* Game action buttons: 164px wide, large patient-friendly typography, 10px stage inset so focus ring never clips */
+/* Game action buttons: responsive fit across 1064px and 1224px tablets with 10px safe focus inset */
 div.button {
 	position: relative;
 	border: 2px solid var(--adr-line) !important;
 	border-radius: 14px !important;
 	background: var(--adr-panel) !important;
 	color: var(--adr-text) !important;
-	font-size: 21px !important;
+	font-size: 19px !important;
 	font-weight: 700 !important;
-	width: 164px !important;
-	padding: 11px 13px 15px 13px !important;
+	width: 160px !important;
+	padding: 10px 12px 14px 12px !important;
 	margin-bottom: 12px !important;
 	box-sizing: border-box;
 	text-decoration: none !important;
@@ -262,35 +263,35 @@ div.button {
 #stokeButton,
 #embarkButton,
 #liftoffButton {
-	width: 246px !important;
-	font-size: 22px !important;
+	width: 240px !important;
+	font-size: 21px !important;
 }
 
 div#buildBtns {
 	left: 10px !important;
-	top: 116px !important;
+	top: 110px !important;
 	padding-bottom: 28px;
 }
 
 div#craftBtns {
-	left: 188px !important;
-	top: 116px !important;
+	left: 180px !important;
+	top: 110px !important;
 	padding-bottom: 28px;
 }
 
 div#buyBtns {
-	left: 366px !important;
-	top: 116px !important;
+	left: 350px !important;
+	top: 110px !important;
 	padding-bottom: 28px;
 }
 
 /* Adaptive Room columns: fill available stage space cleanly before Craft / Buy unlock */
 #roomPanel[data-bci-cols="cols-1"] div#buildBtns {
 	left: 10px !important;
-	width: 508px !important;
+	width: 494px !important;
 	display: grid !important;
-	grid-template-columns: repeat(2, 246px);
-	column-gap: 16px;
+	grid-template-columns: repeat(2, 240px);
+	column-gap: 14px;
 	row-gap: 12px;
 	align-content: start;
 }
@@ -301,37 +302,42 @@ div#buyBtns {
 }
 
 #roomPanel[data-bci-cols="cols-1"] div#buildBtns .button {
-	width: 246px !important;
+	width: 240px !important;
 	margin-bottom: 0 !important;
 }
 
 #roomPanel[data-bci-cols="cols-2-bc"] div#buildBtns,
 #roomPanel[data-bci-cols="cols-2-bb"] div#buildBtns {
 	left: 10px !important;
-	width: 246px !important;
+	width: 240px !important;
 }
 
 #roomPanel[data-bci-cols="cols-2-bc"] div#craftBtns {
-	left: 272px !important;
-	width: 246px !important;
+	left: 264px !important;
+	width: 240px !important;
 }
 
 #roomPanel[data-bci-cols="cols-2-bb"] div#buyBtns {
-	left: 272px !important;
-	width: 246px !important;
+	left: 264px !important;
+	width: 240px !important;
 }
 
 #roomPanel[data-bci-cols="cols-2-bc"] div#buildBtns .button,
 #roomPanel[data-bci-cols="cols-2-bc"] div#craftBtns .button,
 #roomPanel[data-bci-cols="cols-2-bb"] div#buildBtns .button,
 #roomPanel[data-bci-cols="cols-2-bb"] div#buyBtns .button {
-	width: 246px !important;
+	width: 240px !important;
 }
 
-/* Adaptive Outside buttons before workers unlock */
+/* Adaptive Outside buttons before/after workers unlock */
 #outsidePanel[data-bci-outside="no-workers"] #gatherButton,
 #outsidePanel[data-bci-outside="no-workers"] #trapsButton {
-	width: 246px !important;
+	width: 240px !important;
+}
+
+#outsidePanel[data-bci-outside="with-workers"] #gatherButton,
+#outsidePanel[data-bci-outside="with-workers"] #trapsButton {
+	width: 150px !important;
 }
 
 div#fabricateButtons {
@@ -348,53 +354,53 @@ div#fabricateButtons:before {
 }
 
 div#workers {
-	left: 188px !important;
-	width: 342px !important;
-	padding: 14px 16px !important;
+	left: 170px !important;
+	width: 354px !important;
+	padding: 14px 14px !important;
 	box-sizing: border-box;
-	font-size: 20px !important;
+	font-size: 18px !important;
 }
 
 div#pathScroller {
 	max-height: none !important;
 	overflow: visible !important;
-	width: 500px !important;
+	width: 516px !important;
 	top: 0 !important;
 	padding: 12px 10px 36px 0 !important;
 	box-sizing: border-box;
 }
 
 div#outfitting {
-	width: 470px !important;
-	padding: 16px 16px 12px 16px !important;
+	width: 496px !important;
+	padding: 14px 14px 10px 14px !important;
 	box-sizing: border-box;
-	font-size: 20px !important;
+	font-size: 18px !important;
 }
 
 div#stores,
 div#weapons {
-	width: 244px !important;
+	width: 218px !important;
 	margin-right: 10px !important;
-	padding: 16px 16px 12px 16px !important;
+	padding: 14px 14px 10px 14px !important;
 	box-sizing: border-box;
-	font-size: 20px !important;
+	font-size: 18px !important;
 }
 
 div#village,
 div#perks {
 	right: 10px !important;
-	width: 244px !important;
-	padding: 16px 16px 12px 16px !important;
+	width: 218px !important;
+	padding: 14px 14px 10px 14px !important;
 	box-sizing: border-box;
-	font-size: 20px !important;
+	font-size: 18px !important;
 }
 
 div#blueprints {
-	right: 268px !important;
-	width: 244px !important;
-	padding: 16px 16px 12px 16px !important;
+	right: 240px !important;
+	width: 218px !important;
+	padding: 14px 14px 10px 14px !important;
 	box-sizing: border-box;
-	font-size: 20px !important;
+	font-size: 18px !important;
 }
 
 div#population,
@@ -690,13 +696,13 @@ div.eventPanel {
 	border: 3px solid var(--adr-focus) !important;
 	border-radius: 22px !important;
 	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35) !important;
-	width: 720px !important;
-	max-height: calc(var(--adr-vh, 592px) - 56px) !important;
+	width: min(700px, calc(100vw - 48px)) !important;
+	max-height: calc(var(--adr-vh, 528px) - 70px) !important;
 	overflow-y: auto;
 	left: 50% !important;
-	top: 50% !important;
+	top: calc(50% + 16px) !important;
 	transform: translate(-50%, -50%) !important;
-	padding: 26px 32px !important;
+	padding: 24px 28px !important;
 	box-sizing: border-box;
 	z-index: 60;
 }
@@ -728,6 +734,43 @@ div.eventPanel {
 
 #description > div {
 	margin-bottom: 12px;
+}
+
+/* Combat arena: keep fighter HP crisply above @ / enemy glyph at large patient-friendly font sizes */
+#fight {
+	position: relative !important;
+	min-height: 84px !important;
+	margin: 12px 0 16px 0 !important;
+}
+
+#description div.fighter {
+	display: flex !important;
+	flex-direction: column-reverse !important;
+	align-items: center !important;
+	gap: 6px !important;
+	bottom: 8px !important;
+	transform: translateX(-50%);
+}
+
+#description div.fighter#enemy {
+	transform: translateX(50%);
+}
+
+#description div.fighter > .label {
+	position: relative;
+	font-size: 28px !important;
+	font-weight: 900 !important;
+	line-height: 1.15 !important;
+}
+
+#description div.fighter > .hp {
+	position: static !important;
+	top: auto !important;
+	margin-left: 0 !important;
+	font-size: 20px !important;
+	font-weight: 700 !important;
+	line-height: 1.2 !important;
+	white-space: nowrap !important;
 }
 
 div#buttons {
@@ -899,11 +942,11 @@ div.supplyItem {
 	overflow: hidden;
 }
 
-/* Space panel scaling so full 700x700 arena fits inside 560px viewport */
+/* Space panel scaling so full 700x700 arena fits cleanly on any tablet height */
 #spacePanel {
 	background: #0B0D11 !important;
 	color: #F2EEE8 !important;
-	transform: scale(0.76);
+	transform: scale(var(--adr-space-scale, 0.66));
 	transform-origin: top center;
 	border-radius: 18px;
 	border: 2px solid #2A313C;

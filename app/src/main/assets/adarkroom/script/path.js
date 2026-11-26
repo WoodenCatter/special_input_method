@@ -326,7 +326,7 @@ var Path = {
 			$SM.add('stores["'+k+'"]', -Path.outfit[k]);
 		}
 		World.onArrival();
-		$('#outerSlider').animate({left: '-800px'}, 300);
+		$('#outerSlider').animate({left: -Engine.getStageWidth() + 'px'}, 300);
 		Engine.activeModule = World;
 		AudioEngine.playSound(AudioLibrary.EMBARK);
 	},

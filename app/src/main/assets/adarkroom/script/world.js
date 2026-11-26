@@ -1132,7 +1132,7 @@ var World = {
     $('div#bagspace-world > div').empty();
     World.updateSupplies();
     $('#bagspace-world').width($('#map').width());
-    $('#outerSlider').css({ left: '-800px' });
+    $('#outerSlider').css({ left: -Engine.getStageWidth() + 'px' });
     Engine.activeModule = World;
     return true;
   },
