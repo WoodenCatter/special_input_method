@@ -421,7 +421,9 @@
     },
 
     confirmDelete: function() {
-      if (typeof Events !== 'undefined' && Events.activeEvent && Events.activeEvent() && Events.activeEvent()._isRestartConfirm) {
+      if (typeof Events !== 'undefined' && Array.isArray(Events.eventStack) && Events.eventStack.some(function(ev) {
+        return ev && !ev._closing && ev._isRestartConfirm;
+      })) {
         return;
       }
       Events.startEvent({
