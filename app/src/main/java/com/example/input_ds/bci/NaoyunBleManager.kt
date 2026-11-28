@@ -26,7 +26,10 @@ class NaoyunBleManager(val context: Context) {
 
     enum class State {
         IDLE, SCANNING, CONNECTING, INITIALIZING, READY,
-        STREAM_STALLED, RECOVERING, DISCONNECTED, ERROR
+        STREAM_STALLED, RECOVERING, DISCONNECTED, ERROR;
+
+        val canStartScan: Boolean
+            get() = this == IDLE || this == DISCONNECTED || this == ERROR
     }
     enum class ScanError { NONE, BT_OFF, NO_ADAPTER, NO_PERMISSION, LOCATION_OFF, NO_SCANNER, UNKNOWN }
     data class BleDevice(val name: String, val address: String, val device: BluetoothDevice)
@@ -145,7 +148,8 @@ class NaoyunBleManager(val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startScan() {
-        if (!hasScanPerm()) { _scanError.value = ScanError.NO_PERMISSION; return }
+        if (!_state.value.canStartScan) return
+        if (!hasPermissions()) { _scanError.value = ScanError.NO_PERMISSION; return }
         if (btAdapter == null) { _scanError.value = ScanError.NO_ADAPTER; return }
         if (!btAdapter.isEnabled) { _scanError.value = ScanError.BT_OFF; return }
         manualDisconnect = true

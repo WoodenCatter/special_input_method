@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -89,6 +90,7 @@ internal fun CaregiverSheet(
     onAssistantNotice: (String, Boolean) -> Unit,
     onDebugNoContactsChange: (Boolean) -> Unit,
     onDebugIncomingCall: () -> Unit,
+    onOpenDeviceStatus: () -> Unit,
     onOpenDeviceAndModel: () -> Unit
 ) {
     val c = LocalBciColors.current
@@ -212,8 +214,8 @@ internal fun CaregiverSheet(
                         CareSmallButton("管理", onClick = onOpenEntertainmentMarket)
                     }
                 }
-                CareRow("设备") {
-                    CareBoldValue(info.deviceSummary)
+                CareRow("设备", Modifier.clickable(role = Role.Button, onClick = onOpenDeviceStatus)) {
+                    CareBoldValue("${info.deviceSummary}  ›")
                 }
                 CareRow("电量 / 佩戴") {
                     CareBoldValue(info.batteryWearingSummary)
@@ -394,12 +396,13 @@ internal fun CaregiverSheet(
 @Composable
 private fun CareRow(
     label: String,
+    modifier: Modifier = Modifier,
     trailing: @Composable () -> Unit
 ) {
     val c = LocalBciColors.current
     Column(Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
                 .padding(vertical = 9.dp),
             horizontalArrangement = Arrangement.SpaceBetween,

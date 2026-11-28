@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.input_ds.MainActivity
@@ -107,6 +108,17 @@ class EntertainmentEntryTest {
         composeRule.onNodeWithText("选「ABC」").assertIsDisplayed()
         pressBack()
         composeRule.onNodeWithText("选「文字消息」").assertIsDisplayed()
+    }
+
+    @Test
+    fun caregiverDeviceRowOpensHeadsetScannerFromHome() {
+        bci("freeze on")
+        bci("nav home")
+        bci("care on")
+        composeRule.onNodeWithText("设备").performScrollTo().performClick()
+        composeRule.onNodeWithText("BLE 设备扫描").assertIsDisplayed()
+        composeRule.onNodeWithText("← 返回").performClick()
+        composeRule.onNodeWithText("照护").assertIsDisplayed()
     }
 
     @Test

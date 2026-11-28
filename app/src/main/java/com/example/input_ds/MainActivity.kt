@@ -416,13 +416,10 @@ class MainActivity : ComponentActivity() {
                 } else {
                     BciController.Readiness()
                 }
-                LaunchedEffect(bleState, connectedDevice, frozen) {
-                    if (!frozen && connectedDevice == null && bleState in setOf(
-                            NaoyunBleManager.State.IDLE,
-                            NaoyunBleManager.State.DISCONNECTED,
-                            NaoyunBleManager.State.ERROR
-                        )
-                    ) {
+                val inDeviceFlow = destination.value == AppDestination.DEVICE_STATUS ||
+                    destination.value == AppDestination.COLLECTION
+                LaunchedEffect(bleState, connectedDevice, frozen, inDeviceFlow) {
+                    if (!inDeviceFlow && !frozen && connectedDevice == null && bleState.canStartScan) {
                         if (bleManager.hasPermissions()) {
                             bleManager.startScan()
                         } else if (!bluetoothPermissionRequested) {
@@ -798,6 +795,10 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onDebugIncomingCall = {
                                         debugCommand("fake incoming")
+                                    },
+                                    onOpenDeviceStatus = {
+                                        toggleCareSheet(false)
+                                        navigateTo(AppDestination.DEVICE_STATUS)
                                     },
                                     onOpenDeviceAndModel = {
                                         toggleCareSheet(false)
@@ -1185,6 +1186,7 @@ class MainActivity : ComponentActivity() {
 
             AppDestination.DEVICE_STATUS, AppDestination.COLLECTION -> DeviceFlow(
                 bleManager = bleManager,
+                onRequestPermissions = ::requestBluetoothPermissions,
                 onBackHome = { navigateTo(AppDestination.HOME) },
                 onCollectionFinished = { restartBciController() }
             )
@@ -2663,6 +2665,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DeviceFlow(
     bleManager: NaoyunBleManager,
+    onRequestPermissions: () -> Unit,
     onBackHome: () -> Unit,
     onCollectionFinished: () -> Unit
 ) {
@@ -2697,6 +2700,7 @@ private fun DeviceFlow(
     when (screen) {
         "scan" -> BleScanScreen(
             bleManager = bleManager,
+            onRequestPermissions = onRequestPermissions,
             onConnected = { screen = "monitor" },
             onBack = onBackHome
         )

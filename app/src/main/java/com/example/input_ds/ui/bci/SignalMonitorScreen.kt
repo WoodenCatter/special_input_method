@@ -39,6 +39,7 @@ import com.example.input_ds.ui.theme.bciBackground
 @Composable
 fun BleScanScreen(
     bleManager: NaoyunBleManager,
+    onRequestPermissions: () -> Unit,
     onConnected: () -> Unit,
     onBack: () -> Unit = {}
 ) {
@@ -66,7 +67,11 @@ fun BleScanScreen(
             NaoyunBleManager.ScanError.BT_OFF -> "⚠️ 请先打开手机蓝牙"
             NaoyunBleManager.ScanError.NO_ADAPTER -> "⚠️ 设备不支持蓝牙"
             NaoyunBleManager.ScanError.NO_PERMISSION ->
-                "⚠️ 请在系统设置中允许「位置」和「附近的设备」权限"
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    "请在系统设置中允许「附近的设备」权限"
+                } else {
+                    "请在系统设置中允许位置权限"
+                }
             NaoyunBleManager.ScanError.LOCATION_OFF -> "⚠️ 请先打开手机位置服务(GPS)"
             NaoyunBleManager.ScanError.NO_SCANNER -> "⚠️ 设备不支持BLE扫描"
             NaoyunBleManager.ScanError.UNKNOWN -> "⚠️ 扫描失败，请重试"
@@ -84,8 +89,10 @@ fun BleScanScreen(
         Spacer(Modifier.height(8.dp))
 
         Button(
-            onClick = { bleManager.startScan() },
-            enabled = state != NaoyunBleManager.State.SCANNING
+            onClick = {
+                if (bleManager.hasPermissions()) bleManager.startScan() else onRequestPermissions()
+            },
+            enabled = state.canStartScan
         ) {
             Text(
                 if (state == NaoyunBleManager.State.SCANNING) {
@@ -104,6 +111,7 @@ fun BleScanScreen(
             items(devices) { device ->
                 Button(
                     onClick = { bleManager.connect(device.device) },
+                    enabled = state == NaoyunBleManager.State.SCANNING || state.canStartScan,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = LocalBciColors.current.panel
